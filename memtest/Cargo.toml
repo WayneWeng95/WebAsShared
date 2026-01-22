@@ -1,0 +1,8 @@
+[package]
+name = "memtest"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+wasmtime = "41.0.0"
+anyhow = "1.0.100"
