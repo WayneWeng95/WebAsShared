@@ -1,0 +1,15 @@
+[build]
+# 默认编译目标
+target = "wasm32-unknown-unknown"
+
+[unstable]
+# 核心黑魔法：告诉 Cargo 从源码重新编译标准库和 panic 处理逻辑
+build-std = ["std", "panic_abort"]
+
+[target.wasm32-unknown-unknown]
+rustflags = [
+  "-C", "target-feature=+atomics,+bulk-memory", # 开启原子指令
+  "-C", "link-arg=--import-memory",             # 从宿主导入内存
+  "-C", "link-arg=--shared-memory",             # 声明内存为共享类型
+  "-C", "link-arg=--max-memory=4294967296",
+]
