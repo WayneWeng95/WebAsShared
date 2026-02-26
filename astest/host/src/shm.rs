@@ -4,14 +4,34 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::num::NonZeroUsize;
 
+// Base address at 2GB (Guest View)
 pub const TARGET_OFFSET: usize = 0x8000_0000;
 
-pub const INITIAL_SHM_SIZE: usize = 36 * 1024 * 1024;
-pub const SUPER_BLOCK_SIZE: u32 = 4 * 1024;
-pub const ATOMIC_AREA_SIZE: u32 = 2 * 1024 * 1024;
-pub const LOG_BUFFER_SIZE: u32 =16 * 1024 * 1024;
+pub const KIB : usize = 1024;
+pub const MIB : usize = 1024 * 1024;
 
-// Initial the shared memory area
+// Total file size
+pub const INITIAL_SHM_SIZE: usize = 36 * MIB;
+
+// -------------------------------------------------------
+// Memory Layout Constants
+// -------------------------------------------------------
+pub const SUPERBLOCK_SIZE: usize = 4 * KIB;
+
+// [NEW] Registry Arena: 64KB (Can hold ~1000 names)
+pub const REGISTRY_OFFSET: usize = SUPERBLOCK_SIZE; 
+pub const REGISTRY_SIZE: usize = 64 * KIB; 
+
+// Atomic Arena follows the Registry
+pub const ATOMIC_ARENA_OFFSET: usize = REGISTRY_OFFSET + REGISTRY_SIZE;
+pub const ATOMIC_ARENA_SIZE: usize = 2 * MIB;
+
+// Log Arena
+pub const LOG_ARENA_OFFSET: usize = ATOMIC_ARENA_OFFSET + ATOMIC_ARENA_SIZE;
+
+// Page Pool Start
+pub const BUMP_ALLOCATOR_START: u32 = (LOG_ARENA_OFFSET + 16 * MIB) as u32;
+
 pub fn format_shared_memory(path: &str) -> Result<()> {
     let mut file = OpenOptions::new()
         .read(true).write(true).create(true).truncate(true).open(path)?;
@@ -19,19 +39,23 @@ pub fn format_shared_memory(path: &str) -> Result<()> {
     file.set_len(INITIAL_SHM_SIZE as u64)?;
 
     let magic: u32 = 0xDEADBEEF;
-    
-    let bump_allocator_start: u32 = SUPER_BLOCK_SIZE + ATOMIC_AREA_SIZE + LOG_BUFFER_SIZE;
     let global_capacity: u32 = INITIAL_SHM_SIZE as u32;
 
-    file.write_all(&magic.to_le_bytes())?;
-    file.write_all(&bump_allocator_start.to_le_bytes())?;
-    file.write_all(&global_capacity.to_le_bytes())?;
+    // Initialize Superblock fields
+    file.write_all(&magic.to_le_bytes())?;                // +0: Magic
+    file.write_all(&BUMP_ALLOCATOR_START.to_le_bytes())?; // +4: Bump Allocator
+    file.write_all(&global_capacity.to_le_bytes())?;      // +8: Global Capacity
+    file.write_all(&(0u32).to_le_bytes())?;               // +12: Log Offset
     
-    file.write_all(&(0u32).to_le_bytes())?;
+    // [NEW] Synchronization primitives for Registry
+    file.write_all(&(0u32).to_le_bytes())?;               // +16: Registry Spinlock (0 = Unlocked)
+    file.write_all(&(0u32).to_le_bytes())?;               // +20: Next Atomic Index (Starts at 0)
+    file.write_all(&(0u32).to_le_bytes())?;               // +24: Shared Map Base
+    
+    file.write_all(&(0u32).to_le_bytes())?;               // +28: Free List Head
 
     Ok(())
 }
-
 /// Map the file into the virtual memory address specified by Wasm
 pub fn map_into_memory(file: &File, addr: usize, size: usize) -> Result<()> {
     unsafe {
