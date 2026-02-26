@@ -4,33 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::num::NonZeroUsize;
 
-// Base address at 2GB (Guest View)
-pub const TARGET_OFFSET: usize = 0x8000_0000;
-
-pub const KIB : usize = 1024;
-pub const MIB : usize = 1024 * 1024;
-
-// Total file size
-pub const INITIAL_SHM_SIZE: usize = 36 * MIB;
-
-// -------------------------------------------------------
-// Memory Layout Constants
-// -------------------------------------------------------
-pub const SUPERBLOCK_SIZE: usize = 4 * KIB;
-
-// [NEW] Registry Arena: 64KB (Can hold ~1000 names)
-pub const REGISTRY_OFFSET: usize = SUPERBLOCK_SIZE; 
-pub const REGISTRY_SIZE: usize = 64 * KIB; 
-
-// Atomic Arena follows the Registry
-pub const ATOMIC_ARENA_OFFSET: usize = REGISTRY_OFFSET + REGISTRY_SIZE;
-pub const ATOMIC_ARENA_SIZE: usize = 2 * MIB;
-
-// Log Arena
-pub const LOG_ARENA_OFFSET: usize = ATOMIC_ARENA_OFFSET + ATOMIC_ARENA_SIZE;
-
-// Page Pool Start
-pub const BUMP_ALLOCATOR_START: u32 = (LOG_ARENA_OFFSET + 16 * MIB) as u32;
+use common::*;
 
 pub fn format_shared_memory(path: &str) -> Result<()> {
     let mut file = OpenOptions::new()

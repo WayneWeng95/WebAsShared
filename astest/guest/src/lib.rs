@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 
 #[no_mangle]
 pub extern "C" fn writer(id: u32) {
-    ShmApi::append_log(&format!(">>> [INFO] Writer {} initialized.\n", id));
+    // ShmApi::append_log(&format!(">>> [INFO] Writer {} initialized.\n", id));
 
     // [Plan A] 1. Distinct Global Counter for Requests (+1)
     // The Registry will assign a unique index for "TotalRequests" (likely Index 0)
@@ -48,7 +48,7 @@ pub extern "C" fn writer(id: u32) {
 
     ShmApi::append_bytes(id, complex_data.as_bytes());
 
-    ShmApi::append_log(&format!("<<< [SUCCESS] Writer {} completed.\n", id));
+    // ShmApi::append_log(&format!("<<< [SUCCESS] Writer {} completed.\n", id));
 }
 
 // read buffer for OOM
@@ -73,4 +73,60 @@ pub extern "C" fn reader(id: u32) -> u64 {
 #[no_mangle]
 pub extern "C" fn read_live_global() -> u64 {
     ShmApi::get_atomic(0).load(Ordering::SeqCst)
+}
+
+// Func A (Writer)
+#[no_mangle]
+pub extern "C" fn func_a(id: u32) {
+    let result = alloc::format!("This is the finalized data from Function A! (Winner ID: {})", id);
+    
+    ShmApi::write_shared_state("FuncA_Result", id, result.as_bytes());
+    ShmApi::append_log(&alloc::format!("Func A (ID: {}) wrote output.\n", id));
+}
+
+// Func B (Reader)
+#[no_mangle]
+pub extern "C" fn func_b(_id: u32) {
+    if let Some(input_data) = ShmApi::read_shared_state("FuncA_Result") {
+        let text = alloc::string::String::from_utf8_lossy(&input_data);
+        
+       
+        ShmApi::append_log(&alloc::format!("Func B received (len: {}): {}\n", input_data.len(), text));
+        
+        
+        let mut hex_str = alloc::string::String::new();
+        for &b in input_data.iter().take(16) {
+            hex_str.push_str(&alloc::format!("{:02X} ", b));
+        }
+        ShmApi::append_log(&alloc::format!("Hex Dump (first 16 bytes): {}\n", hex_str));
+        
+    } else {
+        ShmApi::append_log("Func B found no input!\n");
+    }
+}
+
+/// Node A: processes images and produces both "processing result (Stream)" and "global state stats (Shared)"
+#[no_mangle]
+pub extern "C" fn process_image_node(id: u32) {
+    // 1. Produce large business output (via Stream channel, no Manager involvement)
+    let image_result = b"Binary_Image_Data...";
+    ShmApi::append_stream_data(id, image_result);
+
+    // 2. Report global task progress (via Shared channel, multi-Worker concurrent writes, Manager resolves LWW)
+    let progress_msg = format!("Worker {} finished batch.", id);
+    ShmApi::write_shared_state("Global_Job_Status", id, progress_msg.as_bytes());
+}
+
+/// Node B: packs Node A's output; it needs to read both kinds of data above
+#[no_mangle]
+pub extern "C" fn zip_results_node(id: u32) {
+    // 1. Read Node A's (assume id 1) private output (directly from in-memory list, zero wait)
+    if let Some(img_data) = ShmApi::read_stream_data(1) {
+        // ... pack img_data ...
+    }
+
+    // 2. Read global task status (from Registry, Manager-confirmed data)
+    if let Some(status) = ShmApi::read_shared_state("Global_Job_Status") {
+        // ... check whether all tasks are done ...
+    }
 }

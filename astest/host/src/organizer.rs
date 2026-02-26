@@ -1,8 +1,9 @@
 use crate::policy::{ConsumptionPolicy, ConsumptionResult, HostNode};
-use crate::shm::TARGET_OFFSET;
 use crate::worker::WorkerState;
 use std::sync::atomic::{AtomicU32, Ordering};
 use wasmtime::{Memory, Store};
+
+use common::{TARGET_OFFSET, REGISTRY_OFFSET,RegistryEntry};
 
 pub struct BucketOrganizer<'a> {
     base_ptr: *mut u8,
@@ -42,53 +43,86 @@ impl<'a> BucketOrganizer<'a> {
     }
 
     // Process a detached list
-    unsafe fn process_detached_list<P: ConsumptionPolicy>(
-        &self,
-        head_offset: u32,
-        bucket_idx: usize,
-        policy: &P,
-    ) {
+    unsafe fn process_detached_list<P: ConsumptionPolicy>(&self, head_offset: u32, bucket_idx: usize, policy: &P) {
         let mut nodes = Vec::new();
         let mut current_offset = head_offset;
 
-        // 1. Traverse and extract data (copy out to host heap)
         while current_offset != 0 {
             let node_ptr = self.base_ptr.add(current_offset as usize);
-
-            // Read header
+            
             let writer_id = *(node_ptr.add(4) as *const u32);
             let data_len = *(node_ptr.add(8) as *const u32);
+            let registry_index = *(node_ptr.add(12) as *const u32);
             let next_offset = (*(node_ptr as *const AtomicU32)).load(Ordering::Relaxed);
 
-            // Read payload
-            let payload_ptr = node_ptr.add(12);
-            let payload = std::slice::from_raw_parts(payload_ptr, data_len as usize).to_vec();
+            
+            let mut payload = Vec::with_capacity(data_len as usize);
+            let mut lob_offset = current_offset;
+            let mut bytes_read = 0;
+            let mut is_head = true;
 
-            nodes.push(HostNode {
-                offset: current_offset,
-                writer_id,
-                data_len,
-                payload,
-            });
+            while bytes_read < data_len as usize {
+                let page_ptr = self.base_ptr.add(lob_offset as usize);
+                let (header_size, next_page) = if is_head {
+                    let next = *(page_ptr.add(16) as *const u32);
+                    (20, next)
+                } else {
+                    let next = *(page_ptr as *const u32);
+                    (4, next)
+                };
 
+                let read_len = std::cmp::min(data_len as usize - bytes_read, 4096 - header_size);
+                let chunk = std::slice::from_raw_parts(page_ptr.add(header_size), read_len);
+                payload.extend_from_slice(chunk);
+
+                bytes_read += read_len;
+                lob_offset = next_page;
+                is_head = false;
+            }
+
+            nodes.push(HostNode { offset: current_offset, writer_id, data_len, registry_index, payload });
             current_offset = next_offset;
         }
 
-        // 2. Run policy
         let result = policy.process(&nodes);
 
-        // 3. Print result (or trigger other logic here, e.g. write to DB)
-        match result {
-            ConsumptionResult::Winner(id, content) => {
-                println!(
-                    "[Manager] Bucket #{} Consumed. Winner: Writer {} -> \"{}\" (Pool size: {})",
-                    bucket_idx,
-                    id,
-                    content,
-                    nodes.len()
-                );
+        
+        let free_lob_chain = |start_offset: u32| {
+            let mut free_offset = start_offset;
+            let mut is_head = true;
+            while free_offset != 0 {
+                let page_ptr = self.base_ptr.add(free_offset as usize);
+                let next_free = if is_head {
+                    *(page_ptr.add(16) as *const u32)
+                } else {
+                    *(page_ptr as *const u32)
+                };
+                self.push_to_free_list(free_offset);
+                free_offset = next_free;
+                is_head = false;
             }
-            ConsumptionResult::None => {}
+        };
+
+        
+        if let ConsumptionResult::Winner(winner_id, _content) = result {
+            let winner_node = nodes.iter().find(|n| n.writer_id == winner_id).unwrap();
+
+            let registry_base = self.base_ptr.add(common::REGISTRY_OFFSET as usize);
+            let entry_ptr = registry_base.add(winner_node.registry_index as usize * 64) as *const common::RegistryEntry;
+            let entry = &*entry_ptr;
+            
+            entry.payload_offset.store(winner_node.offset, Ordering::Release);
+            entry.payload_len.store(winner_node.data_len, Ordering::Release);
+
+            for node in &nodes {
+                if node.offset != winner_node.offset {
+                    free_lob_chain(node.offset); 
+                }
+            }
+        } else {
+            for node in &nodes { 
+                free_lob_chain(node.offset); 
+            }
         }
     }
 

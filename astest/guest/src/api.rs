@@ -4,61 +4,16 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use common::*;
+
 const SHM_BASE: usize = 0x8000_0000;
-const KIB: u32 = 1024;
-const MIB: u32 = 1024 * 1024;
-
-const PAGE_SIZE: u32 = 4 * KIB; // 4 KiB page size
-
-// Layout offsets within the shared memory region.
-const REGISTRY_SIZE: u32 = 64 * KIB; 
-const ATOMIC_ARENA_OFFSET: u32 = PAGE_SIZE + REGISTRY_SIZE; 
-const ATOMIC_ARENA_SIZE: u32 = 2 * MIB;
-const LOG_ARENA_OFFSET: u32 = ATOMIC_ARENA_OFFSET + ATOMIC_ARENA_SIZE;
-const LOG_ARENA_SIZE: u32 = 16 * MIB;
-
-// Number of hash buckets in the shared map (one u32 per bucket).
-const BUCKET_COUNT: usize = (PAGE_SIZE / 4) as usize; 
+static mut LOCAL_CAPACITY: u32 = 36 * MIB;
+static mut ATOMIC_INDEX_CACHE: Option<BTreeMap<String, u32>> = None;
 
 extern "C" {
     fn host_remap(new_size: u32);
     fn host_resolve_atomic(ptr: u32, len: u32) -> u32;
 }
-
-// Core metadata structures stored in shared memory.
-#[repr(C)]
-struct Superblock {
-    magic: u32,
-    bump_allocator: AtomicU32,
-    global_capacity: AtomicU32,
-    log_offset: AtomicU32,
-    registry_lock: AtomicU32,
-    next_atomic_idx: AtomicU32,
-    shared_map_base: AtomicU32, 
-    // Head of the lock-free free-list of reusable pages (offset from SHM_BASE).
-    free_list_head: AtomicU32,
-    
-    // Per-writer queues for append-only byte streams.
-    writer_heads: [AtomicU32; 4],
-    writer_tails: [AtomicU32; 4],
-}
-
-#[repr(C, align(4096))]
-struct Page {
-    next_offset: AtomicU32,
-    cursor: AtomicU32,
-    data: [u8; 4088],
-}
-
-#[repr(C)]
-struct ChainNodeHeader {
-    next_node: AtomicU32,
-    writer_id: u32,
-    data_len: u32,
-}
-
-static mut LOCAL_CAPACITY: u32 = 36 * MIB;
-static mut ATOMIC_INDEX_CACHE: Option<BTreeMap<String, u32>> = None;
 
 pub struct ShmApi;
 
@@ -364,5 +319,156 @@ impl ShmApi {
             latest_data = Some(payload);
         }
         latest_data
+    }
+
+    fn resolve_name(name: &str) -> u32 {
+        unsafe {
+            if ATOMIC_INDEX_CACHE.is_none() { ATOMIC_INDEX_CACHE = Some(BTreeMap::new()); }
+            let cache = ATOMIC_INDEX_CACHE.as_mut().unwrap();
+            if let Some(&idx) = cache.get(name) { 
+                idx 
+            } else {
+                let idx = host_resolve_atomic(name.as_ptr() as u32, name.len() as u32);
+                cache.insert(String::from(name), idx);
+                idx
+            }
+        }
+    }
+}
+
+
+
+impl ShmApi {
+    // =====================================================================
+    // Mode 1: Consensus (shared variables resolved via Registry and Manager)
+    // Use case: aggregated results, global config updates, multi-writer single-reader
+    // =====================================================================
+
+    /// [Output] Write shared state (enters bucket conflict pool, awaits Manager resolution)
+    pub fn write_shared_state(task_name: &str, writer_id: u32, data: &[u8]) {
+        let reg_idx = Self::resolve_name(task_name);
+        let map_base_offset = Self::get_or_init_bucket_array();
+        let bucket_idx = (reg_idx as usize) % BUCKET_COUNT;
+        
+        let bucket_ptr = unsafe { 
+            let base_ptr = (SHM_BASE + map_base_offset) as *const u8;
+            base_ptr.add(bucket_idx * 4) as *const core::sync::atomic::AtomicU32
+        };
+        let bucket = unsafe { &*bucket_ptr };
+
+        let total_len = data.len();
+        let mut data_written = 0;
+
+        let head_offset = Self::allocate_page();
+        let head_ptr = (SHM_BASE + head_offset as usize) as *mut u8;
+        
+        unsafe {
+            let header = head_ptr as *mut ChainNodeHeader;
+            (*header).writer_id = writer_id;
+            (*header).data_len = total_len as u32;
+            (*header).registry_index = reg_idx;
+            (*header).next_payload_page = 0; 
+            
+            
+            let head_capacity = 4096 - core::mem::size_of::<ChainNodeHeader>();
+            let write_len = core::cmp::min(total_len, head_capacity);
+            
+            core::ptr::copy_nonoverlapping(data.as_ptr(), head_ptr.add(20), write_len);
+            data_written += write_len;
+
+            
+            let mut prev_next_ptr = &mut (*header).next_payload_page as *mut u32;
+
+            
+            while data_written < total_len {
+                let next_offset = Self::allocate_page();
+                *prev_next_ptr = next_offset; 
+
+                let next_ptr = (SHM_BASE + next_offset as usize) as *mut u8;
+                let overflow_header = next_ptr as *mut u32; 
+                *overflow_header = 0;
+
+                
+                let overflow_capacity = 4096 - 4;
+                let remain = total_len - data_written;
+                let write_len = core::cmp::min(remain, overflow_capacity);
+
+                core::ptr::copy_nonoverlapping(data.as_ptr().add(data_written), next_ptr.add(4), write_len);
+                data_written += write_len;
+
+                prev_next_ptr = overflow_header; 
+            }
+
+            let mut old_head = bucket.load(Ordering::Acquire);
+            loop {
+                (*header).next_node.store(old_head, Ordering::Relaxed);
+                if bucket.compare_exchange(old_head, head_offset, Ordering::Release, Ordering::Relaxed).is_ok() { 
+                    break; 
+                } else { 
+                    old_head = bucket.load(Ordering::Acquire); 
+                }
+            }
+        }
+    }
+
+    pub fn read_shared_state(task_name: &str) -> Option<Vec<u8>> {
+        let reg_idx = Self::resolve_name(task_name);
+        let registry_base = SHM_BASE + REGISTRY_OFFSET as usize;
+        let entry_ptr = unsafe { (registry_base + reg_idx as usize * 64) as *const RegistryEntry };
+        let entry = unsafe { &*entry_ptr };
+        
+        let offset = entry.payload_offset.load(Ordering::Acquire);
+        let total_len = entry.payload_len.load(Ordering::Acquire) as usize;
+        
+        if offset == 0 { return None; } 
+        
+        let mut vec: Vec<u8> = Vec::with_capacity(total_len);
+        let mut current_offset = offset;
+        let mut bytes_read = 0;
+        let mut is_head = true;
+
+        while bytes_read < total_len {
+            let page_ptr = (SHM_BASE + current_offset as usize) as *const u8;
+            
+            let (header_size, next_page) = if is_head {
+                let header = unsafe { &*(page_ptr as *const ChainNodeHeader) };
+                (20, header.next_payload_page)
+            } else {
+                let next = unsafe { *(page_ptr as *const u32) };
+                (4, next)
+            };
+
+            let read_len = core::cmp::min(total_len - bytes_read, 4096 - header_size);
+            unsafe {
+                core::ptr::copy_nonoverlapping(
+                    page_ptr.add(header_size), 
+                    vec.as_mut_ptr().add(bytes_read), 
+                    read_len
+                );
+            }
+            bytes_read += read_len;
+            current_offset = next_page;
+            is_head = false;
+        }
+
+        unsafe { vec.set_len(total_len); }
+        Some(vec)
+    }
+
+    // =====================================================================
+    // Mode 2: Stream (append-only log with private head/tail pointers)
+    // Use case: single-point output, log streams, one-to-one data pipelines (Map -> Reduce)
+    // =====================================================================
+
+    /// [Output] Append data to own private log stream (lock-free, high throughput)
+    pub fn append_stream_data(writer_id: u32, payload: &[u8]) {
+        // Reuses the existing append_bytes implementation
+        Self::append_bytes(writer_id, payload);
+    }
+
+    /// [Input] Consume the latest log stream data from the specified upstream Worker
+    pub fn read_stream_data(target_worker_id: u32) -> Option<Vec<u8>> {
+        // Reuses the existing read_latest_bytes implementation
+        Self::read_latest_bytes(target_worker_id)
     }
 }

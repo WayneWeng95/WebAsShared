@@ -37,6 +37,14 @@ pub fn run_manager() -> Result<()> {
     for mut handle in writer_handles { handle.wait()?; }
     for mut handle in reader_handles { handle.wait()?; }
 
+    Command::new(&myself).arg("func_a").arg(&shm_path).arg("1").spawn()?;
+
+    thread::sleep(Duration::from_millis(500));
+    
+    Command::new(&myself).arg("func_b").arg(&shm_path).arg("2").spawn()?;
+
+    thread::sleep(Duration::from_millis(500));
+
     println!("[Manager] Completed.");
     Ok(())
 }
