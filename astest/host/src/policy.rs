@@ -92,3 +92,19 @@ impl ConsumptionPolicy for LastWriteWinsPolicy {
         }
     }
 }
+
+// ==========================================
+// Policy E: Longest Result Wins
+// ==========================================
+pub struct LongestWinsPolicy;
+
+impl ConsumptionPolicy for LongestWinsPolicy {
+    fn process(&self, nodes: &Vec<HostNode>) -> ConsumptionResult {
+        if let Some(node) = nodes.iter().max_by_key(|n| (n.data_len, n.writer_id)) {
+            let content = String::from_utf8_lossy(&node.payload).to_string();
+            ConsumptionResult::Winner(node.writer_id, content)
+        } else {
+            ConsumptionResult::None
+        }
+    }
+}

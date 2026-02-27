@@ -344,6 +344,17 @@ impl ShmApi {
     // Use case: aggregated results, global config updates, multi-writer single-reader
     // =====================================================================
 
+    /// [Output] Write shared state with explicit byte range (slice of `data` at `[offset, offset+length)`).
+    /// Returns `false` and does nothing if the range is out of bounds.
+    pub fn write_shared_state_at(task_name: &str, writer_id: u32, data: &[u8], offset: usize, length: usize) -> bool {
+        let end = match offset.checked_add(length) {
+            Some(e) if e <= data.len() => e,
+            _ => return false,
+        };
+        Self::write_shared_state(task_name, writer_id, &data[offset..end]);
+        true
+    }
+
     /// [Output] Write shared state (enters bucket conflict pool, awaits Manager resolution)
     pub fn write_shared_state(task_name: &str, writer_id: u32, data: &[u8]) {
         let reg_idx = Self::resolve_name(task_name);
@@ -411,6 +422,73 @@ impl ShmApi {
         }
     }
 
+    /// Read a sub-range `[offset, offset+length)` from shared state without copying the full data.
+    /// Returns `None` if the state does not exist or the range is out of bounds.
+    pub fn read_shared_state_at(task_name: &str, offset: usize, length: usize) -> Option<Vec<u8>> {
+        if length == 0 { return Some(Vec::new()); }
+
+        let reg_idx = Self::resolve_name(task_name);
+        let registry_base = SHM_BASE + REGISTRY_OFFSET as usize;
+        let entry_ptr = unsafe { (registry_base + reg_idx as usize * 64) as *const RegistryEntry };
+        let entry = unsafe { &*entry_ptr };
+
+        let payload_offset = entry.payload_offset.load(Ordering::Acquire);
+        let total_len = entry.payload_len.load(Ordering::Acquire) as usize;
+
+        if payload_offset == 0 { return None; }
+
+        // Bounds check: [offset, end) must fit inside [0, total_len)
+        let end = offset.checked_add(length)?;
+        if end > total_len { return None; }
+
+        let mut result: Vec<u8> = Vec::with_capacity(length);
+        let mut current_offset = payload_offset;
+        let mut page_logical_start = 0usize; // logical byte index of the first data byte on this page
+        let mut result_written = 0usize;
+        let mut is_head = true;
+
+        while result_written < length {
+            let page_ptr = (SHM_BASE + current_offset as usize) as *const u8;
+
+            let (header_size, next_page) = if is_head {
+                let header = unsafe { &*(page_ptr as *const ChainNodeHeader) };
+                (20usize, header.next_payload_page)
+            } else {
+                let next = unsafe { *(page_ptr as *const u32) };
+                (4usize, next)
+            };
+
+            let page_capacity = 4096 - header_size;
+            let page_logical_end = page_logical_start + page_capacity;
+
+            // Compute the overlap between this page's logical range and [offset, end)
+            let copy_start = offset.max(page_logical_start);
+            let copy_end   = end.min(page_logical_end);
+
+            if copy_start < copy_end {
+                let src_off_in_page = copy_start - page_logical_start;
+                let copy_len = copy_end - copy_start;
+                unsafe {
+                    core::ptr::copy_nonoverlapping(
+                        page_ptr.add(header_size + src_off_in_page),
+                        result.as_mut_ptr().add(result_written),
+                        copy_len,
+                    );
+                }
+                result_written += copy_len;
+            }
+
+            if page_logical_end >= end { break; }
+            page_logical_start = page_logical_end;
+            current_offset = next_page;
+            is_head = false;
+        }
+
+        unsafe { result.set_len(length); }
+        Some(result)
+    }
+
+    /// Return the vector of the address pages pointer
     pub fn read_shared_state(task_name: &str) -> Option<Vec<u8>> {
         let reg_idx = Self::resolve_name(task_name);
         let registry_base = SHM_BASE + REGISTRY_OFFSET as usize;
