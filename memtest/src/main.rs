@@ -71,9 +71,7 @@ fn run_worker_node(shmem_id: &str, mode: &str) -> anyhow::Result<()> {
     // 3. Sophisticated Access: Map raw OS pointer to Wasm Memory
     // Note: In a real "Refined" case, the Agent could tell us to map this Read-Only
     let memory_type = MemoryType::new(1, Some(1));
-    let wasm_memory = unsafe {
-        Memory::new_static(&mut store, memory_type, raw_ptr)?
-    };
+    let wasm_memory = Memory::new(&mut store, memory_type)?;
 
     // 4. Manual Linking
     let mut linker = Linker::new(&engine);
