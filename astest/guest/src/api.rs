@@ -446,6 +446,8 @@ impl ShmApi {
 
     /// Read a sub-range `[offset, offset+length)` from shared state without copying the full data.
     /// Returns `None` if the state does not exist or the range is out of bounds.
+    /// Returning a vertor of pointer heads to the chain of pages containing the payload,
+    ///  allowing zero-copy traversal of large state.
     pub fn read_shared_state_range(task_name: &str, offset: usize, length: usize) -> Option<Vec<u8>> {
         if length == 0 { return Some(Vec::new()); }
 
@@ -512,6 +514,8 @@ impl ShmApi {
 
     /// Reads the full payload of the Manager-committed winning state for `task_name`.
     /// Returns `None` if the Manager has not yet resolved any writes for this task.
+    /// Returning a vertor of pointer heads to the chain of pages containing the payload,
+    ///  allowing zero-copy traversal of large state.
     pub fn read_shared_state(task_name: &str) -> Option<Vec<u8>> {
         let reg_idx = Self::resolve_name_to_index(task_name);
         let registry_base = SHM_BASE + REGISTRY_OFFSET as usize;
