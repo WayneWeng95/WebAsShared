@@ -18,11 +18,11 @@ extern "C" {
 pub struct ShmApi;
 
 impl ShmApi {
+    /// Returns a shared reference to the Superblock at the base of shared memory.
     fn superblock() -> &'static Superblock { unsafe { &*(SHM_BASE as *const Superblock) } }
 
-    // ==========================================
-    // Append a debug message to the shared log.
-    // ==========================================
+    /// Appends a debug message to the shared log arena.
+    /// Reserves space atomically; silently drops the message if the arena is full.
     pub fn append_log(msg: &str) {
         let sb = Self::superblock();
         let bytes = msg.as_bytes();
@@ -41,10 +41,11 @@ impl ShmApi {
         }
     }
 
-    // ==========================================
-    // Core page allocator with free-list reuse.
-    // ==========================================
-    fn allocate_page() -> u32 {
+    /// Allocates a 4KB page from the shared memory pool.
+    /// First tries to reuse a recycled page from the lock-free free list (Treiber stack CAS pop).
+    /// Falls back to bump allocation, triggering a VMA expansion via `host_remap` if needed.
+    /// Returns the page's byte offset from the shared memory base.
+    fn try_allocate_page() -> u32 {
         let sb = Self::superblock();
 
 
@@ -108,14 +109,16 @@ impl ShmApi {
         }
     }
 
-    fn get_or_init_bucket_array() -> usize {
+    /// Returns the byte offset of the shared hash bucket array, initializing it lazily on first call.
+    /// Uses a CAS to ensure only one page is ever committed even under concurrent races.
+    fn get_bucket_array() -> usize {
         let sb = Self::superblock();
         let mut map_base = sb.shared_map_base.load(Ordering::Acquire);
         if map_base != 0 {
             return map_base as usize;
         }
 
-        let new_page_offset = Self::allocate_page();
+        let new_page_offset = Self::try_allocate_page();
         
         match sb.shared_map_base.compare_exchange(
             0, 
@@ -128,14 +131,15 @@ impl ShmApi {
         }
     }
 
+    /// Inserts a keyed data node into the shared lock-free hash map.
+    /// Multiple writers may concurrently insert under the same `key_hash`; all nodes are
+    /// prepended to the bucket's linked list and resolved later by the Manager via a policy.
     pub fn insert_shared_data(key_hash: u32, writer_id: u32, data: &[u8]) {
-        let map_base_offset = Self::get_or_init_bucket_array();
+        let map_base_offset = Self::get_bucket_array();
         let bucket_idx = (key_hash as usize) % BUCKET_COUNT;
 
-        // ==========================================
         // Insert a node into the per-key lock-free chain.
         // Pointer arithmetic is done via byte pointers to avoid UB.
-        // ==========================================
         let bucket_ptr = unsafe { 
             // Use raw byte pointers for precise control of address calculation.
             let base_ptr = (SHM_BASE + map_base_offset) as *const u8;
@@ -143,7 +147,7 @@ impl ShmApi {
         };
         let bucket = unsafe { &*bucket_ptr };
 
-        let node_offset = Self::allocate_page();
+        let node_offset = Self::try_allocate_page();
         let node_ptr = (SHM_BASE + node_offset as usize) as *mut u8;
         
         unsafe {
@@ -166,6 +170,9 @@ impl ShmApi {
         }
     }
 
+    /// Reads all nodes currently stored under `key_hash` from the shared hash map.
+    /// Returns a list of `(writer_id, payload)` pairs in insertion order (newest first).
+    /// Does not remove nodes; use the Manager's organizer to consume and resolve conflicts.
     pub fn read_shared_chain(key_hash: u32) -> Vec<(u32, Vec<u8>)> {
         let sb = Self::superblock();
         let map_base_offset = sb.shared_map_base.load(Ordering::Acquire);
@@ -211,12 +218,14 @@ impl ShmApi {
         results
     }
     
-    // Remaining helper functions for atomics and log streams.
+    /// Returns a reference to the `AtomicU64` at the given index in the shared atomic arena.
     fn get_atomic_by_index(index: usize) -> &'static AtomicU64 {
         let base = SHM_BASE + ATOMIC_ARENA_OFFSET as usize;
         unsafe { &*((base as *const AtomicU64).add(index)) }
     }
 
+    /// Looks up a named atomic variable, registering it in the host Registry on first access.
+    /// The resolved index is cached locally to avoid repeated `host_resolve_atomic` calls.
     pub fn get_named_atomic(name: &str) -> &'static AtomicU64 {
         unsafe {
             if ATOMIC_INDEX_CACHE.is_none() { ATOMIC_INDEX_CACHE = Some(BTreeMap::new()); }
@@ -230,13 +239,16 @@ impl ShmApi {
         }
     }
     
+    /// Returns a reference to the `AtomicU64` at the given registry index.
     pub fn get_atomic(index: usize) -> &'static AtomicU64 { Self::get_atomic_by_index(index) }
 
-    fn append_raw_bytes(id: u32, mut data: &[u8]) {
+    /// Appends raw bytes to writer `id`'s private stream without a length prefix.
+    /// Allocates new pages as needed when the current tail page is full.
+    fn append_bytes_unprefixed(id: u32, mut data: &[u8]) {
         let sb = Self::superblock();
         let mut tail_offset = sb.writer_tails[id as usize].load(Ordering::Acquire);
         if tail_offset == 0 {
-            tail_offset = Self::allocate_page();
+            tail_offset = Self::try_allocate_page();
             let new_page = unsafe { &mut *((SHM_BASE + tail_offset as usize) as *mut Page) };
             new_page.next_offset.store(0, Ordering::Relaxed);
             new_page.cursor.store(0, Ordering::Relaxed);
@@ -248,7 +260,7 @@ impl ShmApi {
             let current_cursor = tail_page.cursor.load(Ordering::Relaxed);
             let space_left = 4088 - current_cursor;
             if space_left == 0 {
-                let new_offset = Self::allocate_page();
+                let new_offset = Self::try_allocate_page();
                 let new_page = unsafe { &mut *((SHM_BASE + new_offset as usize) as *mut Page) };
                 new_page.next_offset.store(0, Ordering::Relaxed);
                 new_page.cursor.store(0, Ordering::Relaxed);
@@ -267,12 +279,18 @@ impl ShmApi {
         }
     }
 
-    pub fn append_bytes(id: u32, payload: &[u8]) {
+    /// Appends a length-prefixed record to writer `id`'s private stream.
+    /// Writes a 4-byte LE length header followed by `payload`, allowing `read_latest_bytes`
+    /// to correctly frame records on the read side.
+    pub fn append_bytes_prefixed(id: u32, payload: &[u8]) {
         let record_len = payload.len() as u32;
-        Self::append_raw_bytes(id, &record_len.to_le_bytes());
-        Self::append_raw_bytes(id, payload);
+        Self::append_bytes_unprefixed(id, &record_len.to_le_bytes());
+        Self::append_bytes_unprefixed(id, payload);
     }
     
+    /// Reads the most recently written record from writer `id`'s private stream.
+    /// Scans all length-prefixed records from the stream head and returns the last complete one.
+    /// Returns `None` if the stream is empty or the writer has not yet written any data.
     pub fn read_latest_bytes(id: u32) -> Option<alloc::vec::Vec<u8>> {
         let sb = Self::superblock();
         let head_offset = sb.writer_heads[id as usize].load(Ordering::Acquire);
@@ -321,7 +339,9 @@ impl ShmApi {
         latest_data
     }
 
-    fn resolve_name(name: &str) -> u32 {
+    /// Resolves a symbolic task name to its registry index, caching the result locally.
+    /// Delegates to `host_resolve_atomic` on first lookup; subsequent calls use the cached value.
+    fn resolve_name_to_index(name: &str) -> u32 {
         unsafe {
             if ATOMIC_INDEX_CACHE.is_none() { ATOMIC_INDEX_CACHE = Some(BTreeMap::new()); }
             let cache = ATOMIC_INDEX_CACHE.as_mut().unwrap();
@@ -346,7 +366,7 @@ impl ShmApi {
 
     /// [Output] Write shared state with explicit byte range (slice of `data` at `[offset, offset+length)`).
     /// Returns `false` and does nothing if the range is out of bounds.
-    pub fn write_shared_state_at(task_name: &str, writer_id: u32, data: &[u8], offset: usize, length: usize) -> bool {
+    pub fn write_shared_state_range(task_name: &str, writer_id: u32, data: &[u8], offset: usize, length: usize) -> bool {
         let end = match offset.checked_add(length) {
             Some(e) if e <= data.len() => e,
             _ => return false,
@@ -355,10 +375,12 @@ impl ShmApi {
         true
     }
 
-    /// [Output] Write shared state (enters bucket conflict pool, awaits Manager resolution)
+    /// Writes `data` as shared state for `task_name`.
+    /// The node enters the bucket conflict pool; the Manager resolves concurrent writers
+    /// using the active `ConsumptionPolicy` and commits the winner to the Registry.
     pub fn write_shared_state(task_name: &str, writer_id: u32, data: &[u8]) {
-        let reg_idx = Self::resolve_name(task_name);
-        let map_base_offset = Self::get_or_init_bucket_array();
+        let reg_idx = Self::resolve_name_to_index(task_name);
+        let map_base_offset = Self::get_bucket_array();
         let bucket_idx = (reg_idx as usize) % BUCKET_COUNT;
         
         let bucket_ptr = unsafe { 
@@ -370,7 +392,7 @@ impl ShmApi {
         let total_len = data.len();
         let mut data_written = 0;
 
-        let head_offset = Self::allocate_page();
+        let head_offset = Self::try_allocate_page();
         let head_ptr = (SHM_BASE + head_offset as usize) as *mut u8;
         
         unsafe {
@@ -392,7 +414,7 @@ impl ShmApi {
 
             
             while data_written < total_len {
-                let next_offset = Self::allocate_page();
+                let next_offset = Self::try_allocate_page();
                 *prev_next_ptr = next_offset; 
 
                 let next_ptr = (SHM_BASE + next_offset as usize) as *mut u8;
@@ -424,10 +446,10 @@ impl ShmApi {
 
     /// Read a sub-range `[offset, offset+length)` from shared state without copying the full data.
     /// Returns `None` if the state does not exist or the range is out of bounds.
-    pub fn read_shared_state_at(task_name: &str, offset: usize, length: usize) -> Option<Vec<u8>> {
+    pub fn read_shared_state_range(task_name: &str, offset: usize, length: usize) -> Option<Vec<u8>> {
         if length == 0 { return Some(Vec::new()); }
 
-        let reg_idx = Self::resolve_name(task_name);
+        let reg_idx = Self::resolve_name_to_index(task_name);
         let registry_base = SHM_BASE + REGISTRY_OFFSET as usize;
         let entry_ptr = unsafe { (registry_base + reg_idx as usize * 64) as *const RegistryEntry };
         let entry = unsafe { &*entry_ptr };
@@ -488,9 +510,10 @@ impl ShmApi {
         Some(result)
     }
 
-    /// Return the vector of the address pages pointer
+    /// Reads the full payload of the Manager-committed winning state for `task_name`.
+    /// Returns `None` if the Manager has not yet resolved any writes for this task.
     pub fn read_shared_state(task_name: &str) -> Option<Vec<u8>> {
-        let reg_idx = Self::resolve_name(task_name);
+        let reg_idx = Self::resolve_name_to_index(task_name);
         let registry_base = SHM_BASE + REGISTRY_OFFSET as usize;
         let entry_ptr = unsafe { (registry_base + reg_idx as usize * 64) as *const RegistryEntry };
         let entry = unsafe { &*entry_ptr };
@@ -540,12 +563,12 @@ impl ShmApi {
 
     /// [Output] Append data to own private log stream (lock-free, high throughput)
     pub fn append_stream_data(writer_id: u32, payload: &[u8]) {
-        // Reuses the existing append_bytes implementation
-        Self::append_bytes(writer_id, payload);
+        // Reuses the existing append_bytes_prefixed implementation
+        Self::append_bytes_prefixed(writer_id, payload);
     }
 
     /// [Input] Consume the latest log stream data from the specified upstream Worker
-    pub fn read_stream_data(target_worker_id: u32) -> Option<Vec<u8>> {
+    pub fn read_latest_stream_data(target_worker_id: u32) -> Option<Vec<u8>> {
         // Reuses the existing read_latest_bytes implementation
         Self::read_latest_bytes(target_worker_id)
     }

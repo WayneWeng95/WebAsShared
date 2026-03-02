@@ -6,6 +6,9 @@ use api::ShmApi;
 use alloc::format;
 use alloc::vec::Vec;
 
+/// WASM export: writer workload for worker `id`.
+/// Updates named atomics in the Registry, inserts a conflict node into the shared hash map,
+/// and appends a JSON summary record to the worker's private stream.
 #[no_mangle]
 pub extern "C" fn writer(id: u32) {
     // ShmApi::append_log(&format!(">>> [INFO] Writer {} initialized.\n", id));
@@ -46,14 +49,17 @@ pub extern "C" fn writer(id: u32) {
         id, local_val, current_reqs, batch_val, local_sum
     );
 
-    ShmApi::append_bytes(id, complex_data.as_bytes());
+    ShmApi::append_bytes_prefixed(id, complex_data.as_bytes());
 
     // ShmApi::append_log(&format!("<<< [SUCCESS] Writer {} completed.\n", id));
 }
 
-// read buffer for OOM
+// Persistent buffer used to extend the lifetime of the last read payload across the ABI boundary.
 static mut READ_BUFFER: Vec<u8> = Vec::new();
 
+/// WASM export: reads the latest record from writer `id`'s private stream.
+/// Returns a packed `(ptr << 32 | len)` fat pointer for the host to read directly,
+/// or `0` if no data is available yet.
 #[no_mangle]
 pub extern "C" fn reader(id: u32) -> u64 {
     if let Some(vec) = ShmApi::read_latest_bytes(id) {
@@ -70,12 +76,14 @@ pub extern "C" fn reader(id: u32) -> u64 {
     }
 }
 
+/// WASM export: returns the current value of registry atomic index 0 (`TotalRequests`).
 #[no_mangle]
 pub extern "C" fn read_live_global() -> u64 {
     ShmApi::get_atomic(0).load(Ordering::SeqCst)
 }
 
-// Func A (Writer)
+/// WASM export: writes a finalized result string under the `"FuncA_Result"` task name.
+/// Competing invocations from multiple workers are resolved by the Manager's conflict policy.
 #[no_mangle]
 pub extern "C" fn func_a(id: u32) {
     let result = alloc::format!("This is the finalized data from Function A! (Winner ID: {})", id);
@@ -84,7 +92,8 @@ pub extern "C" fn func_a(id: u32) {
     ShmApi::append_log(&alloc::format!("Func A (ID: {}) wrote output.\n", id));
 }
 
-// Func B (Reader)
+/// WASM export: reads the Manager-committed result of `"FuncA_Result"` and logs it.
+/// Logs both the UTF-8 text and a hex dump of the first 16 bytes to the shared log arena.
 #[no_mangle]
 pub extern "C" fn func_b(_id: u32) {
     if let Some(input_data) = ShmApi::read_shared_state("FuncA_Result") {
@@ -121,7 +130,7 @@ pub extern "C" fn process_image_node(id: u32) {
 #[no_mangle]
 pub extern "C" fn zip_results_node(id: u32) {
     // 1. Read Node A's (assume id 1) private output (directly from in-memory list, zero wait)
-    if let Some(img_data) = ShmApi::read_stream_data(1) {
+    if let Some(img_data) = ShmApi::read_latest_stream_data(1) {
         // ... pack img_data ...
     }
 

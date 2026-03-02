@@ -11,6 +11,7 @@ pub struct BucketOrganizer<'a> {
 }
 
 impl<'a> BucketOrganizer<'a> {
+    /// Creates a new `BucketOrganizer` anchored at the shared memory base pointer.
     pub fn new(store: &mut Store<WorkerState>, memory: &Memory) -> Self {
         let base_ptr = unsafe { memory.data_ptr(store).add(TARGET_OFFSET) };
         Self {
@@ -19,7 +20,9 @@ impl<'a> BucketOrganizer<'a> {
         }
     }
 
-    /// Core: scan all buckets, detach lists, run policy, then tear down
+    /// Scans every hash bucket, atomically detaches its conflict list, applies `policy` to
+    /// select a winner, commits the winner to the Registry, and recycles all losing pages.
+    /// Must be called after all writers have finished to ensure the bucket lists are stable.
     pub unsafe fn consume_all_buckets<P: ConsumptionPolicy>(&self, policy: P) {
         let sb_ptr = self.base_ptr;
         let map_base_atomic = sb_ptr.add(24) as *const AtomicU32;
@@ -42,7 +45,9 @@ impl<'a> BucketOrganizer<'a> {
         }
     }
 
-    // Process a detached list
+    /// Applies `policy` to the already-detached linked list rooted at `head_offset`.
+    /// Deserializes each node's multi-page payload, invokes the policy, stores the winning
+    /// node's offset and length into the Registry, and frees all losing nodes' page chains.
     unsafe fn process_detached_list<P: ConsumptionPolicy>(&self, head_offset: u32, bucket_idx: usize, policy: &P) {
         let mut nodes = Vec::new();
         let mut current_offset = head_offset;
@@ -126,6 +131,8 @@ impl<'a> BucketOrganizer<'a> {
         }
     }
 
+    /// Returns every node in the chain starting at `list_head` to the free list.
+    /// Walks the top-level `next_node` links of the conflict list (not overflow payload pages).
     unsafe fn recycle_chain(&self, list_head: u32) {
         if list_head == 0 {
             return;
@@ -150,6 +157,8 @@ impl<'a> BucketOrganizer<'a> {
         }
     }
 
+    /// Pushes a single page back onto the superblock's free list using a lock-free CAS loop
+    /// (Treiber stack push). Safe to call concurrently from multiple threads.
     unsafe fn push_to_free_list(&self, page_offset: u32) {
         let sb_ptr = self.base_ptr;
         // Free list head is at superblock offset 28

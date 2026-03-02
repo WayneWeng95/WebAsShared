@@ -6,6 +6,9 @@ use std::num::NonZeroUsize;
 
 use common::*;
 
+/// Creates and initializes the shared memory file at `path`.
+/// Truncates the file to `INITIAL_SHM_SIZE` and writes the superblock header fields,
+/// zeroing all atomic counters and pointers so they are ready for first use.
 pub fn format_shared_memory(path: &str) -> Result<()> {
     let mut file = OpenOptions::new()
         .read(true).write(true).create(true).truncate(true).open(path)?;
@@ -30,7 +33,8 @@ pub fn format_shared_memory(path: &str) -> Result<()> {
 
     Ok(())
 }
-/// Map the file into the virtual memory address specified by Wasm
+/// Maps `file` into the process address space at the fixed virtual address `addr` with
+/// `MAP_SHARED | MAP_FIXED`, making the shared memory region visible to both host and WASM guest.
 pub fn map_into_memory(file: &File, addr: usize, size: usize) -> Result<()> {
     unsafe {
         mmap(
@@ -45,7 +49,8 @@ pub fn map_into_memory(file: &File, addr: usize, size: usize) -> Result<()> {
     Ok(())
 }
 
-/// Responsible for dynamically expanding the file and updating the VMA mapping at runtime
+/// Expands the shared memory backing file to `new_size` and remaps the VMA in-place.
+/// Called by the `host_remap` host function when the guest's bump allocator needs more capacity.
 pub fn expand_mapping(file: &File, addr: usize, new_size: usize) -> Result<()> {
     // 1. Expand the underlying file
     file.set_len(new_size as u64)?;

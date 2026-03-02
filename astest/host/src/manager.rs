@@ -9,6 +9,9 @@ use crate::shm::format_shared_memory;
 
 // Used for testing the shared memory read and write functionality
 
+/// Entry point for the manager process.
+/// Initializes the shared memory file, spawns 4 reader and 4 writer worker subprocesses,
+/// waits for all to finish, then chains `func_a` and `func_b` invocations sequentially.
 pub fn run_manager() -> Result<()> {
     println!("[Manager] Formatting Initial 16MB Dynamic Shared Memory...");
     

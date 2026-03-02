@@ -24,8 +24,8 @@ pub struct WorkerState {
     pub splice_addr: usize,
 }
 
-/// WASM engine config
-/// Now isolated to handle engine creation and configuration
+/// Creates a Wasmtime engine configured for shared memory:
+/// 4GB static address space, no guard pages (VMA is managed manually), threads enabled.
 pub fn create_wasmtime_engine() -> Result<Engine> {
     let mut config = Config::new();
     // Allow full 4GB address space
@@ -39,8 +39,9 @@ pub fn create_wasmtime_engine() -> Result<Engine> {
     Engine::new(&config)
 }
 
-/// VMA environment adjust
-/// Handles Memory creation, File mapping, and Host Function exports
+/// Allocates the WASM shared memory, maps the SHM file into it at `TARGET_OFFSET`,
+/// and registers the two host imports (`host_remap`, `host_resolve_atomic`) with the linker.
+/// Returns the `Memory` handle needed for direct host-side reads after WASM execution.
 pub fn setup_vma_environment(
     store: &mut Store<WorkerState>,
     linker: &mut Linker<WorkerState>,
@@ -154,6 +155,9 @@ pub fn setup_vma_environment(
     Ok(memory)
 }
 
+/// Loads the guest WASM module and executes the function for `role` with the given `id`.
+/// Supported roles: `"writer"`, `"reader"`, `"func_a"`, `"func_b"`.
+/// After writers complete, triggers the `BucketOrganizer` to resolve conflicts and GC pages.
 pub fn run_worker(role: &str, shm_path: &str, id: u32) -> Result<()> {
     let pid = std::process::id();
     let file = OpenOptions::new().read(true).write(true).open(shm_path)?;
