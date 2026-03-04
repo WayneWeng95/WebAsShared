@@ -49,7 +49,7 @@ pub extern "C" fn writer(id: u32) {
         id, local_val, current_reqs, batch_val, local_sum
     );
 
-    ShmApi::append_bytes_prefixed(id, complex_data.as_bytes());
+    ShmApi::append_stream_data(id, complex_data.as_bytes());
 
     // ShmApi::append_log(&format!("<<< [SUCCESS] Writer {} completed.\n", id));
 }
@@ -62,7 +62,7 @@ static mut READ_BUFFER: Vec<u8> = Vec::new();
 /// or `0` if no data is available yet.
 #[no_mangle]
 pub extern "C" fn reader(id: u32) -> u64 {
-    if let Some(vec) = ShmApi::read_latest_bytes(id) {
+    if let Some(vec) = ShmApi::read_latest_stream_data(id) {
         unsafe {
             // take the read buffer
             READ_BUFFER = vec;
