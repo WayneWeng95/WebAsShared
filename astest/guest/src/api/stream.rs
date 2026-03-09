@@ -1,0 +1,1 @@
+// Use for a easy stream setup

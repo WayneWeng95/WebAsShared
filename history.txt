@@ -26,18 +26,6 @@
    26  calude
    27  claude
    28  cd WebAsShared/
-   29  git status
-   30  git add -A
-   31  git commit -m "Update comments"
-   32  git config --global --edit
-   33  git commit --amend --reset-author
-   34  git push
-   35  git status
-   36  git add -A
-   37  git commit -m "update small comments"
-   38  git config --global user.email wayneweng9508@gmail.com
-   39  git commit -amend --reset-author
-   40  git commit --amend --reset-author
    41  git status
    42  git push
    43  cd /opt/
@@ -55,6 +43,3 @@
    55  cd /opt/myapp/
    56  ls
    57  history > history.txt
-   58  sudo chown Wengwk:Wengwk /opt/myapp
-   59  sudo chown Wengwk:sched-serv-PG0 /opt/myapp
-   60  history > history.txt

@@ -1,4 +1,4 @@
-core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::{AtomicU64, Ordering};
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use common::*;
