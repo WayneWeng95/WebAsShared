@@ -32,6 +32,9 @@ pub const BUMP_ALLOCATOR_START: u32 = LOG_ARENA_OFFSET + LOG_ARENA_SIZE;
 // Dynamic Hash Map
 pub const BUCKET_COUNT: usize = (PAGE_SIZE / 4) as usize;
 
+// Shuffle
+pub const PARALLEL_THRESHOLD: usize = 50;
+
 // -------------------------------------------------------
 // Shared Data Structures (Guarantees ABI matching)
 // -------------------------------------------------------

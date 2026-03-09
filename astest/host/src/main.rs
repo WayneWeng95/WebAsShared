@@ -1,8 +1,10 @@
 mod manager;
 mod shm;
 mod worker;
-mod organizer; 
-mod policy;   
+mod organizer;
+mod policy;
+mod stream;
+mod shuffle;
 
 
 use anyhow::Result;
