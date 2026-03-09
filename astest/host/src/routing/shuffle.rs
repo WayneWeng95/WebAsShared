@@ -16,6 +16,9 @@ use common::*;
 // ShmIo — O(1) chain splicing
 // -----------------------------------------------------------------------------
 
+// ShmIo is just a usize (the shm base address). Copy is intentional:
+// cloning into thread closures copies one pointer-sized integer — one instruction.
+#[derive(Clone, Copy)]
 struct ShmIo {
     base: usize,
 }
@@ -87,7 +90,7 @@ impl ShmIo {
                 // writer_heads/tails[dst/src] — all disjoint across pairs.
                 thread::scope(|s| {
                     for &(pair_dst, pair_src) in &pairs {
-                        s.spawn(|| self.chain_onto(pair_dst, pair_src));
+                        s.spawn(move || self.chain_onto(pair_dst, pair_src));
                     }
                 });
 
@@ -162,7 +165,7 @@ impl ShuffleConnection {
             for (slot, group) in groups.iter().enumerate() {
                 if group.is_empty() { continue; }
                 let dst_id = self.downstream_ids[slot];
-                s.spawn(|| io.merge_into(group, dst_id));
+                s.spawn(move || io.merge_into(group, dst_id));
             }
         });
     }

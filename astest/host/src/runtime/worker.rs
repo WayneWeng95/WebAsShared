@@ -9,7 +9,7 @@ use crate::shm::{expand_mapping, map_into_memory};
 
 use common::{RegistryEntry, INITIAL_SHM_SIZE, REGISTRY_OFFSET, REGISTRY_SIZE, TARGET_OFFSET};
 
-use crate::organizer::BucketOrganizer;
+use crate::runtime::organizer::BucketOrganizer;
 use crate::policy::{LastWriteWinsPolicy, MajorityWinsPolicy, MaxIdWinsPolicy, MinIdWinsPolicy};
 
 const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";

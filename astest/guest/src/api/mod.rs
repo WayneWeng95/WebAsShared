@@ -26,5 +26,3 @@ mod atomic_arena;
 mod log_arena;
 mod shared_area;
 mod stream_area;
-pub mod stream;
-pub mod shuffle;

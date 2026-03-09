@@ -1,5 +1,5 @@
 use crate::policy::{ConsumptionPolicy, ConsumptionResult, HostNode};
-use crate::worker::WorkerState;
+use crate::runtime::worker::WorkerState;
 use std::sync::atomic::{AtomicU32, Ordering};
 use wasmtime::{Memory, Store};
 
