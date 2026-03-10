@@ -1,0 +1,67 @@
+{
+  "shm_path": "/dev/shm/dag_demo",
+  "nodes": [
+
+    { "id": "p0", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 0 } } },
+    { "id": "p1", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 1 } } },
+    { "id": "p2", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 2 } } },
+    { "id": "p3", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 3 } } },
+    { "id": "p4", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 4 } } },
+    { "id": "p5", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 5 } } },
+    { "id": "p6", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 6 } } },
+    { "id": "p7", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 7 } } },
+    { "id": "p8", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 8 } } },
+    { "id": "p9", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 9 } } },
+
+    {
+      "id": "bridge",
+      "deps": ["p0"],
+      "kind": { "Bridge": { "from": 0, "to": 20 } }
+    },
+
+    {
+      "id": "aggregate",
+      "deps": ["p1", "p2", "p3"],
+      "kind": { "Aggregate": { "upstream": [1, 2, 3], "downstream": 21 } }
+    },
+
+    {
+      "id": "shuffle_modulo",
+      "deps": ["p4", "p5"],
+      "kind": { "Shuffle": {
+        "upstream": [4, 5],
+        "downstream": [22, 23],
+        "policy": { "type": "Modulo" }
+      } }
+    },
+
+    {
+      "id": "shuffle_rr",
+      "deps": ["p6", "p7"],
+      "kind": { "Shuffle": {
+        "upstream": [6, 7],
+        "downstream": [24, 25],
+        "policy": { "type": "RoundRobin" }
+      } }
+    },
+
+    {
+      "id": "shuffle_fixedmap",
+      "deps": ["p8", "p9"],
+      "kind": { "Shuffle": {
+        "upstream": [8, 9],
+        "downstream": [26, 27],
+        "policy": { "type": "FixedMap", "map": [[8, 1], [9, 0]], "default_slot": 0 }
+      } }
+    },
+
+    { "id": "verify_bridge",         "deps": ["bridge"],         "kind": { "WasmFatPtr": { "func": "dump_stream_records",  "arg": 20 } } },
+    { "id": "verify_aggregate",       "deps": ["aggregate"],      "kind": { "WasmFatPtr": { "func": "dump_stream_records",  "arg": 21 } } },
+    { "id": "verify_modulo_slot22",   "deps": ["shuffle_modulo"], "kind": { "WasmFatPtr": { "func": "dump_stream_records",  "arg": 22 } } },
+    { "id": "verify_modulo_slot23",   "deps": ["shuffle_modulo"], "kind": { "WasmFatPtr": { "func": "dump_stream_records",  "arg": 23 } } },
+    { "id": "count_rr_slot24",        "deps": ["shuffle_rr"],     "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 24 } } },
+    { "id": "count_rr_slot25",        "deps": ["shuffle_rr"],     "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 25 } } },
+    { "id": "verify_fixedmap_slot26", "deps": ["shuffle_fixedmap"],"kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 26 } } },
+    { "id": "verify_fixedmap_slot27", "deps": ["shuffle_fixedmap"],"kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 27 } } }
+  ]
+}

@@ -10,6 +10,7 @@
 use std::sync::atomic::Ordering;
 use std::thread;
 use common::*;
+use crate::policy::ShufflePolicy;
 
 
 // -----------------------------------------------------------------------------
@@ -130,31 +131,36 @@ impl AggregateConnection {
 pub struct ShuffleConnection {
     upstream_ids: Vec<usize>,
     downstream_ids: Vec<usize>,
-    /// Maps upstream_id → downstream slot. Whole-stream granularity:
-    /// all pages from one upstream go to one reducer.
-    partition_fn: Box<dyn Fn(usize) -> usize + Send + Sync>,
+    /// Partitioning policy: maps each upstream_id to a downstream slot index.
+    /// Whole-stream granularity — all pages from one upstream go to one reducer.
+    policy: Box<dyn ShufflePolicy>,
 }
 
 impl ShuffleConnection {
-    pub fn new<F>(upstream_ids: &[usize], downstream_ids: &[usize], partition_fn: F) -> Self
-    where
-        F: Fn(usize) -> usize + Send + Sync + 'static,
-    {
+    /// Construct a shuffle connection with any `ShufflePolicy` implementation.
+    /// `policy.partition(upstream_id, num_downstream)` is called once per upstream
+    /// during `bridge` to determine which downstream slot it routes to.
+    pub fn new<P: ShufflePolicy + 'static>(
+        upstream_ids: &[usize],
+        downstream_ids: &[usize],
+        policy: P,
+    ) -> Self {
         Self {
             upstream_ids: upstream_ids.to_vec(),
             downstream_ids: downstream_ids.to_vec(),
-            partition_fn: Box::new(partition_fn),
+            policy: Box::new(policy),
         }
     }
 }
 
 impl ShuffleConnection {
-    /// Group upstreams by downstream slot, then merge_into each slot.
+    /// Group upstreams by downstream slot (via the policy), then merge_into each slot.
     /// Groups are independent and can be processed concurrently.
     pub fn bridge(&self, splice_addr: usize) {
-        let mut groups: Vec<Vec<usize>> = vec![Vec::new(); self.downstream_ids.len()];
+        let num_downstream = self.downstream_ids.len();
+        let mut groups: Vec<Vec<usize>> = vec![Vec::new(); num_downstream];
         for &up in &self.upstream_ids {
-            let slot = (self.partition_fn)(up);
+            let slot = self.policy.partition(up, num_downstream);
             if slot < groups.len() {
                 groups[slot].push(up);
             }

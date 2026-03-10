@@ -13,7 +13,18 @@ pub const MIB: u32 = 1024 * 1024;
 pub const INITIAL_SHM_SIZE: u32 = 36 * MIB;
 
 pub const PAGE_SIZE: u32 = 4 * KIB;
-pub const SUPERBLOCK_SIZE: u32 = 4 * KIB;
+
+// Number of independent stream slots (upstream producers + downstream routing targets).
+// Increase this to support more concurrent actors; SUPERBLOCK_SIZE adjusts automatically.
+pub const STREAM_SLOT_COUNT: usize = 2048;
+
+// Automatically derived: size of the Superblock struct rounded up to the next full page.
+// Rust resolves Superblock (defined below) ahead of source order, so this is always exact.
+// With STREAM_SLOT_COUNT=2048: 8 fields×4 + 2×2048×4 = 16416 bytes → rounds to 5 pages (20 KiB).
+pub const SUPERBLOCK_SIZE: u32 = {
+    let sz = core::mem::size_of::<Superblock>() as u32;
+    (sz + PAGE_SIZE - 1) / PAGE_SIZE * PAGE_SIZE
+};
 
 // Registry Arena: 1MB
 pub const REGISTRY_SIZE: u32 = 1 * MIB;
@@ -48,8 +59,8 @@ pub struct Superblock {
     pub next_atomic_idx: AtomicU32,
     pub shared_map_base: AtomicU32, 
     pub free_list_head: AtomicU32,
-    pub writer_heads: [AtomicU32; 4],
-    pub writer_tails: [AtomicU32; 4],
+    pub writer_heads: [AtomicU32; STREAM_SLOT_COUNT],
+    pub writer_tails: [AtomicU32; STREAM_SLOT_COUNT],
 }
 
 #[repr(C, align(4096))]

@@ -1,0 +1,27 @@
+● All results are correct. Here's the verification:
+
+  Bridge (slot 0 → 20)                                                 
+  - slot 20: P0_seq0/1/2 ✓ — all 3 records from producer 0, zero-copy
+  wire confirmed                                                       
+                  
+  Aggregate ([1,2,3] → 21)                                             
+  - slot 21: 9 records, P1 then P2 then P3 in chain order ✓ — all three
+   chains spliced in sequence                                          
+                                                                       
+  Shuffle — Modulo ([4,5] → [22,23])                                   
+  - slot 22: P4 records only (4 % 2 = 0 → index 0 → slot 22) ✓
+  - slot 23: P5 records only (5 % 2 = 1 → index 1 → slot 23) ✓         
+   
+  Shuffle — RoundRobin ([6,7] → [24,25])                               
+  - slot 24: 3 records, slot 25: 3 records ✓ — call order assigns P6
+  first (→24), P7 second (→25), matching the upstream list order       
+                                                                
+  Shuffle — FixedMap ([8,9] → [26,27], map {8→1, 9→0})                 
+  - slot 26: P9 records (9 → index 0 → slot 26) ✓                      
+  - slot 27: P8 records (8 → index 1 → slot 27) ✓ — the intended swap  
+  is confirmed                                                         
+                                                                       
+  Every node produced exactly the expected output. The DAG engine
+  correctly resolves dependencies, executes in topological order, and  
+  all five routing primitives (Bridge, Aggregate, Modulo, RoundRobin,
+  FixedMap) work as designed.                 

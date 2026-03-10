@@ -119,6 +119,60 @@ impl ShmApi {
         Self::read_latest_bytes(target_worker_id)
     }
 
+    /// Scans every length-prefixed record in `id`'s stream from head to tail
+    /// and returns them all in order.  Returns an empty Vec if the stream is
+    /// empty.  Used by routing tests where all records from merged / shuffled
+    /// chains must be inspected, not just the last one.
+    pub fn read_all_stream_records(id: u32) -> Vec<Vec<u8>> {
+        let sb = Self::superblock();
+        let head_offset = sb.writer_heads[id as usize].load(Ordering::Acquire);
+        if head_offset == 0 { return Vec::new(); }
+        let mut current_offset = head_offset;
+        let mut cursor_in_page = 0u32;
+        // Same page-walking closure as read_latest_bytes but collects every record.
+        let mut read_exact = |dest: &mut [u8]| -> bool {
+            let mut dest = dest;
+            while !dest.is_empty() {
+                if current_offset == 0 { return false; }
+                let required_cap = current_offset + PAGE_SIZE;
+                let local_cap = unsafe { super::LOCAL_CAPACITY };
+                if required_cap > local_cap {
+                    let global_cap = sb.global_capacity.load(Ordering::Acquire);
+                    if global_cap >= required_cap {
+                        unsafe { host_remap(global_cap); super::LOCAL_CAPACITY = global_cap; }
+                    } else { return false; }
+                }
+                let page = unsafe { &*((SHM_BASE + current_offset as usize) as *const Page) };
+                let page_written = page.cursor.load(Ordering::Acquire);
+                let available = page_written.saturating_sub(cursor_in_page);
+                if available == 0 {
+                    current_offset = page.next_offset.load(Ordering::Acquire);
+                    cursor_in_page = 0;
+                    continue;
+                }
+                let read_len = core::cmp::min(available as usize, dest.len());
+                unsafe {
+                    let src = page.data.as_ptr().add(cursor_in_page as usize);
+                    core::ptr::copy_nonoverlapping(src, dest.as_mut_ptr(), read_len);
+                }
+                cursor_in_page += read_len as u32;
+                dest = &mut dest[read_len..];
+            }
+            true
+        };
+        let mut records = Vec::new();
+        loop {
+            let mut len_buf = [0u8; 4];
+            if !read_exact(&mut len_buf) { break; }
+            let record_len = u32::from_le_bytes(len_buf);
+            let mut payload = Vec::with_capacity(record_len as usize);
+            unsafe { payload.set_len(record_len as usize); }
+            if !read_exact(&mut payload) { break; }
+            records.push(payload);
+        }
+        records
+    }
+
     /// Reads `length` bytes from writer `id`'s stream starting at absolute byte `offset`.
     /// Traverses the page chain and copies data across page boundaries as needed.
     /// Returns `None` if the stream is empty or `offset` is beyond all written data.

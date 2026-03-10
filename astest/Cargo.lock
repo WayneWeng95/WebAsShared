@@ -520,6 +520,8 @@ dependencies = [
  "anyhow",
  "common",
  "nix",
+ "serde",
+ "serde_json",
  "tempfile",
  "wasmtime",
 ]
