@@ -109,6 +109,9 @@ pub enum NodeKind {
     Persist(PersistParams),
     /// Lightweight: persist a single stream slot or a single shared-state entry.
     Watch(WatchParams),
+    /// Multi-round streaming pipeline: source → filter → transform → sink,
+    /// each stage advancing its own SHM-atomic cursor each round.
+    StreamPipeline(StreamPipelineParams),
 }
 
 #[derive(Debug, Deserialize)]
@@ -162,6 +165,30 @@ pub struct WatchParams {
     pub stream: Option<usize>,
     /// Named shared-state entry to persist (mutually exclusive with `stream`).
     pub shared: Option<String>,
+}
+
+/// Parameters for the `StreamPipeline` node.
+///
+/// The host calls each stage WASM function once per round:
+///   1. `pipeline_source(source_slot, round)` — appends a fresh batch
+///   2. `pipeline_filter(source_slot, filter_slot)` — keeps even-indexed items
+///   3. `pipeline_transform(filter_slot, transform_slot)` — appends "|T" tag
+///   4. `pipeline_sink(transform_slot, summary_slot)` — emits a count/sum record
+///
+/// Per-stage cursors are stored as named SHM atomics inside the WASM instance,
+/// so each stage only processes records written since the previous round.
+#[derive(Debug, Deserialize)]
+pub struct StreamPipelineParams {
+    /// Number of rounds to execute.
+    pub rounds: u32,
+    /// Slot written by the source stage (input to filter).
+    pub source_slot: u32,
+    /// Slot written by the filter stage (input to transform).
+    pub filter_slot: u32,
+    /// Slot written by the transform stage (input to sink).
+    pub transform_slot: u32,
+    /// Slot where the sink writes one summary record per round.
+    pub summary_slot: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -399,6 +426,44 @@ fn execute_node(
                 }
                 None => {
                     println!("  Persist: no writer available — skipped");
+                }
+            }
+        }
+
+        // ── Streaming pipeline: multi-round source→filter→transform→sink ─────
+        NodeKind::StreamPipeline(p) => {
+            let source_fn    = instance.get_typed_func::<(u32, u32), ()>(&mut *store, "pipeline_source")
+                .map_err(|e| anyhow!("[{}] pipeline_source: {}", node.id, e))?;
+            let filter_fn    = instance.get_typed_func::<(u32, u32), ()>(&mut *store, "pipeline_filter")
+                .map_err(|e| anyhow!("[{}] pipeline_filter: {}", node.id, e))?;
+            let transform_fn = instance.get_typed_func::<(u32, u32), ()>(&mut *store, "pipeline_transform")
+                .map_err(|e| anyhow!("[{}] pipeline_transform: {}", node.id, e))?;
+            let sink_fn      = instance.get_typed_func::<(u32, u32), ()>(&mut *store, "pipeline_sink")
+                .map_err(|e| anyhow!("[{}] pipeline_sink: {}", node.id, e))?;
+            let dump_fn      = instance.get_typed_func::<u32, u64>(&mut *store, "dump_stream_records")
+                .map_err(|e| anyhow!("[{}] dump_stream_records: {}", node.id, e))?;
+
+            println!("  StreamPipeline: {} rounds | slots {}→{}→{}→{}",
+                p.rounds, p.source_slot, p.filter_slot, p.transform_slot, p.summary_slot);
+
+            for round in 0..p.rounds {
+                source_fn.call(&mut *store, (p.source_slot, round))?;
+                filter_fn.call(&mut *store, (p.source_slot, p.filter_slot))?;
+                transform_fn.call(&mut *store, (p.filter_slot, p.transform_slot))?;
+                sink_fn.call(&mut *store, (p.transform_slot, p.summary_slot))?;
+                println!("    round {} complete", round);
+            }
+
+            // Print the accumulated per-round summaries from the sink slot.
+            let packed = dump_fn.call(&mut *store, p.summary_slot)?;
+            if packed > 0 {
+                let ptr = (packed >> 32) as usize;
+                let len = (packed & 0xFFFF_FFFF) as usize;
+                let raw = unsafe { std::slice::from_raw_parts(base_ptr.add(ptr), len) };
+                let text = String::from_utf8_lossy(raw);
+                println!("  Pipeline sink summaries (slot {}):", p.summary_slot);
+                for line in text.lines() {
+                    println!("    {}", line);
                 }
             }
         }

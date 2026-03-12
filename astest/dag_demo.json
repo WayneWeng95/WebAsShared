@@ -114,6 +114,31 @@
     { "id": "w91", "deps": [], "kind": { "WasmVoid": { "func": "writer", "arg": 91 } } },
 
     {
+      "id": "stream_pipeline_demo",
+      "deps": [],
+      "kind": {
+        "StreamPipeline": {
+          "rounds": 5,
+          "source_slot": 200,
+          "filter_slot": 201,
+          "transform_slot": 202,
+          "summary_slot": 203
+        }
+      }
+    },
+
+    {
+      "id": "watch_pipeline_summary",
+      "deps": ["stream_pipeline_demo"],
+      "kind": {
+        "Watch": {
+          "stream": 203,
+          "output": "/tmp/dag_demo_out/pipeline_summary.txt"
+        }
+      }
+    },
+
+    {
       "id": "watch_stream_aggregate",
       "deps": ["aggregate"],
       "kind": {
