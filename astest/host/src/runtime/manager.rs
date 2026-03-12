@@ -140,6 +140,16 @@ pub fn run_manager() -> Result<()> {
         .arg("shuffle_fixedmap_heavy_test").arg(&heavy_fm_shm_str).arg("0")
         .spawn()?.wait()?;
 
+    // Heavy Test 4: BroadcastConnection 20→10
+    // 20 producers × 150 records each; every upstream reaches every downstream.
+    // All 10 slots must report exactly 3000 records with identical content.
+    let broadcast_shm = Path::new("/dev/shm").join("shm_broadcast_heavy");
+    let broadcast_shm_str = broadcast_shm.to_str().unwrap().to_string();
+    format_shared_memory(&broadcast_shm_str)?;
+    Command::new(&myself)
+        .arg("broadcast_heavy_test").arg(&broadcast_shm_str).arg("0")
+        .spawn()?.wait()?;
+
     println!("[Manager] ── Routing tests completed ──\n");
     println!("[Manager] Completed.");
     Ok(())

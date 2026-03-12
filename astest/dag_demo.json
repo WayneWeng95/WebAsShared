@@ -62,6 +62,90 @@
     { "id": "count_rr_slot24",        "deps": ["shuffle_rr"],     "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 24 } } },
     { "id": "count_rr_slot25",        "deps": ["shuffle_rr"],     "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 25 } } },
     { "id": "verify_fixedmap_slot26", "deps": ["shuffle_fixedmap"],"kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 26 } } },
-    { "id": "verify_fixedmap_slot27", "deps": ["shuffle_fixedmap"],"kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 27 } } }
+    { "id": "verify_fixedmap_slot27", "deps": ["shuffle_fixedmap"],"kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 27 } } },
+
+    { "id": "p30", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 30 } } },
+    { "id": "p31", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 31 } } },
+    { "id": "p32", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 32 } } },
+    { "id": "p33", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 33 } } },
+    { "id": "p34", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 34 } } },
+    { "id": "p35", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 35 } } },
+    { "id": "p36", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 36 } } },
+    { "id": "p37", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 37 } } },
+    { "id": "p38", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 38 } } },
+    { "id": "p39", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 39 } } },
+    { "id": "p40", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 40 } } },
+    { "id": "p41", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 41 } } },
+    { "id": "p42", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 42 } } },
+    { "id": "p43", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 43 } } },
+    { "id": "p44", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 44 } } },
+    { "id": "p45", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 45 } } },
+    { "id": "p46", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 46 } } },
+    { "id": "p47", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 47 } } },
+    { "id": "p48", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 48 } } },
+    { "id": "p49", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream_heavy", "arg": 49 } } },
+
+    {
+      "id": "shuffle_broadcast",
+      "deps": ["p30","p31","p32","p33","p34","p35","p36","p37","p38","p39",
+               "p40","p41","p42","p43","p44","p45","p46","p47","p48","p49"],
+      "kind": { "Shuffle": {
+        "upstream": [30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49],
+        "downstream": [50,51,52,53,54,55,56,57,58,59],
+        "policy": { "type": "Broadcast" }
+      } }
+    },
+
+    { "id": "count_broadcast_slot50", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 50 } } },
+    { "id": "count_broadcast_slot51", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 51 } } },
+    { "id": "count_broadcast_slot52", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 52 } } },
+    { "id": "count_broadcast_slot53", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 53 } } },
+    { "id": "count_broadcast_slot54", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 54 } } },
+    { "id": "count_broadcast_slot55", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 55 } } },
+    { "id": "count_broadcast_slot56", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 56 } } },
+    { "id": "count_broadcast_slot57", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 57 } } },
+    { "id": "count_broadcast_slot58", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 58 } } },
+    { "id": "count_broadcast_slot59", "deps": ["shuffle_broadcast"], "kind": { "WasmU32":    { "func": "count_stream_records", "arg": 59 } } },
+
+    { "id": "dump_broadcast_slot50",  "deps": ["count_broadcast_slot50"], "kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 50 } } },
+    { "id": "dump_broadcast_slot59",  "deps": ["count_broadcast_slot59"], "kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 59 } } },
+
+    { "id": "w90", "deps": [], "kind": { "WasmVoid": { "func": "writer", "arg": 90 } } },
+    { "id": "w91", "deps": [], "kind": { "WasmVoid": { "func": "writer", "arg": 91 } } },
+
+    {
+      "id": "watch_stream_aggregate",
+      "deps": ["aggregate"],
+      "kind": {
+        "Watch": {
+          "stream": 21,
+          "output": "/tmp/dag_demo_out/watch_stream_21_aggregate.txt"
+        }
+      }
+    },
+
+    {
+      "id": "watch_stream_worker",
+      "deps": ["w90"],
+      "kind": {
+        "Watch": {
+          "stream": 90,
+          "output": "/tmp/dag_demo_out/watch_stream_90_worker.txt"
+        }
+      }
+    },
+
+    {
+      "id": "persist_comprehensive",
+      "deps": ["w90", "w91", "aggregate", "dump_broadcast_slot50", "dump_broadcast_slot59"],
+      "kind": {
+        "Persist": {
+          "output_dir": "/tmp/dag_demo_out",
+          "atomics": true,
+          "stream_slots": [90, 91, 21, 50],
+          "shared_state": false
+        }
+      }
+    }
   ]
 }

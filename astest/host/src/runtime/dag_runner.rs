@@ -25,12 +25,36 @@
 //! - `Bridge`     — `HostStream::bridge(from, to)` (zero-copy 1→1 wire)
 //! - `Aggregate`  — `AggregateConnection::new(upstream, downstream).bridge()`
 //! - `Shuffle`    — `ShuffleConnection::new(upstream, downstream, policy).bridge()`
+//! - `Persist`    — snapshot SHM data to storage in a background thread
+//! - `Watch`      — lightweight: persist one stream slot or one shared-state entry
+//!
+//! ## Watch node (lightweight)
+//! ```json
+//! { "kind": { "Watch": { "stream": 50, "output": "/tmp/out/slot50.txt" } } }
+//! { "kind": { "Watch": { "shared": "FuncA_Result", "output": "/tmp/out/funcA.bin" } } }
+//! ```
+//!
+//! ## Persist node
+//! ```json
+//! {
+//!   "id": "save", "deps": ["some_node"],
+//!   "kind": {
+//!     "Persist": {
+//!       "output_dir": "/tmp/dag_out",
+//!       "atomics": true,
+//!       "stream_slots": [50, 51],
+//!       "shared_state": true
+//!     }
+//!   }
+//! }
+//! ```
 //!
 //! ## Shuffle policies
 //! ```json
 //! { "type": "Modulo" }
 //! { "type": "RoundRobin" }
 //! { "type": "FixedMap", "map": [[0,1],[1,0]], "default_slot": 0 }
+//! { "type": "Broadcast" }
 //! ```
 
 use anyhow::{anyhow, Result};
@@ -40,9 +64,10 @@ use std::fs::OpenOptions;
 use wasmtime::*;
 
 use crate::policy::{FixedMapPartition, ModuloPartition, RoundRobinPartition};
-use crate::routing::shuffle::{AggregateConnection, ShuffleConnection};
+use crate::routing::shuffle::{AggregateConnection, BroadcastConnection, ShuffleConnection};
 use crate::routing::stream::HostStream;
 use crate::runtime::worker::{create_wasmtime_engine, setup_vma_environment, WorkerState};
+use crate::runtime::writer::{PersistenceOptions, PersistenceWriter};
 use crate::shm::format_shared_memory;
 
 const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";
@@ -80,6 +105,10 @@ pub enum NodeKind {
     Aggregate(AggregateParams),
     /// `ShuffleConnection::new(upstream, downstream, policy).bridge()` — N→M routing.
     Shuffle(ShuffleParams),
+    /// Snapshot SHM data and flush to storage in a background thread.
+    Persist(PersistParams),
+    /// Lightweight: persist a single stream slot or a single shared-state entry.
+    Watch(WatchParams),
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,6 +147,36 @@ pub enum PolicySpec {
         #[serde(default)]
         default_slot: usize,
     },
+    /// Fan-out: every upstream is merged into every downstream slot.
+    Broadcast,
+}
+
+/// Lightweight single-item watch: persists exactly one stream slot or one
+/// named shared-state entry to the given output file path.
+/// Set exactly one of `stream` or `shared`; the other must be absent.
+#[derive(Debug, Deserialize)]
+pub struct WatchParams {
+    /// Exact output file path (parent directory is created if absent).
+    pub output: String,
+    /// Stream slot ID to persist (mutually exclusive with `shared`).
+    pub stream: Option<usize>,
+    /// Named shared-state entry to persist (mutually exclusive with `stream`).
+    pub shared: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PersistParams {
+    /// Directory where output files are written (created if absent).
+    pub output_dir: String,
+    /// Save all named atomic variables from the registry.
+    #[serde(default)]
+    pub atomics: bool,
+    /// Stream slot IDs whose records should be persisted.
+    #[serde(default)]
+    pub stream_slots: Vec<usize>,
+    /// Save all Manager-committed shared-state entries from the registry.
+    #[serde(default)]
+    pub shared_state: bool,
 }
 
 // ─── Topological sort (Kahn's algorithm) ─────────────────────────────────────
@@ -211,12 +270,22 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
     let node_ids: Vec<&str> = order.iter().map(|&i| dag.nodes[i].id.as_str()).collect();
     println!("[DAG] Execution order: {}", node_ids.join(" → "));
 
+    // Create a shared persistence writer if any Persist node is present.
+    let mut persist_writer = if dag.nodes.iter().any(|n| matches!(n.kind, NodeKind::Persist(_) | NodeKind::Watch(_))) {
+        Some(PersistenceWriter::new())
+    } else {
+        None
+    };
+
     // Run each node
     for idx in order {
         let node = &dag.nodes[idx];
         println!("[DAG] ── Node: {} ──", node.id);
-        execute_node(node, &mut store, &instance, &memory)?;
+        execute_node(node, &mut store, &instance, &memory, persist_writer.as_ref())?;
     }
+
+    // Wait for all background persistence writes to complete before returning.
+    if let Some(ref mut w) = persist_writer { w.join(); }
 
     println!("[DAG] All nodes completed.");
     Ok(())
@@ -229,6 +298,7 @@ fn execute_node(
     store: &mut Store<WorkerState>,
     instance: &Instance,
     memory: &Memory,
+    persist_writer: Option<&PersistenceWriter>,
 ) -> Result<()> {
     let splice_addr = store.data().splice_addr;
     let base_ptr = memory.data_ptr(&*store);
@@ -292,6 +362,47 @@ fn execute_node(
             println!("  AggregateConnection({:?} → {}): done", p.upstream, p.downstream);
         }
 
+        // ── Lightweight single-item watch ─────────────────────────────────────
+        NodeKind::Watch(p) => {
+            match persist_writer {
+                None => println!("  Watch: no writer available — skipped"),
+                Some(w) => match (&p.stream, &p.shared) {
+                    (Some(slot), None) => {
+                        let slot = *slot;
+                        w.watch_stream(splice_addr, slot, &p.output);
+                        println!("  Watch stream {} → \"{}\" [background]", slot, p.output);
+                    }
+                    (None, Some(name)) => {
+                        w.watch_shared(splice_addr, name, &p.output);
+                        println!("  Watch shared \"{}\" → \"{}\" [background]", name, p.output);
+                    }
+                    _ => println!("  Watch: set exactly one of `stream` or `shared`"),
+                },
+            }
+        }
+
+        // ── Background persistence snapshot ───────────────────────────────────
+        NodeKind::Persist(p) => {
+            let opts = PersistenceOptions {
+                output_dir:   p.output_dir.clone(),
+                atomics:      p.atomics,
+                stream_slots: p.stream_slots.clone(),
+                shared_state: p.shared_state,
+            };
+            match persist_writer {
+                Some(w) => {
+                    w.snapshot(splice_addr, &opts);
+                    println!(
+                        "  Persist(atomics={}, streams={:?}, shared={}) → \"{}\" [background]",
+                        p.atomics, p.stream_slots, p.shared_state, p.output_dir
+                    );
+                }
+                None => {
+                    println!("  Persist: no writer available — skipped");
+                }
+            }
+        }
+
         // ── Host routing: ShuffleConnection N→M ──────────────────────────────
         NodeKind::Shuffle(p) => {
             let policy_name = match &p.policy {
@@ -314,6 +425,11 @@ fn execute_node(
                         FixedMapPartition::new(hmap, *default_slot),
                     ).bridge(splice_addr);
                     "FixedMap"
+                }
+                PolicySpec::Broadcast => {
+                    BroadcastConnection::new(&p.upstream, &p.downstream)
+                        .bridge(splice_addr);
+                    "Broadcast"
                 }
             };
             println!(

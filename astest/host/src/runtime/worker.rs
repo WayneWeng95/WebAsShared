@@ -12,7 +12,7 @@ use common::{RegistryEntry, INITIAL_SHM_SIZE, REGISTRY_OFFSET, REGISTRY_SIZE, TA
 use crate::runtime::organizer::BucketOrganizer;
 use crate::policy::{LastWriteWinsPolicy, MajorityWinsPolicy, MaxIdWinsPolicy, MinIdWinsPolicy};
 use crate::routing::stream::HostStream;
-use crate::routing::shuffle::{AggregateConnection, ShuffleConnection};
+use crate::routing::shuffle::{AggregateConnection, BroadcastConnection, ShuffleConnection};
 use crate::policy::{ModuloPartition, RoundRobinPartition, FixedMapPartition};
 
 const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";
@@ -670,6 +670,71 @@ pub fn run_worker(role: &str, shm_path: &str, id: u32) -> Result<()> {
                 }
             }
             println!("[ShuffleFMHeavyTest] Done.\n");
+        }
+
+        // ─────────────────────────────────────────────────────────────────
+        // Routing test (heavy): BroadcastConnection 20→10
+        //
+        // 20 producers each write 150 records (~70 bytes each) to slots 0-19,
+        // producing 2-3 page chains per upstream slot (~147 KB total).
+        //
+        // BroadcastConnection fans every upstream into every downstream:
+        //   slots 20-29 each receive the full merged chain from all 20 producers
+        //   → 20 × 150 = 3000 records per downstream slot
+        //
+        // Verification:
+        //   all 10 downstream slots: 3000 records each
+        //   spot-checks on slots 20 and 29: first record p=0,s=0000;
+        //                                   last  record p=19,s=0149
+        // ─────────────────────────────────────────────────────────────────
+        "broadcast_heavy_test" => {
+            println!("\n[BroadcastHeavyTest] === BroadcastConnection 20→10 (150 records × 20 producers) ===");
+            let produce = instance.get_typed_func::<u32, ()>(&mut store, "produce_stream_heavy")?;
+            let count   = instance.get_typed_func::<u32, u32>(&mut store, "count_stream_records")?;
+            let dump    = instance.get_typed_func::<u32, u64>(&mut store, "dump_stream_records")?;
+
+            // Step 1: 20 producers write to slots 0-19
+            for i in 0..20u32 { produce.call(&mut store, i)?; }
+            println!("[BroadcastHeavyTest] 20 producers wrote 150 records each to slots 0-19  \
+                      (~{} KB total).", 20 * 150 * 70 / 1024);
+
+            // Step 2: broadcast all 20 upstreams into all 10 downstream slots
+            let upstreams:   Vec<usize> = (0..20).collect();
+            let downstreams: Vec<usize> = (20..30).collect();
+            let splice_addr = store.data().splice_addr;
+            BroadcastConnection::new(&upstreams, &downstreams).bridge(splice_addr);
+            println!("[BroadcastHeavyTest] BroadcastConnection::bridge([0..19] → [20..29]) done.");
+
+            // Step 3: verify all 10 downstream slots — each must hold exactly 3000 records
+            println!("[BroadcastHeavyTest] Downstream summary (expect 3000 records each):");
+            let base_ptr = memory.data_ptr(&store);
+            let mut all_ok = true;
+            for slot in 20u32..30 {
+                let n = count.call(&mut store, slot)?;
+                let ok = n == 3000;
+                all_ok &= ok;
+                println!("  slot {:2}: {:4} records  {}", slot, n, if ok { "✓" } else { "FAIL" });
+            }
+
+            // Step 4: spot-check first (slot 20) and last (slot 29) downstream —
+            //         both must start at p=0,s=0000 and end at p=19,s=0149
+            for spot in [20u32, 29u32] {
+                let packed = dump.call(&mut store, spot)?;
+                if packed > 0 {
+                    let ptr = (packed >> 32) as usize;
+                    let len = (packed & 0xFFFF_FFFF) as usize;
+                    let raw = unsafe { std::slice::from_raw_parts(base_ptr.add(ptr), len) };
+                    let s   = String::from_utf8_lossy(raw);
+                    let lines: Vec<&str> = s.lines().collect();
+                    let total = lines.len();
+                    println!("[BroadcastHeavyTest] Spot-check slot {} (expect first=p=0,s=0000 / last=p=19,s=0149):", spot);
+                    for (i, l) in lines.iter().take(3).enumerate() { println!("  [{:3}] {}", i, l); }
+                    if total > 6 { println!("  ... {} records omitted ...", total - 6); }
+                    for i in total.saturating_sub(3)..total { println!("  [{:3}] {}", i, lines[i]); }
+                }
+            }
+            println!("[BroadcastHeavyTest] Overall: {}", if all_ok { "✓ ALL PASS" } else { "FAIL" });
+            println!("[BroadcastHeavyTest] Done.\n");
         }
 
         _ => eprintln!("Unknown role: {}", role),
