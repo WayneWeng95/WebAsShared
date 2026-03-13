@@ -169,7 +169,7 @@ fn take_snapshot(splice_addr: usize, opts: &PersistenceOptions) -> Snapshot {
         let reg_base  = splice_addr + REGISTRY_OFFSET as usize;
         let atom_base = splice_addr + ATOMIC_ARENA_OFFSET as usize;
         for i in 0..count {
-            let entry = unsafe { &*((reg_base + i * 64) as *const RegistryEntry) };
+            let entry = unsafe { &*((reg_base + i * std::mem::size_of::<RegistryEntry>()) as *const RegistryEntry) };
             let name_len = entry.name.iter().position(|&b| b == 0).unwrap_or(52);
             let name = String::from_utf8_lossy(&entry.name[..name_len]).into_owned();
             // AtomicU64 values are packed consecutively in the atomic arena.
@@ -191,7 +191,7 @@ fn take_snapshot(splice_addr: usize, opts: &PersistenceOptions) -> Snapshot {
     if opts.shared_state {
         let reg_base = splice_addr + REGISTRY_OFFSET as usize;
         for i in 0..count {
-            let entry = unsafe { &*((reg_base + i * 64) as *const RegistryEntry) };
+            let entry = unsafe { &*((reg_base + i * std::mem::size_of::<RegistryEntry>()) as *const RegistryEntry) };
             let payload_offset = entry.payload_offset.load(Ordering::Acquire);
             if payload_offset == 0 { continue; }
             let total_len = entry.payload_len.load(Ordering::Acquire) as usize;
@@ -215,7 +215,7 @@ fn take_snapshot(splice_addr: usize, opts: &PersistenceOptions) -> Snapshot {
 // -----------------------------------------------------------------------------
 
 /// Walks the length-prefixed page chain for `slot` and returns every record.
-fn read_stream_records(base: usize, sb: &Superblock, slot: usize) -> Vec<Vec<u8>> {
+pub(super) fn read_stream_records(base: usize, sb: &Superblock, slot: usize) -> Vec<Vec<u8>> {
     let head = sb.writer_heads[slot].load(Ordering::Acquire);
     if head == 0 { return Vec::new(); }
 
@@ -246,10 +246,10 @@ fn read_shared_payload(base: usize, payload_offset: u32, total_len: usize) -> Ve
         let ptr = (base + current as usize) as *const u8;
         let (header_size, next) = if is_head {
             let hdr = unsafe { &*(ptr as *const ChainNodeHeader) };
-            (20usize, hdr.next_payload_page)
+            (std::mem::size_of::<ChainNodeHeader>(), hdr.next_payload_page)
         } else {
             let next = unsafe { *(ptr as *const u32) };
-            (4usize, next)
+            (std::mem::size_of::<u32>(), next)
         };
         let capacity = PAGE_SIZE as usize - header_size;
         let n = capacity.min(total_len - bytes_read);

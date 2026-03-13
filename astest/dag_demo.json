@@ -1,5 +1,6 @@
 {
   "shm_path": "/dev/shm/dag_demo",
+  "log_level": "debug",
   "nodes": [
 
     { "id": "p0", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 0 } } },
@@ -170,6 +171,142 @@
           "stream_slots": [90, 91, 21, 50],
           "shared_state": false
         }
+      }
+    },
+
+    {
+      "_comment": "── FileDispatch demos ──────────────────────────────────────────────────",
+      "id": "dispatch_file_equal",
+      "deps": [],
+      "kind": {
+        "FileDispatch": {
+          "path": "../target/wasm32-unknown-unknown/release/guest.wasm",
+          "workers": 4,
+          "policy": { "type": "Equal" }
+        }
+      }
+    },
+
+    {
+      "id": "dispatch_file_fixedsize",
+      "deps": [],
+      "kind": {
+        "FileDispatch": {
+          "path": "../target/wasm32-unknown-unknown/release/guest.wasm",
+          "workers": 4,
+          "policy": { "type": "FixedSize", "max_bytes": 16384 }
+        }
+      }
+    },
+
+    {
+      "id": "dispatch_file_lineboundary",
+      "deps": [],
+      "kind": {
+        "FileDispatch": {
+          "path": "../dag_demo.json",
+          "workers": 3,
+          "policy": { "type": "LineBoundary" }
+        }
+      }
+    },
+
+    {
+      "_comment": "── OwnedDispatch demo: inline payloads simulating worker-produced data ─",
+      "id": "dispatch_owned_basic",
+      "deps": [],
+      "kind": {
+        "OwnedDispatch": {
+          "workers": 3,
+          "items": [
+            "worker_0_result: processed 42 records",
+            "worker_1_result: processed 37 records",
+            "worker_2_result: processed 51 records",
+            "worker_3_result: processed 29 records",
+            "worker_4_result: processed 44 records",
+            "worker_5_result: processed 38 records",
+            "worker_6_result: processed 55 records"
+          ]
+        }
+      }
+    },
+
+    {
+      "id": "dispatch_owned_uneven",
+      "deps": [],
+      "kind": {
+        "OwnedDispatch": {
+          "workers": 4,
+          "items": [
+            "chunk_A: header section data",
+            "chunk_B: body section data"
+          ]
+        }
+      }
+    },
+
+    {
+      "_comment": "── fan_out demo ────────────────────────────────────────────────────────",
+      "_slots": "fan_out60: primary=60, secondary_A=160, secondary_B=260",
+      "id": "fan_out60",
+      "deps": [],
+      "kind": { "WasmVoid": { "func": "produce_fan_out", "arg": 60 } }
+    },
+    {
+      "_slots": "fan_out61: primary=61, secondary_A=161, secondary_B=261",
+      "id": "fan_out61",
+      "deps": [],
+      "kind": { "WasmVoid": { "func": "produce_fan_out", "arg": 61 } }
+    },
+
+    {
+      "id": "verify_fan_out_primary60",
+      "deps": ["fan_out60"],
+      "kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 60 } }
+    },
+    {
+      "id": "verify_fan_out_secondary_A160",
+      "deps": ["fan_out60"],
+      "kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 160 } }
+    },
+    {
+      "id": "verify_fan_out_secondary_B260",
+      "deps": ["fan_out60"],
+      "kind": { "WasmFatPtr": { "func": "dump_stream_records", "arg": 260 } }
+    },
+    {
+      "id": "count_fan_out_secondary_A161",
+      "deps": ["fan_out61"],
+      "kind": { "WasmU32": { "func": "count_stream_records", "arg": 161 } }
+    },
+    {
+      "id": "count_fan_out_secondary_B261",
+      "deps": ["fan_out61"],
+      "kind": { "WasmU32": { "func": "count_stream_records", "arg": 261 } }
+    },
+
+    {
+      "_comment": "── write_final_output demo — multiple workers append to OUTPUT_SLOT_ID ─",
+      "id": "final_out70",
+      "deps": [],
+      "kind": { "WasmVoid": { "func": "write_final_output", "arg": 70 } }
+    },
+    {
+      "id": "final_out71",
+      "deps": [],
+      "kind": { "WasmVoid": { "func": "write_final_output", "arg": 71 } }
+    },
+    {
+      "id": "final_out72",
+      "deps": [],
+      "kind": { "WasmVoid": { "func": "write_final_output", "arg": 72 } }
+    },
+
+    {
+      "id": "save_final_output",
+      "deps": ["final_out70", "final_out71", "final_out72"],
+      "kind": {
+        "Output": { "path": "/tmp/dag_demo_out/final_output.txt" }
       }
     }
   ]

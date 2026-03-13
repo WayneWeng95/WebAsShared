@@ -56,6 +56,15 @@
 //! { "type": "FixedMap", "map": [[0,1],[1,0]], "default_slot": 0 }
 //! { "type": "Broadcast" }
 //! ```
+//!
+//! ## Logging
+//! Set the optional `"log_level"` field to enable host-side logging into the
+//! SHM LOG_ARENA (readable alongside guest log output via the `func_b` reader):
+//! ```json
+//! { "shm_path": "...", "log_level": "info", "nodes": [...] }
+//! ```
+//! Accepted values (case-insensitive): `"debug"`, `"info"`, `"warn"`, `"error"`.
+//! Omit the field (or set it to `"off"`) to disable logging entirely.
 
 use anyhow::{anyhow, Result};
 use serde::Deserialize;
@@ -63,9 +72,18 @@ use std::collections::{HashMap, VecDeque};
 use std::fs::OpenOptions;
 use wasmtime::*;
 
-use crate::policy::{FixedMapPartition, ModuloPartition, RoundRobinPartition};
-use crate::routing::shuffle::{AggregateConnection, BroadcastConnection, ShuffleConnection};
+use std::path::Path;
+
+use crate::policy::{EqualSlice, FixedMapPartition, FixedSizeSlice, LineBoundarySlice, ModuloPartition, RoundRobinPartition};
+use crate::routing::aggregate::AggregateConnection;
+use crate::routing::broadcast::BroadcastConnection;
+use crate::routing::dispatch::{FileDispatcher, OwnedSlice};
+use crate::routing::shuffle::ShuffleConnection;
 use crate::routing::stream::HostStream;
+use crate::runtime::loader::load_file;
+use crate::runtime::logger::{HostLogger, Level};
+use crate::runtime::outputer::Outputer;
+use crate::runtime::slicer::Slicer;
 use crate::runtime::worker::{create_wasmtime_engine, setup_vma_environment, WorkerState};
 use crate::runtime::writer::{PersistenceOptions, PersistenceWriter};
 use crate::shm::format_shared_memory;
@@ -78,6 +96,10 @@ const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";
 pub struct Dag {
     /// Path to the SHM file; created and formatted automatically.
     pub shm_path: String,
+    /// Optional log level for host-side SHM logging.
+    /// Accepted: `"debug"`, `"info"`, `"warn"`, `"error"`, `"off"` (default).
+    #[serde(default)]
+    pub log_level: Option<String>,
     pub nodes: Vec<DagNode>,
 }
 
@@ -112,6 +134,12 @@ pub enum NodeKind {
     /// Multi-round streaming pipeline: source → filter → transform → sink,
     /// each stage advancing its own SHM-atomic cursor each round.
     StreamPipeline(StreamPipelineParams),
+    /// Load a file, slice it with a policy, and dispatch slices to N workers.
+    FileDispatch(FileDispatchParams),
+    /// Dispatch a list of inline owned byte payloads to N workers.
+    OwnedDispatch(OwnedDispatchParams),
+    /// Read the reserved output slot and save all records to a file.
+    Output(OutputParams),
 }
 
 #[derive(Debug, Deserialize)]
@@ -206,6 +234,136 @@ pub struct PersistParams {
     pub shared_state: bool,
 }
 
+/// Slicing policy selector for `FileDispatch` nodes.
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type")]
+pub enum SlicePolicySpec {
+    /// Split into at most `workers` equal byte ranges.
+    Equal,
+    /// Split on newlines; never cuts a line.
+    LineBoundary,
+    /// Split into chunks of at most `max_bytes` bytes.
+    FixedSize { max_bytes: usize },
+}
+
+/// Load a file from `path`, slice it according to `policy`, and dispatch the
+/// resulting `FileSlice`s to `workers` parallel workers.  Each worker logs
+/// its assignment summary.
+#[derive(Debug, Deserialize)]
+pub struct FileDispatchParams {
+    /// Path to the file to load and slice.
+    pub path: String,
+    /// Number of parallel workers.
+    pub workers: usize,
+    /// How to divide the file into slices.
+    pub policy: SlicePolicySpec,
+}
+
+/// Dispatch a list of inline string payloads as `OwnedSlice`s to `workers`
+/// parallel workers.  Exercises the generic `DispatchSlice` path without
+/// requiring an on-disk file.
+#[derive(Debug, Deserialize)]
+pub struct OwnedDispatchParams {
+    /// Number of parallel workers.
+    pub workers: usize,
+    /// Payload strings; each becomes one `OwnedSlice` in index order.
+    pub items: Vec<String>,
+}
+
+/// Read all records from the reserved output slot (written by the guest via
+/// `ShmApi::write_output`) and save them to `path`, one record per line.
+#[derive(Debug, Deserialize)]
+pub struct OutputParams {
+    /// Destination file path (parent directories are created if absent).
+    pub path: String,
+}
+
+// ─── Logger helpers ───────────────────────────────────────────────────────────
+
+/// Parse a user-supplied level string into a `Level`.
+/// Returns `None` for `"off"` or an unrecognised value (logging disabled).
+fn parse_level(s: &str) -> Option<Level> {
+    match s.to_ascii_lowercase().as_str() {
+        "debug" => Some(Level::Debug),
+        "info"  => Some(Level::Info),
+        "warn"  => Some(Level::Warn),
+        "error" => Some(Level::Error),
+        _       => None,
+    }
+}
+
+// ─── Slot conflict validation ─────────────────────────────────────────────────
+
+/// Scan every node in the DAG for stream slot IDs that collide with
+/// `OUTPUT_SLOT_ID` and return an error listing all violations before any
+/// execution begins.
+///
+/// Only explicitly declared slot IDs are checked (routing nodes, pipeline
+/// slots, Watch/Persist lists).  WASM node `arg` values are **not** checked
+/// because they are not always slot identifiers — misuse there is caught at
+/// runtime by the guest `debug_assert` in `append_stream_data`.
+fn validate_dag(dag: &Dag) -> Result<()> {
+    use common::OUTPUT_SLOT_ID;
+    let reserved = OUTPUT_SLOT_ID as usize;
+    let mut conflicts: Vec<String> = Vec::new();
+
+    for node in &dag.nodes {
+        let mut slots: Vec<usize> = Vec::new();
+
+        match &node.kind {
+            NodeKind::Bridge(p) => {
+                slots.push(p.from);
+                slots.push(p.to);
+            }
+            NodeKind::Aggregate(p) => {
+                slots.extend_from_slice(&p.upstream);
+                slots.push(p.downstream);
+            }
+            NodeKind::Shuffle(p) => {
+                slots.extend_from_slice(&p.upstream);
+                slots.extend_from_slice(&p.downstream);
+            }
+            NodeKind::StreamPipeline(p) => {
+                slots.extend_from_slice(&[
+                    p.source_slot as usize,
+                    p.filter_slot as usize,
+                    p.transform_slot as usize,
+                    p.summary_slot as usize,
+                ]);
+            }
+            NodeKind::Watch(p) => {
+                if let Some(s) = p.stream { slots.push(s); }
+            }
+            NodeKind::Persist(p) => {
+                slots.extend_from_slice(&p.stream_slots);
+            }
+            // WasmVoid/WasmU32/WasmFatPtr/FileDispatch/OwnedDispatch/Output:
+            // no explicitly declared stream slots to validate.
+            _ => {}
+        }
+
+        for slot in slots {
+            if slot == reserved {
+                conflicts.push(format!(
+                    "node '{}' references slot {} which is reserved as OUTPUT_SLOT_ID",
+                    node.id, reserved
+                ));
+            }
+        }
+    }
+
+    if conflicts.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!(
+            "DAG uses reserved OUTPUT_SLOT_ID ({}) in {} node(s):\n  {}",
+            reserved,
+            conflicts.len(),
+            conflicts.join("\n  ")
+        ))
+    }
+}
+
 // ─── Topological sort (Kahn's algorithm) ─────────────────────────────────────
 
 fn topo_sort(nodes: &[DagNode]) -> Result<Vec<usize>> {
@@ -273,6 +431,9 @@ pub fn run_dag_json(json: &str) -> Result<()> {
 pub fn run_dag(dag: &Dag) -> Result<()> {
     println!("[DAG] Starting — shm: {}", dag.shm_path);
 
+    // Reject any DAG that references the reserved output slot before touching SHM.
+    validate_dag(dag)?;
+
     // Format a fresh SHM region so prior data never leaks between runs.
     format_shared_memory(&dag.shm_path)?;
 
@@ -292,10 +453,24 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
     let module = Module::from_file(&engine, WASM_PATH)?;
     let instance = linker.instantiate(&mut store, &module)?;
 
+    // Build an optional logger now that splice_addr is known.
+    let splice_addr = store.data().splice_addr;
+    let logger: Option<HostLogger> = dag.log_level
+        .as_deref()
+        .and_then(parse_level)
+        .map(|lvl| HostLogger::with_level(splice_addr, lvl));
+
+    if let Some(ref lg) = logger {
+        lg.info("DAG", &format!("starting — shm: {}", dag.shm_path));
+    }
+
     // Topological order
     let order = topo_sort(&dag.nodes)?;
     let node_ids: Vec<&str> = order.iter().map(|&i| dag.nodes[i].id.as_str()).collect();
     println!("[DAG] Execution order: {}", node_ids.join(" → "));
+    if let Some(ref lg) = logger {
+        lg.info("DAG", &format!("execution order: {}", node_ids.join(" → ")));
+    }
 
     // Create a shared persistence writer if any Persist node is present.
     let mut persist_writer = if dag.nodes.iter().any(|n| matches!(n.kind, NodeKind::Persist(_) | NodeKind::Watch(_))) {
@@ -308,12 +483,15 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
     for idx in order {
         let node = &dag.nodes[idx];
         println!("[DAG] ── Node: {} ──", node.id);
-        execute_node(node, &mut store, &instance, &memory, persist_writer.as_ref())?;
+        execute_node(node, &mut store, &instance, &memory, persist_writer.as_ref(), logger)?;
     }
 
     // Wait for all background persistence writes to complete before returning.
     if let Some(ref mut w) = persist_writer { w.join(); }
 
+    if let Some(ref lg) = logger {
+        lg.info("DAG", "all nodes completed");
+    }
     println!("[DAG] All nodes completed.");
     Ok(())
 }
@@ -326,29 +504,47 @@ fn execute_node(
     instance: &Instance,
     memory: &Memory,
     persist_writer: Option<&PersistenceWriter>,
+    logger: Option<HostLogger>,
 ) -> Result<()> {
     let splice_addr = store.data().splice_addr;
     let base_ptr = memory.data_ptr(&*store);
 
+    // Shorthand: log at info level tagged with the node id.
+    let log = |msg: &str| {
+        if let Some(lg) = logger {
+            lg.info(&node.id, msg);
+        }
+    };
+    let log_debug = |msg: &str| {
+        if let Some(lg) = logger {
+            lg.debug(&node.id, msg);
+        }
+    };
+
     match &node.kind {
         // ── WASM: void return ────────────────────────────────────────────────
         NodeKind::WasmVoid(call) => {
+            log_debug(&format!("call {}({})", call.func, call.arg));
             let func = instance.get_typed_func::<u32, ()>(&mut *store, &call.func)
                 .map_err(|e| anyhow!("[{}] no WASM export '{}': {}", node.id, call.func, e))?;
             func.call(&mut *store, call.arg)?;
             println!("  {}({}) → ()", call.func, call.arg);
+            log(&format!("{}({}) done", call.func, call.arg));
         }
 
         // ── WASM: u32 return ─────────────────────────────────────────────────
         NodeKind::WasmU32(call) => {
+            log_debug(&format!("call {}({})", call.func, call.arg));
             let func = instance.get_typed_func::<u32, u32>(&mut *store, &call.func)
                 .map_err(|e| anyhow!("[{}] no WASM export '{}': {}", node.id, call.func, e))?;
             let result = func.call(&mut *store, call.arg)?;
             println!("  {}({}) → {}", call.func, call.arg, result);
+            log(&format!("{}({}) → {}", call.func, call.arg, result));
         }
 
         // ── WASM: fat-pointer return — prints all records ─────────────────────
         NodeKind::WasmFatPtr(call) => {
+            log_debug(&format!("call {}({})", call.func, call.arg));
             let func = instance.get_typed_func::<u32, u64>(&mut *store, &call.func)
                 .map_err(|e| anyhow!("[{}] no WASM export '{}': {}", node.id, call.func, e))?;
             let packed = func.call(&mut *store, call.arg)?;
@@ -368,40 +564,47 @@ fn execute_node(
                         println!("    ... {} records omitted ...", lines.len() - 10);
                     }
                 }
+                log(&format!("{}({}) → {} records", call.func, call.arg, lines.len()));
             } else {
                 println!("  {}({}) → (empty)", call.func, call.arg);
+                log(&format!("{}({}) → empty", call.func, call.arg));
             }
         }
 
         // ── Host routing: HostStream 1→1 bridge ──────────────────────────────
         NodeKind::Bridge(p) => {
             let ok = HostStream::new(splice_addr).bridge(p.from, p.to);
-            println!(
-                "  HostStream::bridge({} → {}): {}",
-                p.from, p.to,
-                if ok { "OK" } else { "FAIL (source slot empty)" }
-            );
+            let status = if ok { "ok" } else { "fail (source slot empty)" };
+            println!("  HostStream::bridge({} → {}): {}", p.from, p.to, status);
+            log(&format!("bridge {} → {}: {}", p.from, p.to, status));
         }
 
         // ── Host routing: AggregateConnection N→1 ────────────────────────────
         NodeKind::Aggregate(p) => {
+            log(&format!("aggregate {:?} → {}", p.upstream, p.downstream));
             AggregateConnection::new(&p.upstream, p.downstream).bridge(splice_addr);
             println!("  AggregateConnection({:?} → {}): done", p.upstream, p.downstream);
+            log(&format!("aggregate {:?} → {} done", p.upstream, p.downstream));
         }
 
         // ── Lightweight single-item watch ─────────────────────────────────────
         NodeKind::Watch(p) => {
             match persist_writer {
-                None => println!("  Watch: no writer available — skipped"),
+                None => {
+                    println!("  Watch: no writer available — skipped");
+                    log("watch skipped: no persistence writer");
+                }
                 Some(w) => match (&p.stream, &p.shared) {
                     (Some(slot), None) => {
                         let slot = *slot;
                         w.watch_stream(splice_addr, slot, &p.output);
                         println!("  Watch stream {} → \"{}\" [background]", slot, p.output);
+                        log(&format!("watch stream {} → \"{}\"", slot, p.output));
                     }
                     (None, Some(name)) => {
                         w.watch_shared(splice_addr, name, &p.output);
                         println!("  Watch shared \"{}\" → \"{}\" [background]", name, p.output);
+                        log(&format!("watch shared \"{}\" → \"{}\"", name, p.output));
                     }
                     _ => println!("  Watch: set exactly one of `stream` or `shared`"),
                 },
@@ -423,9 +626,14 @@ fn execute_node(
                         "  Persist(atomics={}, streams={:?}, shared={}) → \"{}\" [background]",
                         p.atomics, p.stream_slots, p.shared_state, p.output_dir
                     );
+                    log(&format!(
+                        "persist atomics={} streams={:?} shared={} → \"{}\"",
+                        p.atomics, p.stream_slots, p.shared_state, p.output_dir
+                    ));
                 }
                 None => {
                     println!("  Persist: no writer available — skipped");
+                    log("persist skipped: no persistence writer");
                 }
             }
         }
@@ -445,6 +653,10 @@ fn execute_node(
 
             println!("  StreamPipeline: {} rounds | slots {}→{}→{}→{}",
                 p.rounds, p.source_slot, p.filter_slot, p.transform_slot, p.summary_slot);
+            log(&format!(
+                "pipeline {} rounds: slots {}→{}→{}→{}",
+                p.rounds, p.source_slot, p.filter_slot, p.transform_slot, p.summary_slot
+            ));
 
             for round in 0..p.rounds {
                 source_fn.call(&mut *store, (p.source_slot, round))?;
@@ -452,6 +664,7 @@ fn execute_node(
                 transform_fn.call(&mut *store, (p.filter_slot, p.transform_slot))?;
                 sink_fn.call(&mut *store, (p.transform_slot, p.summary_slot))?;
                 println!("    round {} complete", round);
+                log_debug(&format!("round {} complete", round));
             }
 
             // Print the accumulated per-round summaries from the sink slot.
@@ -466,6 +679,79 @@ fn execute_node(
                     println!("    {}", line);
                 }
             }
+        }
+
+        // ── Output: flush reserved output slot to a file ─────────────────────
+        NodeKind::Output(p) => {
+            let outputer = Outputer::new(splice_addr);
+            let count = outputer.save(Path::new(&p.path))
+                .map_err(|e| anyhow!("[{}] output save failed: {}", node.id, e))?;
+            println!("  Output → \"{}\" ({} records)", p.path, count);
+            log(&format!("output saved to \"{}\" ({} records)", p.path, count));
+        }
+
+        // ── FileDispatch: load file → slice → parallel workers ───────────────
+        NodeKind::FileDispatch(p) => {
+            let loaded = load_file(Path::new(&p.path))
+                .map_err(|e| anyhow!("[{}] load_file '{}': {}", node.id, p.path, e))?;
+            let slicer = Slicer::new(&loaded);
+            let slices = match &p.policy {
+                SlicePolicySpec::Equal        => slicer.slice(&EqualSlice,       p.workers),
+                SlicePolicySpec::LineBoundary => slicer.slice(&LineBoundarySlice, p.workers),
+                SlicePolicySpec::FixedSize { max_bytes } =>
+                    slicer.slice(&FixedSizeSlice { max_bytes: *max_bytes }, p.workers),
+            };
+            let policy_name = match &p.policy {
+                SlicePolicySpec::Equal        => "Equal",
+                SlicePolicySpec::LineBoundary => "LineBoundary",
+                SlicePolicySpec::FixedSize{..} => "FixedSize",
+            };
+            println!(
+                "  FileDispatch: '{}' ({} bytes) → {} slices, {} workers, policy={}",
+                p.path, loaded.len(), slices.len(), p.workers, policy_name
+            );
+            log(&format!(
+                "dispatch '{}' {} bytes {} slices {} workers policy={}",
+                p.path, loaded.len(), slices.len(), p.workers, policy_name
+            ));
+            FileDispatcher::new(p.workers).run(slices, |assignment| {
+                println!(
+                    "    [FileDispatch] worker {} → {} slices, {} bytes",
+                    assignment.worker_id, assignment.slice_count(), assignment.total_bytes()
+                );
+            });
+            println!("  FileDispatch done");
+            log("file dispatch done");
+        }
+
+        // ── OwnedDispatch: inline payloads → parallel workers ─────────────────
+        NodeKind::OwnedDispatch(p) => {
+            let slices: Vec<OwnedSlice> = p.items
+                .iter()
+                .enumerate()
+                .map(|(i, s)| OwnedSlice { index: i, data: s.as_bytes().to_vec() })
+                .collect();
+            let total: usize = slices.iter().map(|s| s.data.len()).sum();
+            println!(
+                "  OwnedDispatch: {} items ({} bytes total) → {} workers",
+                slices.len(), total, p.workers
+            );
+            log(&format!(
+                "owned dispatch {} items {} bytes {} workers",
+                slices.len(), total, p.workers
+            ));
+            FileDispatcher::new(p.workers).run(slices, |assignment| {
+                println!(
+                    "    [OwnedDispatch] worker {} → {} slices, {} bytes",
+                    assignment.worker_id, assignment.slice_count(), assignment.total_bytes()
+                );
+                for s in &assignment.slices {
+                    let text = std::str::from_utf8(&s.data).unwrap_or("<binary>");
+                    println!("      slice[{}]: {:?}", s.index, text);
+                }
+            });
+            println!("  OwnedDispatch done");
+            log("owned dispatch done");
         }
 
         // ── Host routing: ShuffleConnection N→M ──────────────────────────────
@@ -501,6 +787,10 @@ fn execute_node(
                 "  ShuffleConnection({:?} → {:?}, {}): done",
                 p.upstream, p.downstream, policy_name
             );
+            log(&format!(
+                "shuffle {:?} → {:?} policy={} done",
+                p.upstream, p.downstream, policy_name
+            ));
         }
     }
 

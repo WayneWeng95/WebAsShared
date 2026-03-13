@@ -23,6 +23,8 @@ pub struct ShmApi;
 
 mod page_allocator;
 mod atomic_arena;
+mod fan_out;
 mod log_arena;
+mod output;
 mod shared_area;
 mod stream_area;

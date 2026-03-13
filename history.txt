@@ -1,11 +1,4 @@
-    1  claude
-    2  git clone https://github.com/WayneWeng95/WebAsShared.git
-    3  curl -fsSL https://claude.ai/install.sh | bash
-    4  echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
-    5  cargo --version
-    6  cargo --version
-    7  cd WebAsShared/astest/
-    8  ls
+
     9  rustup toolchain install nightly
    10  rustup target add wasm32-unknown-unknown --toolchain nightly
    11  rustup component add rust-src --toolchain nightly
@@ -13,33 +6,7 @@
    13  cd guest/
    14  cargo +nightly build --release
    15  cd WebAsShared/astest/
-   16  ls
-   17  cd host/
-   18  ls
-   19  cargo run
-   20  claude
-   21  cd WebAsShared/memtest/
-   22  claude
-   23  cd ..
-   24  cd astest/
-   25  ls
-   26  calude
-   27  claude
-   28  cd WebAsShared/
-   41  git status
-   42  git push
-   43  cd /opt/
-   44  ls
-   45  history
-   46  history > history.txt
-   47  cd /usr/local/
-   48  ls
-   49  history > history.txt
-   50  cd /opt/
-   51  ls
-   52  cd ..
-   53  ls
-   54  sudo mkdir /opt/myapp
+
    55  cd /opt/myapp/
-   56  ls
-   57  history > history.txt
+
+   cargo run dag ../dag_demo.json 

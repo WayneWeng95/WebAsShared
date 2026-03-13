@@ -46,6 +46,11 @@ pub const BUCKET_COUNT: usize = (PAGE_SIZE / 4) as usize;
 // Shuffle
 pub const PARALLEL_THRESHOLD: usize = 50;
 
+// Reserved stream slot for final worker output.
+// The guest writes to this slot via `ShmApi::write_output`; the host Outputer
+// reads it after the producing node finishes and persists it to a file.
+pub const OUTPUT_SLOT_ID: u32 = (STREAM_SLOT_COUNT - 1) as u32;
+
 // -------------------------------------------------------
 // Shared Data Structures (Guarantees ABI matching)
 // -------------------------------------------------------

@@ -240,6 +240,42 @@ pub extern "C" fn pipeline_sink(in_slot: u32, summary_slot: u32) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Fan-out and final output demos
+//
+// `produce_fan_out(id)` — writes one record to three SHM stream slots at once
+//   using `ShmApi::fan_out`, demonstrating the guest-side multi-stream API.
+//   Slot layout: id (primary), id+100 (secondary A), id+200 (secondary B).
+//
+// `write_final_output(id)` — appends one record to the reserved output slot
+//   using `ShmApi::write_output_str`.  The host `Output` DAG node saves all
+//   accumulated records to the configured file path after this node finishes.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Fan-out demo: write the same record to three stream slots simultaneously.
+///
+/// Demonstrates `ShmApi::fan_out` — one payload, three destinations, no loop
+/// in the caller.  The host can then route slots id+100 and id+200 to
+/// downstream workers independently of the primary slot.
+#[no_mangle]
+pub extern "C" fn produce_fan_out(id: u32) {
+    let payload = alloc::format!("fan_out_src={},v={}", id, id * id);
+    ShmApi::fan_out(&[id, id + 100, id + 200], payload.as_bytes());
+}
+
+/// Final output demo: compute a result and write it to the reserved output slot.
+///
+/// Demonstrates `ShmApi::write_output_str`.  Multiple workers can call this;
+/// all records accumulate in order and are flushed to disk by the `Output` DAG
+/// node that depends on them.
+#[no_mangle]
+pub extern "C" fn write_final_output(id: u32) {
+    ShmApi::write_output_str(&alloc::format!(
+        "worker={},result={},squared={}",
+        id, id * 10, id * id
+    ));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Routing-test helpers
 //
 // These are called by the host routing-test roles (stream_bridge_test,

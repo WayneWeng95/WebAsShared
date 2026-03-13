@@ -3,7 +3,10 @@ use crate::runtime::worker::WorkerState;
 use std::sync::atomic::{AtomicU32, Ordering};
 use wasmtime::{Memory, Store};
 
-use common::{TARGET_OFFSET, REGISTRY_OFFSET,RegistryEntry};
+use common::{
+    TARGET_OFFSET, REGISTRY_OFFSET, PAGE_SIZE, BUCKET_COUNT,
+    Superblock, RegistryEntry, ChainNodeHeader,
+};
 
 pub struct BucketOrganizer<'a> {
     base_ptr: *mut u8,
@@ -11,6 +14,10 @@ pub struct BucketOrganizer<'a> {
 }
 
 impl<'a> BucketOrganizer<'a> {
+    fn superblock(&self) -> &Superblock {
+        unsafe { &*(self.base_ptr as *const Superblock) }
+    }
+
     /// Creates a new `BucketOrganizer` anchored at the shared memory base pointer.
     pub fn new(store: &mut Store<WorkerState>, memory: &Memory) -> Self {
         let base_ptr = unsafe { memory.data_ptr(store).add(TARGET_OFFSET) };
@@ -24,14 +31,12 @@ impl<'a> BucketOrganizer<'a> {
     /// select a winner, commits the winner to the Registry, and recycles all losing pages.
     /// Must be called after all writers have finished to ensure the bucket lists are stable.
     pub unsafe fn consume_all_buckets<P: ConsumptionPolicy>(&self, policy: P) {
-        let sb_ptr = self.base_ptr;
-        let map_base_atomic = sb_ptr.add(24) as *const AtomicU32;
-        let map_base_offset = (*map_base_atomic).load(Ordering::Relaxed);
+        let map_base_offset = self.superblock().shared_map_base.load(Ordering::Relaxed);
         if map_base_offset == 0 {
             return;
         }
 
-        for i in 0..1024 {
+        for i in 0..BUCKET_COUNT {
             let bucket_ptr =
                 self.base_ptr.add(map_base_offset as usize).add(i * 4) as *const AtomicU32;
             let list_head = (*bucket_ptr).swap(0, Ordering::SeqCst);
@@ -69,14 +74,13 @@ impl<'a> BucketOrganizer<'a> {
             while bytes_read < data_len as usize {
                 let page_ptr = self.base_ptr.add(lob_offset as usize);
                 let (header_size, next_page) = if is_head {
-                    let next = *(page_ptr.add(16) as *const u32);
-                    (20, next)
+                    let hdr = &*(page_ptr as *const ChainNodeHeader);
+                    (std::mem::size_of::<ChainNodeHeader>(), hdr.next_payload_page)
                 } else {
-                    let next = *(page_ptr as *const u32);
-                    (4, next)
+                    (std::mem::size_of::<u32>(), *(page_ptr as *const u32))
                 };
 
-                let read_len = std::cmp::min(data_len as usize - bytes_read, 4096 - header_size);
+                let read_len = std::cmp::min(data_len as usize - bytes_read, PAGE_SIZE as usize - header_size);
                 let chunk = std::slice::from_raw_parts(page_ptr.add(header_size), read_len);
                 payload.extend_from_slice(chunk);
 
@@ -98,7 +102,7 @@ impl<'a> BucketOrganizer<'a> {
             while free_offset != 0 {
                 let page_ptr = self.base_ptr.add(free_offset as usize);
                 let next_free = if is_head {
-                    *(page_ptr.add(16) as *const u32)
+                    (*(page_ptr as *const ChainNodeHeader)).next_payload_page
                 } else {
                     *(page_ptr as *const u32)
                 };
@@ -113,7 +117,7 @@ impl<'a> BucketOrganizer<'a> {
             let winner_node = nodes.iter().find(|n| n.writer_id == winner_id).unwrap();
 
             let registry_base = self.base_ptr.add(common::REGISTRY_OFFSET as usize);
-            let entry_ptr = registry_base.add(winner_node.registry_index as usize * 64) as *const common::RegistryEntry;
+            let entry_ptr = registry_base.add(winner_node.registry_index as usize * std::mem::size_of::<RegistryEntry>()) as *const RegistryEntry;
             let entry = &*entry_ptr;
             
             entry.payload_offset.store(winner_node.offset, Ordering::Release);
@@ -160,10 +164,7 @@ impl<'a> BucketOrganizer<'a> {
     /// Pushes a single page back onto the superblock's free list using a lock-free CAS loop
     /// (Treiber stack push). Safe to call concurrently from multiple threads.
     unsafe fn push_to_free_list(&self, page_offset: u32) {
-        let sb_ptr = self.base_ptr;
-        // Free list head is at superblock offset 28
-        let free_list_head_ptr = sb_ptr.add(28) as *const AtomicU32;
-        let free_list = &*free_list_head_ptr;
+        let free_list = &self.superblock().free_list_head;
 
         let page_ptr = self.base_ptr.add(page_offset as usize);
         let page_next_atomic = &*(page_ptr as *const AtomicU32);

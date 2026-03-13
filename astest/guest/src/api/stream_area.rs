@@ -110,7 +110,17 @@ impl ShmApi {
     }
 
     /// [Output] Append data to own private log stream (lock-free, high throughput).
+    ///
+    /// # Panics (debug builds only)
+    /// Panics if `writer_id == OUTPUT_SLOT_ID`.  Use `ShmApi::write_output` to
+    /// write to the reserved output slot; direct writes via this function are
+    /// flagged as likely misuse.
     pub fn append_stream_data(writer_id: u32, payload: &[u8]) {
+        debug_assert_ne!(
+            writer_id, common::OUTPUT_SLOT_ID,
+            "slot {} is reserved for final output — use ShmApi::write_output instead",
+            common::OUTPUT_SLOT_ID,
+        );
         Self::append_bytes_prefixed(writer_id, payload);
     }
 

@@ -1,18 +1,20 @@
 use anyhow::Result;
 use std::fs::{File, OpenOptions};
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::Ordering;
 use std::thread;
 use std::time::Duration;
 use wasmtime::*;
 
 use crate::shm::{expand_mapping, map_into_memory};
 
-use common::{RegistryEntry, INITIAL_SHM_SIZE, REGISTRY_OFFSET, REGISTRY_SIZE, TARGET_OFFSET};
+use common::{RegistryEntry, Superblock, INITIAL_SHM_SIZE, REGISTRY_OFFSET, REGISTRY_SIZE, TARGET_OFFSET};
 
 use crate::runtime::organizer::BucketOrganizer;
 use crate::policy::{LastWriteWinsPolicy, MajorityWinsPolicy, MaxIdWinsPolicy, MinIdWinsPolicy};
 use crate::routing::stream::HostStream;
-use crate::routing::shuffle::{AggregateConnection, BroadcastConnection, ShuffleConnection};
+use crate::routing::aggregate::AggregateConnection;
+use crate::routing::broadcast::BroadcastConnection;
+use crate::routing::shuffle::ShuffleConnection;
 use crate::policy::{ModuloPartition, RoundRobinPartition, FixedMapPartition};
 
 const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";
@@ -95,12 +97,9 @@ pub fn setup_vma_environment(
             entry_name[..name_len].copy_from_slice(&name_bytes[..name_len]);
 
             let host_base = unsafe { memory_handle.data_ptr(&caller).add(TARGET_OFFSET as usize) };
-
-            let lock_ptr = unsafe { host_base.add(16) as *const AtomicU32 };
-            let next_idx_ptr = unsafe { host_base.add(20) as *const AtomicU32 };
+            let superblock = unsafe { &*(host_base as *const Superblock) };
+            let lock = &superblock.registry_lock;
             let registry_base = unsafe { host_base.add(REGISTRY_OFFSET as usize) };
-
-            let lock = unsafe { &*lock_ptr };
 
             // --- Spinlock Acquire ---
             while lock
@@ -112,12 +111,13 @@ pub fn setup_vma_environment(
 
             // --- Search Registry ---
             let mut result_index = u32::MAX;
-            let next_idx_atomic = unsafe { &*next_idx_ptr };
+            let next_idx_atomic = &superblock.next_atomic_idx;
             let current_count = next_idx_atomic.load(Ordering::Relaxed);
 
             for i in 0..current_count {
-                let entry_ptr =
-                    unsafe { registry_base.add(i as usize * 64) as *const RegistryEntry };
+                let entry_ptr = unsafe {
+                    registry_base.add(i as usize * std::mem::size_of::<RegistryEntry>()) as *const RegistryEntry
+                };
                 let entry = unsafe { &*entry_ptr };
                 if entry.name == entry_name {
                     result_index = entry.index;
@@ -261,8 +261,8 @@ pub fn run_worker(role: &str, shm_path: &str, id: u32) -> Result<()> {
             let target_base = unsafe { base_ptr.add(TARGET_OFFSET) };
 
             
-            let log_offset_ptr = unsafe { target_base.add(12) as *const AtomicU32 };
-            let log_offset = unsafe { (*log_offset_ptr).load(Ordering::Acquire) };
+            let log_offset = unsafe { &*(target_base as *const Superblock) }
+                .log_offset.load(Ordering::Acquire);
 
             if log_offset > 0 {
                 let log_data_ptr = unsafe { target_base.add(common::LOG_ARENA_OFFSET as usize) };
