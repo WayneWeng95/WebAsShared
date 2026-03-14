@@ -141,59 +141,336 @@ pub extern "C" fn zip_results_node(id: u32) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Word count demo
+// Word count demo  —  parallel map-reduce (10 workers)
 //
-// Two-stage map-reduce pipeline driven by the DAG runner:
+// Slot layout:
+//   I/O  slot 0          : raw input lines (written by host Input node)
+//   stream slots 10–19   : per-worker line partitions (written by wc_distribute)
+//   stream slots 110–119 : per-worker word-frequency records (written by wc_map)
+//   stream slot  200     : merged mapper output (written by host Aggregate node)
 //
-//   Input node   → loads data/sample.txt into I/O slot 0 (one record per line)
-//   wc_map(0)    → reads each line from I/O slot 0, counts words, appends
-//                  "line=N,words=M" records to stream slot 10
-//   wc_reduce(10)→ reads all stream records from slot 10, accumulates totals,
-//                  writes "total_lines=N,total_words=M" to OUTPUT_IO_SLOT
-//   Output node  → flushes OUTPUT_IO_SLOT to /tmp/word_count_result.txt
+// DAG stages:
+//   Input          → load corpus into I/O slot 0
+//   wc_distribute  → fan lines round-robin into stream slots 10–19
+//   wc_map × 10   → each worker counts words in its slot, writes to slot+100
+//   Aggregate      → merge stream slots 110–119 → slot 200
+//   wc_reduce      → aggregate per-word counts from slot 200, write to output
+//   Output         → flush output I/O slot to file
+//
+// Record formats:
+//   wc_map  emits : "word=<w>\x1f<count>" (0x1F unit-separator avoids comma
+//                    clash with words containing none, and is never in plain text)
+//   wc_reduce emits: "<word>: <count>"  (one line per unique word, sorted)
+//                    plus a header record "=== word_count ==="
 // ─────────────────────────────────────────────────────────────────────────────
 
-const WC_STREAM_SLOT: u32 = 10;
+/// First stream slot used by the distribute stage.
+const WC_DIST_BASE: u32 = 10;
+/// Map output base: wc_map(slot) writes to stream slot `slot + WC_MAP_OUT_BASE`.
+const WC_MAP_OUT_BASE: u32 = 100;
 
-/// Map stage: read every line from I/O slot `io_slot`, count words per line,
-/// and append one `"line=N,words=M"` record to `WC_STREAM_SLOT`.
+/// Distribute: read every line from the default input I/O slot and append it
+/// round-robin to one of the `n_workers` stream slots starting at `WC_DIST_BASE`.
+/// Worker i receives all lines where `line_index % n_workers == i`.
 #[no_mangle]
-pub extern "C" fn wc_map(io_slot: u32) {
-    let lines = ShmApi::read_all_inputs_from(io_slot);
-    for (n, line) in lines.iter().enumerate() {
-        let words = core::str::from_utf8(line)
-            .unwrap_or("")
-            .split_whitespace()
-            .count();
-        let rec = alloc::format!("line={},words={}", n, words);
-        ShmApi::append_stream_data(WC_STREAM_SLOT, rec.as_bytes());
+pub extern "C" fn wc_distribute(n_workers: u32) {
+    let lines = ShmApi::read_all_inputs();
+    for (i, line) in lines.iter().enumerate() {
+        let slot = WC_DIST_BASE + (i as u32 % n_workers);
+        ShmApi::append_stream_data(slot, line);
     }
 }
 
-/// Reduce stage: read all `"line=N,words=M"` records from `stream_slot`,
-/// sum the word counts, and write one `"total_lines=N,total_words=M"` record
-/// to `OUTPUT_IO_SLOT`.
+/// Map: count occurrences of every unique word in stream slot `slot`.
+/// Each word is lower-cased and stripped of non-alphabetic characters before
+/// counting so "Rust," and "rust" tally together.
+/// Emits one `"word=<w>\x1f<count>"` record per unique word to stream slot
+/// `slot + WC_MAP_OUT_BASE`.
 #[no_mangle]
-pub extern "C" fn wc_reduce(stream_slot: u32) {
-    let records = ShmApi::read_all_stream_records(stream_slot);
-    let total_lines = records.len();
-    let mut total_words: u64 = 0;
+pub extern "C" fn wc_map(slot: u32) {
+    // Collect word → count pairs into a sorted vec (BTreeMap-style via insertion sort
+    // on a flat Vec so we stay alloc-only with no std dependency).
+    let mut counts: Vec<(alloc::string::String, u64)> = Vec::new();
+
+    let records = ShmApi::read_all_stream_records(slot);
     for rec in &records {
-        if let Ok(s) = core::str::from_utf8(rec) {
-            // format: "line=N,words=M"
-            if let Some(words_part) = s.split(',').nth(1) {
-                if let Some(val) = words_part.split('=').nth(1) {
-                    if let Ok(n) = val.parse::<u64>() {
-                        total_words += n;
-                    }
-                }
+        let line = core::str::from_utf8(rec).unwrap_or("");
+        for token in line.split_whitespace() {
+            let word: alloc::string::String = token
+                .chars()
+                .filter(|c| c.is_alphabetic())
+                .map(|c| {
+                    if c >= 'A' && c <= 'Z' { (c as u8 + 32) as char } else { c }
+                })
+                .collect();
+            if word.is_empty() { continue; }
+            // Linear scan — acceptable for per-chunk vocabulary sizes.
+            match counts.iter_mut().find(|(w, _)| w == &word) {
+                Some((_, n)) => *n += 1,
+                None => counts.push((word, 1)),
             }
         }
     }
-    ShmApi::write_output_str(&alloc::format!(
-        "total_lines={},total_words={}",
-        total_lines, total_words
-    ));
+
+    let out_slot = slot + WC_MAP_OUT_BASE;
+    for (word, count) in &counts {
+        // Use ASCII unit-separator (0x1F) as field delimiter — never appears in text.
+        let rec = alloc::format!("word={}\x1f{}", word, count);
+        ShmApi::append_stream_data(out_slot, rec.as_bytes());
+    }
+}
+
+/// Reduce: read all `"word=<w>\x1f<count>"` records from `stream_slot`,
+/// merge counts across all mappers, sort alphabetically, and write one
+/// `"<word>: <count>"` record per unique word plus a summary header to
+/// `OUTPUT_IO_SLOT`.
+#[no_mangle]
+pub extern "C" fn wc_reduce(stream_slot: u32) {
+    let mut totals: Vec<(alloc::string::String, u64)> = Vec::new();
+
+    let records = ShmApi::read_all_stream_records(stream_slot);
+    for rec in &records {
+        let s = core::str::from_utf8(rec).unwrap_or("");
+        // format: "word=<w>\x1f<count>"
+        let body = match s.strip_prefix("word=") {
+            Some(b) => b,
+            None => continue,
+        };
+        let sep = match body.find('\x1f') {
+            Some(i) => i,
+            None => continue,
+        };
+        let word = &body[..sep];
+        let count: u64 = body[sep + 1..].parse().unwrap_or(0);
+        if word.is_empty() { continue; }
+        match totals.iter_mut().find(|(w, _)| w == word) {
+            Some((_, n)) => *n += count,
+            None => totals.push((alloc::string::String::from(word), count)),
+        }
+    }
+
+    // Sort alphabetically.
+    totals.sort_by(|(a, _), (b, _)| a.as_str().cmp(b.as_str()));
+
+    let unique = totals.len();
+    let total: u64 = totals.iter().map(|(_, n)| n).sum();
+
+    ShmApi::write_output_str("=== word_count ===");
+    ShmApi::write_output_str(&alloc::format!("unique_words={}", unique));
+    ShmApi::write_output_str(&alloc::format!("total_occurrences={}", total));
+    for (word, count) in &totals {
+        ShmApi::write_output_str(&alloc::format!("{}: {}", word, count));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Image processing pipeline demo  —  4 synthetic images processed in parallel
+//
+// Each image travels through the same 5 processing stages independently so all
+// 4 pipelines run in parallel at every wave.
+//
+// Stages and slot layout:
+//   img_generate(arg)  : arg = 10-13 → write RGB  128×128 to stream slot arg
+//   img_rotate(arg)    : arg = 10-13 → read slot arg, write 90°CW to arg+10
+//   img_grayscale(arg) : arg = 20-23 → read slot arg, write gray to arg+10
+//   img_equalize(arg)  : arg = 30-33 → read slot arg, write equalized to arg+10
+//   img_blur(arg)      : arg = 40-43 → read slot arg, write blurred to arg+10
+//   img_export(i)      : i = 0-3     → read stream 50+i, write PGM to I/O slot 2+i
+//
+// Internal image record format  (one SHM record per image):
+//   [width: u16 LE][height: u16 LE][channels: u8][pixels: w*h*ch bytes]
+//   channels = 3 (RGB) for generate/rotate, 1 (gray) thereafter.
+//
+// Output: binary PGM (P5) files, viewable with any image tool that reads PGM.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Decode a 5-byte image header. Returns (width, height, channels, pixel_slice).
+#[inline]
+fn img_decode(data: &[u8]) -> Option<(usize, usize, usize, &[u8])> {
+    if data.len() < 5 { return None; }
+    let w  = u16::from_le_bytes([data[0], data[1]]) as usize;
+    let h  = u16::from_le_bytes([data[2], data[3]]) as usize;
+    let ch = data[4] as usize;
+    if data.len() < 5 + w * h * ch { return None; }
+    Some((w, h, ch, &data[5..]))
+}
+
+#[inline]
+fn img_header(w: usize, h: usize, ch: usize) -> [u8; 5] {
+    let wb = (w as u16).to_le_bytes();
+    let hb = (h as u16).to_le_bytes();
+    [wb[0], wb[1], hb[0], hb[1], ch as u8]
+}
+
+// ─── Fixed-slot image pipeline ───────────────────────────────────────────────
+//
+// Every function in this pipeline uses the same hard-coded slot numbers so the
+// DAG JSON can call them with `"arg": 0` (ignored) for every image.
+// A host `FreeSlots` node resets these slots between images so the pipeline
+// can be reused without any slot-number offsets.
+//
+//   PIPE_IO_IN  (I/O 10)  ← host Input node writes raw PPM lines here
+//   PIPE_LOAD   (str 20)  ← img_load_ppm   : parsed internal image
+//   PIPE_ROT    (str 30)  ← img_rotate     : 90° CW rotated
+//   PIPE_GRAY   (str 40)  ← img_grayscale  : grayscale
+//   PIPE_EQ     (str 50)  ← img_equalize   : histogram equalised
+//   PIPE_BLUR   (str 60)  ← img_blur       : box blurred
+//   OUTPUT_IO_SLOT (I/O 1) ← img_export_ppm: binary PGM, flushed by Output node
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PIPE_IO_IN: u32 = 10;
+const PIPE_LOAD:  u32 = 20;
+const PIPE_ROT:   u32 = 30;
+const PIPE_GRAY:  u32 = 40;
+const PIPE_EQ:    u32 = 50;
+const PIPE_BLUR:  u32 = 60;
+
+/// Load an ASCII PPM (P3) or PGM (P2) image from `PIPE_IO_IN` (I/O slot 10)
+/// and write the internal binary image format to `PIPE_LOAD` (stream slot 20).
+/// The `arg` parameter is unused; pass `0` in the DAG JSON.
+#[no_mangle]
+pub extern "C" fn img_load_ppm(_: u32) {
+    let lines = ShmApi::read_all_inputs_from(PIPE_IO_IN);
+
+    let mut all = alloc::string::String::new();
+    for line in &lines {
+        if let Ok(s) = core::str::from_utf8(line) {
+            if !s.trim_start().starts_with('#') {
+                all.push_str(s.trim());
+                all.push(' ');
+            }
+        }
+    }
+
+    let mut tok = all.split_whitespace();
+    let magic       = tok.next().unwrap_or("");
+    let w: usize    = tok.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let h: usize    = tok.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let maxval: u32 = tok.next().and_then(|s| s.parse().ok()).unwrap_or(255);
+    if w == 0 || h == 0 { return; }
+
+    let ch = if magic == "P3" { 3usize } else { 1 };
+    let expected = w * h * ch;
+    let mut pixels = Vec::with_capacity(expected);
+    for t in tok.take(expected) {
+        if let Ok(v) = t.parse::<u32>() {
+            pixels.push(if maxval == 0 || maxval == 255 { v as u8 }
+                        else { ((v * 255 + maxval / 2) / maxval) as u8 });
+        }
+    }
+    pixels.resize(expected, 0);
+
+    let mut data = Vec::with_capacity(5 + expected);
+    data.extend_from_slice(&img_header(w, h, ch));
+    data.extend_from_slice(&pixels);
+    ShmApi::append_stream_data(PIPE_LOAD, &data);
+}
+
+/// Rotate 90° CW: reads `PIPE_LOAD` (stream 20), writes to `PIPE_ROT` (stream 30).
+/// The `arg` parameter is unused; pass `0` in the DAG JSON.
+#[no_mangle]
+pub extern "C" fn img_rotate(_: u32) {
+    let records = ShmApi::read_all_stream_records(PIPE_LOAD);
+    if records.is_empty() { return; }
+    let (w, h, ch, pixels) = match img_decode(&records[0]) { Some(v) => v, None => return };
+    let (out_w, out_h) = (h, w);
+    let mut buf = vec![0u8; out_w * out_h * ch];
+    for r in 0..out_h {
+        for c in 0..out_w {
+            let src = ((h - 1 - c) * w + r) * ch;
+            let dst = (r * out_w + c) * ch;
+            buf[dst..dst + ch].copy_from_slice(&pixels[src..src + ch]);
+        }
+    }
+    let mut data = Vec::with_capacity(5 + buf.len());
+    data.extend_from_slice(&img_header(out_w, out_h, ch));
+    data.extend_from_slice(&buf);
+    ShmApi::append_stream_data(PIPE_ROT, &data);
+}
+
+/// Grayscale: reads `PIPE_ROT` (stream 30), writes to `PIPE_GRAY` (stream 40).
+/// The `arg` parameter is unused; pass `0` in the DAG JSON.
+#[no_mangle]
+pub extern "C" fn img_grayscale(_: u32) {
+    let records = ShmApi::read_all_stream_records(PIPE_ROT);
+    if records.is_empty() { return; }
+    let (w, h, ch, pixels) = match img_decode(&records[0]) { Some(v) => v, None => return };
+    let mut data = Vec::with_capacity(5 + w * h);
+    data.extend_from_slice(&img_header(w, h, 1));
+    for i in 0..w * h {
+        let b = i * ch;
+        let gray = if ch >= 3 {
+            ((pixels[b] as u32 * 77 + pixels[b+1] as u32 * 150 + pixels[b+2] as u32 * 29) >> 8) as u8
+        } else { pixels[b] };
+        data.push(gray);
+    }
+    ShmApi::append_stream_data(PIPE_GRAY, &data);
+}
+
+/// Histogram equalisation: reads `PIPE_GRAY` (stream 40), writes to `PIPE_EQ` (stream 50).
+/// The `arg` parameter is unused; pass `0` in the DAG JSON.
+#[no_mangle]
+pub extern "C" fn img_equalize(_: u32) {
+    let records = ShmApi::read_all_stream_records(PIPE_GRAY);
+    if records.is_empty() { return; }
+    let (w, h, _ch, pixels) = match img_decode(&records[0]) { Some(v) => v, None => return };
+    let total = w * h;
+    let mut hist = [0u32; 256];
+    for &p in &pixels[..total] { hist[p as usize] += 1; }
+    let mut cdf = [0u32; 256];
+    let mut running = 0u32;
+    for i in 0..256 { running += hist[i]; cdf[i] = running; }
+    let cdf_min = cdf.iter().copied().find(|&x| x > 0).unwrap_or(0);
+    let denom = (total as u32).saturating_sub(cdf_min);
+    let mut lut = [0u8; 256];
+    for i in 0..256 {
+        lut[i] = if denom == 0 { i as u8 } else {
+            let n = cdf[i].saturating_sub(cdf_min);
+            ((n as u64 * 255 + denom as u64 / 2) / denom as u64) as u8
+        };
+    }
+    let mut data = Vec::with_capacity(5 + total);
+    data.extend_from_slice(&records[0][..5]);
+    for &p in &pixels[..total] { data.push(lut[p as usize]); }
+    ShmApi::append_stream_data(PIPE_EQ, &data);
+}
+
+/// 3×3 box blur: reads `PIPE_EQ` (stream 50), writes to `PIPE_BLUR` (stream 60).
+/// The `arg` parameter is unused; pass `0` in the DAG JSON.
+#[no_mangle]
+pub extern "C" fn img_blur(_: u32) {
+    let records = ShmApi::read_all_stream_records(PIPE_EQ);
+    if records.is_empty() { return; }
+    let (w, h, _ch, pixels) = match img_decode(&records[0]) { Some(v) => v, None => return };
+    let mut data = Vec::with_capacity(5 + w * h);
+    data.extend_from_slice(&records[0][..5]);
+    for r in 0..h {
+        for c in 0..w {
+            let mut sum = 0u32; let mut cnt = 0u32;
+            for nr in r.saturating_sub(1)..=(r + 1).min(h - 1) {
+                for nc in c.saturating_sub(1)..=(c + 1).min(w - 1) {
+                    sum += pixels[nr * w + nc] as u32; cnt += 1;
+                }
+            }
+            data.push((sum / cnt) as u8);
+        }
+    }
+    ShmApi::append_stream_data(PIPE_BLUR, &data);
+}
+
+/// Encode the blurred image from `PIPE_BLUR` (stream 60) as binary PGM (P5)
+/// and write it to `OUTPUT_IO_SLOT` for the host `Output` node to flush to disk.
+/// The `arg` parameter is unused; pass `0` in the DAG JSON.
+#[no_mangle]
+pub extern "C" fn img_export_ppm(_: u32) {
+    let records = ShmApi::read_all_stream_records(PIPE_BLUR);
+    if records.is_empty() { return; }
+    let (w, h, _ch, pixels) = match img_decode(&records[0]) { Some(v) => v, None => return };
+    let hdr = alloc::format!("P5\n{} {}\n255\n", w, h);
+    let mut pgm = Vec::with_capacity(hdr.len() + w * h);
+    pgm.extend_from_slice(hdr.as_bytes());
+    pgm.extend_from_slice(&pixels[..w * h]);
+    ShmApi::write_output(&pgm);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

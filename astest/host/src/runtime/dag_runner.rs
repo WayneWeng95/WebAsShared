@@ -77,6 +77,16 @@
 //! { "type": "Broadcast" }
 //! ```
 //!
+//! ## Execution mode
+//! Set the optional `"mode"` field to control what happens after all nodes finish:
+//! ```json
+//! { "shm_path": "...", "mode": "one_shot", "nodes": [...] }
+//! { "shm_path": "...", "mode": "reset",    "nodes": [...] }
+//! ```
+//! - `"one_shot"` (default) — execute once and exit.
+//! - `"reset"` — re-execute immediately from the first node using the **same**
+//!   WASM instance and SHM connection, looping until SIGINT (Ctrl-C).
+//!
 //! ## Logging
 //! Set the optional `"log_level"` field to enable host-side logging into the
 //! SHM LOG_ARENA (readable alongside guest log output via the `func_b` reader):
@@ -113,6 +123,20 @@ const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";
 
 // ─── JSON schema ─────────────────────────────────────────────────────────────
 
+/// Execution mode for a DAG.
+///
+/// - `"one_shot"` (default) — execute once and exit.
+/// - `"reset"` — after all nodes complete, re-execute from the beginning
+///   using the same WASM instance and SHM connection.  Send SIGINT (Ctrl-C)
+///   to stop.
+#[derive(Debug, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DagMode {
+    #[default]
+    OneShot,
+    Reset,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct Dag {
     /// Path to the SHM file; created and formatted automatically.
@@ -121,6 +145,13 @@ pub struct Dag {
     /// Accepted: `"debug"`, `"info"`, `"warn"`, `"error"`, `"off"` (default).
     #[serde(default)]
     pub log_level: Option<String>,
+    /// Execution mode: `"one_shot"` (default) or `"reset"`.
+    #[serde(default)]
+    pub mode: DagMode,
+    /// Maximum number of runs in `reset` mode.  Omit (or set to `null`) for
+    /// an infinite loop.  Ignored in `one_shot` mode.
+    #[serde(default)]
+    pub runs: Option<u32>,
     pub nodes: Vec<DagNode>,
 }
 
@@ -161,6 +192,9 @@ pub enum NodeKind {
     OwnedDispatch(OwnedDispatchParams),
     /// Read the reserved output slot and save all records to a file.
     Output(OutputParams),
+    /// Free specified stream and/or I/O slot page chains back to the SHM pool.
+    /// Use between sequential pipeline runs that reuse the same fixed slots.
+    FreeSlots(FreeSlotsParams),
     /// Load a file from `path` and write its content into the reserved input
     /// slot (INPUT_SLOT_ID), one record per non-empty line.  The guest reads
     /// the records via `ShmApi::read_input` / `ShmApi::read_all_inputs`.
@@ -301,10 +335,33 @@ pub struct OwnedDispatchParams {
 #[derive(Debug, Deserialize)]
 pub struct OutputParams {
     /// Destination file path (parent directories are created if absent).
+    /// Ignored when `paths` is non-empty.
+    #[serde(default)]
     pub path: String,
+    /// Per-iteration paths for `reset` mode.  On run N the path used is
+    /// `paths[N % paths.len()]`.  Takes priority over `path` when non-empty.
+    #[serde(default)]
+    pub paths: Vec<String>,
     /// Source I/O slot.  Defaults to `OUTPUT_IO_SLOT` when omitted.
     #[serde(default)]
     pub slot: Option<u32>,
+}
+
+/// Explicitly free a set of stream and/or I/O slots, returning their page
+/// chains to the SHM pool.  Use this between sequential pipeline runs that
+/// reuse the same fixed slot numbers, so the second run starts with empty slots.
+///
+/// ```json
+/// { "kind": { "FreeSlots": { "stream": [20, 30, 40], "io": [10] } } }
+/// ```
+#[derive(Debug, Deserialize)]
+pub struct FreeSlotsParams {
+    /// Stream slot IDs whose page chains should be freed.
+    #[serde(default)]
+    pub stream: Vec<usize>,
+    /// I/O slot IDs whose page chains should be freed.
+    #[serde(default)]
+    pub io: Vec<usize>,
 }
 
 /// Load a file into a stream slot so the guest can consume it via
@@ -313,7 +370,13 @@ pub struct OutputParams {
 #[derive(Debug, Deserialize)]
 pub struct InputParams {
     /// Path to the file to load (must exist and be readable).
+    /// Ignored when `paths` is non-empty.
+    #[serde(default)]
     pub path: String,
+    /// Per-iteration paths for `reset` mode.  On run N the path used is
+    /// `paths[N % paths.len()]`.  Takes priority over `path` when non-empty.
+    #[serde(default)]
+    pub paths: Vec<String>,
     /// Target I/O slot.  Defaults to `INPUT_IO_SLOT` when omitted.
     #[serde(default)]
     pub slot: Option<u32>,
@@ -546,13 +609,18 @@ pub fn run_dag_json(json: &str) -> Result<()> {
 }
 
 /// Execute a pre-parsed [`Dag`].
+///
+/// Behaviour depends on [`DagMode`]:
+/// - `one_shot`: execute all nodes once and return.
+/// - `reset`:    execute all nodes, then immediately re-execute from the
+///               beginning using the **same** WASM instance and SHM
+///               connection.  Loops until SIGINT (Ctrl-C).
 pub fn run_dag(dag: &Dag) -> Result<()> {
-    println!("[DAG] Starting — shm: {}", dag.shm_path);
+    println!("[DAG] Starting — shm: {} (mode: {:?})", dag.shm_path, dag.mode);
 
-    // Reject any DAG that references the reserved output slot before touching SHM.
     validate_dag(dag)?;
 
-    // Format a fresh SHM region so prior data never leaks between runs.
+    // Format a fresh SHM region so prior data never leaks into the first run.
     format_shared_memory(&dag.shm_path)?;
 
     let file = OpenOptions::new()
@@ -582,7 +650,7 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         lg.info("DAG", &format!("starting — shm: {}", dag.shm_path));
     }
 
-    // Topological order
+    // Topological order is fixed for all iterations.
     let order = topo_sort(&dag.nodes)?;
     let node_ids: Vec<&str> = order.iter().map(|&i| dag.nodes[i].id.as_str()).collect();
     println!("[DAG] Execution order: {}", node_ids.join(" → "));
@@ -590,98 +658,106 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         lg.info("DAG", &format!("execution order: {}", node_ids.join(" → ")));
     }
 
-    // Create a shared persistence writer if any Persist node is present.
-    let mut persist_writer = if dag.nodes.iter().any(|n| matches!(n.kind, NodeKind::Persist(_) | NodeKind::Watch(_))) {
-        Some(PersistenceWriter::new())
-    } else {
-        None
-    };
+    let has_persistence = dag.nodes.iter().any(|n| matches!(n.kind, NodeKind::Persist(_) | NodeKind::Watch(_)));
 
-    // Tracks in-flight prefetch handles keyed by the Input node's id.
-    // When a node is about to execute, any prefetch handles in its dependency
-    // list are joined first, ensuring data is ready before the consumer runs.
-    let mut prefetch_handles: HashMap<String, PrefetchHandle> = HashMap::new();
-
-    // Per-slot reader counts: decremented as each consuming node finishes.
-    // When a count reaches zero the page chain for that slot is freed back
-    // to the SHM pool so subsequent nodes can reuse those pages.
-    let mut slot_refcounts = build_slot_refcounts(dag);
-
-    // Run each node
-    for idx in order {
-        let node = &dag.nodes[idx];
-        println!("[DAG] ── Node: {} ──", node.id);
-
-        // Join any prefetch launched by a dependency of this node.
-        for dep_id in &node.deps {
-            if let Some(handle) = prefetch_handles.remove(dep_id) {
-                let slot = handle.slot;
-                let count = handle.join()
-                    .map_err(|e| anyhow!("prefetch '{}' failed: {}", dep_id, e))?;
-                println!("[DAG] Prefetch '{}' ready ({} records in slot {})", dep_id, count, slot);
+    let mut run_count = 0u32;
+    loop {
+        run_count += 1;
+        if dag.mode == DagMode::Reset && run_count > 1 {
+            println!("[DAG] ══ Reset — run #{} ══", run_count);
+            if let Some(ref lg) = logger {
+                lg.info("DAG", &format!("reset run #{}", run_count));
             }
         }
 
-        execute_node(node, &mut store, &instance, &memory, persist_writer.as_ref(), logger, &mut prefetch_handles)?;
+        // Per-run state: rebuilt every iteration so slot counts are correct.
+        let mut persist_writer = if has_persistence { Some(PersistenceWriter::new()) } else { None };
+        let mut prefetch_handles: HashMap<String, PrefetchHandle> = HashMap::new();
+        let mut slot_refcounts = build_slot_refcounts(dag);
 
-        // ── Reclaim / clear slot chains ───────────────────────────────────────
-        let splice_addr = store.data().splice_addr;
+        // Run each node
+        for &idx in &order {
+            let node = &dag.nodes[idx];
+            println!("[DAG] ── Node: {} ──", node.id);
 
-        // Routing upstreams: page chains have been transferred into downstream
-        // slots by chain_onto.  Zero only the metadata — calling free_page_chain
-        // here would walk into the downstream chain and corrupt it.
-        for s in node_routed_upstream_slots(&node.kind) {
-            reclaimer::clear_stream_slot(splice_addr, s);
-        }
-
-        // Exclusively-owned slots: pages belong to exactly one chain and can
-        // be returned to the pool as soon as the last reader finishes.
-        let (owned_streams, owned_ios) = node_owned_slots(&node.kind);
-
-        for s in owned_streams {
-            let key = (SlotKind::Stream, s);
-            if let Some(count) = slot_refcounts.get_mut(&key) {
-                *count -= 1;
-                if *count == 0 {
-                    reclaimer::free_stream_slot(splice_addr, s);
-                    println!("[DAG] Reclaimed stream slot {}", s);
+            // Join any prefetch launched by a dependency of this node.
+            for dep_id in &node.deps {
+                if let Some(handle) = prefetch_handles.remove(dep_id) {
+                    let slot = handle.slot;
+                    let count = handle.join()
+                        .map_err(|e| anyhow!("prefetch '{}' failed: {}", dep_id, e))?;
+                    println!("[DAG] Prefetch '{}' ready ({} records in slot {})", dep_id, count, slot);
                 }
             }
-        }
-        for s in owned_ios {
-            let key = (SlotKind::Io, s);
-            if let Some(count) = slot_refcounts.get_mut(&key) {
-                *count -= 1;
-                if *count == 0 {
-                    reclaimer::free_io_slot(splice_addr, s);
-                    println!("[DAG] Reclaimed I/O slot {}", s);
+
+            execute_node(node, &mut store, &instance, &memory, persist_writer.as_ref(), logger, &mut prefetch_handles, (run_count - 1) as usize)?;
+
+            // ── Reclaim / clear slot chains ───────────────────────────────────
+            let splice_addr = store.data().splice_addr;
+
+            // Routing upstreams: page chains have been transferred into downstream
+            // slots by chain_onto.  Zero only the metadata.
+            for s in node_routed_upstream_slots(&node.kind) {
+                reclaimer::clear_stream_slot(splice_addr, s);
+            }
+
+            // Exclusively-owned slots: freed when the last reader finishes.
+            let (owned_streams, owned_ios) = node_owned_slots(&node.kind);
+
+            for s in owned_streams {
+                let key = (SlotKind::Stream, s);
+                if let Some(count) = slot_refcounts.get_mut(&key) {
+                    *count -= 1;
+                    if *count == 0 {
+                        reclaimer::free_stream_slot(splice_addr, s);
+                        println!("[DAG] Reclaimed stream slot {}", s);
+                    }
                 }
             }
+            for s in owned_ios {
+                let key = (SlotKind::Io, s);
+                if let Some(count) = slot_refcounts.get_mut(&key) {
+                    *count -= 1;
+                    if *count == 0 {
+                        reclaimer::free_io_slot(splice_addr, s);
+                        println!("[DAG] Reclaimed I/O slot {}", s);
+                    }
+                }
+            }
+            // StreamPipeline intermediate slots are exclusively owned and internal.
+            if let NodeKind::StreamPipeline(p) = &node.kind {
+                reclaimer::free_stream_slot(splice_addr, p.filter_slot as usize);
+                reclaimer::free_stream_slot(splice_addr, p.transform_slot as usize);
+                println!("[DAG] Reclaimed StreamPipeline internal slots {} {}", p.filter_slot, p.transform_slot);
+            }
         }
-        // StreamPipeline intermediate slots are exclusively owned and internal —
-        // no routing or downstream node ever touches them.
-        if let NodeKind::StreamPipeline(p) = &node.kind {
-            reclaimer::free_stream_slot(splice_addr, p.filter_slot as usize);
-            reclaimer::free_stream_slot(splice_addr, p.transform_slot as usize);
-            println!("[DAG] Reclaimed StreamPipeline internal slots {} {}", p.filter_slot, p.transform_slot);
+
+        // Drain any orphaned prefetch handles.
+        for (id, handle) in prefetch_handles {
+            if let Err(e) = handle.join() {
+                eprintln!("[DAG] Warning: orphaned prefetch '{}' failed: {}", id, e);
+            }
         }
+
+        // Wait for all background persistence writes to complete.
+        if let Some(ref mut w) = persist_writer { w.join(); }
+
+        if let Some(ref lg) = logger {
+            lg.info("DAG", &format!("run #{} completed", run_count));
+        }
+        println!("[DAG] All nodes completed (run #{}).", run_count);
+
+        if dag.mode == DagMode::OneShot {
+            break;
+        }
+        // Reset mode: stop if a run limit was specified and we've reached it.
+        if dag.runs.map_or(false, |limit| run_count >= limit) {
+            println!("[DAG] Reached run limit ({}).", run_count);
+            break;
+        }
+        // Otherwise loop immediately with the same instance and SHM state.
     }
 
-    // Drain any prefetch handles whose dependents have no explicit deps listed
-    // (should not happen in a well-formed DAG, but ensures no thread is leaked).
-    for (id, handle) in prefetch_handles {
-        if let Err(e) = handle.join() {
-            eprintln!("[DAG] Warning: orphaned prefetch '{}' failed: {}", id, e);
-        }
-    }
-
-    // Wait for all background persistence writes to complete before returning.
-    if let Some(ref mut w) = persist_writer { w.join(); }
-
-    if let Some(ref lg) = logger {
-        lg.info("DAG", "all nodes completed");
-    }
-    println!("[DAG] All nodes completed.");
     Ok(())
 }
 
@@ -695,6 +771,7 @@ fn execute_node(
     persist_writer: Option<&PersistenceWriter>,
     logger: Option<HostLogger>,
     prefetch_handles: &mut HashMap<String, PrefetchHandle>,
+    run_index: usize,
 ) -> Result<()> {
     let splice_addr = store.data().splice_addr;
     let base_ptr = memory.data_ptr(&*store);
@@ -875,11 +952,31 @@ fn execute_node(
         NodeKind::Output(p) => {
             use common::OUTPUT_IO_SLOT;
             let slot = p.slot.unwrap_or(OUTPUT_IO_SLOT);
+            let path = if !p.paths.is_empty() {
+                p.paths[run_index % p.paths.len()].as_str()
+            } else {
+                p.path.as_str()
+            };
             let outputer = Outputer::new(splice_addr);
-            let count = outputer.save_slot(Path::new(&p.path), slot)
+            let count = outputer.save_slot(Path::new(path), slot)
                 .map_err(|e| anyhow!("[{}] output save failed: {}", node.id, e))?;
-            println!("  Output slot {} → \"{}\" ({} records)", slot, p.path, count);
-            log(&format!("output slot {} saved to \"{}\" ({} records)", slot, p.path, count));
+            println!("  Output slot {} → \"{}\" ({} records)", slot, path, count);
+            log(&format!("output slot {} saved to \"{}\" ({} records)", slot, path, count));
+        }
+
+        // ── FreeSlots: explicit slot reset between sequential pipeline runs ──
+        NodeKind::FreeSlots(p) => {
+            let splice_addr = store.data().splice_addr;
+            for &s in &p.stream {
+                reclaimer::free_stream_slot(splice_addr, s);
+                println!("  FreeSlots: stream slot {} freed", s);
+                log(&format!("freed stream slot {}", s));
+            }
+            for &s in &p.io {
+                reclaimer::free_io_slot(splice_addr, s);
+                println!("  FreeSlots: I/O slot {} freed", s);
+                log(&format!("freed I/O slot {}", s));
+            }
         }
 
         // ── FileDispatch: load file → slice → parallel workers ───────────────
@@ -989,19 +1086,24 @@ fn execute_node(
         NodeKind::Input(p) => {
             use common::INPUT_IO_SLOT;
             let slot = p.slot.unwrap_or(INPUT_IO_SLOT);
+            let path = if !p.paths.is_empty() {
+                p.paths[run_index % p.paths.len()].as_str()
+            } else {
+                p.path.as_str()
+            };
             if p.prefetch {
                 // Fire off the load in a background thread; the executor will
                 // join this handle before the first node that lists us as a dep.
-                let handle = Inputer::prefetch(splice_addr, PathBuf::from(&p.path), slot);
+                let handle = Inputer::prefetch(splice_addr, PathBuf::from(path), slot);
                 prefetch_handles.insert(node.id.clone(), handle);
-                println!("  Input ← \"{}\" slot {} [prefetch started]", p.path, slot);
-                log(&format!("input prefetch started: '{}' → slot {}", p.path, slot));
+                println!("  Input ← \"{}\" slot {} [prefetch started]", path, slot);
+                log(&format!("input prefetch started: '{}' → slot {}", path, slot));
             } else {
                 let count = Inputer::new(splice_addr)
-                    .load(Path::new(&p.path), slot)
+                    .load(Path::new(path), slot)
                     .map_err(|e| anyhow!("[{}] input load failed: {}", node.id, e))?;
-                println!("  Input ← \"{}\" slot {} ({} records)", p.path, slot, count);
-                log(&format!("input loaded '{}' → slot {} ({} records)", p.path, slot, count));
+                println!("  Input ← \"{}\" slot {} ({} records)", path, slot, count);
+                log(&format!("input loaded '{}' → slot {} ({} records)", path, slot, count));
             }
         }
     }

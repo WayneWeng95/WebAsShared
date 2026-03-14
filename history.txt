@@ -9,4 +9,6 @@
 
    55  cd /opt/myapp/
 
-   cargo run dag ../dag_demo.json 
+   cargo run dag ../demo_dag/dag_demo.json 
+
+   cargo run dag ../demo_dag/word_count_demo.json 
