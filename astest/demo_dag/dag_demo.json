@@ -204,7 +204,7 @@
       "deps": [],
       "kind": {
         "FileDispatch": {
-          "path": "../dag_demo.json",
+          "path": "../demo_dag/dag_demo.json",
           "workers": 3,
           "policy": { "type": "LineBoundary" }
         }

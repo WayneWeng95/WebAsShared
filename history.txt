@@ -12,3 +12,5 @@
    cargo run dag ../demo_dag/dag_demo.json 
 
    cargo run dag ../demo_dag/word_count_demo.json 
+
+   cargo run dag ../demo_dag/img_pipeline_demo.json 
