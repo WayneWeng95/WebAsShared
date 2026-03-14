@@ -12,7 +12,7 @@
 //   FileDispatcher::new(8).run(slices, |assignment| { /* process */ });
 
 use crate::policy::SlicePolicy;
-use crate::runtime::loader::LoadedFile;
+use crate::runtime::inputer::LoadedFile;
 
 // -----------------------------------------------------------------------------
 // FileSlice — a single view into the loaded file

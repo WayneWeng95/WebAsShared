@@ -161,34 +161,11 @@ impl<'a> BucketOrganizer<'a> {
         }
     }
 
-    /// Pushes a single page back onto the superblock's free list using a lock-free CAS loop
-    /// (Treiber stack push). Safe to call concurrently from multiple threads.
+    /// Pushes a single page back onto the sharded free list.
+    /// Delegates to `reclaimer::free_page_chain` so the shard selection,
+    /// spin_loop backoff, and ABA documentation are all in one place.
     unsafe fn push_to_free_list(&self, page_offset: u32) {
-        let free_list = &self.superblock().free_list_head;
-
-        let page_ptr = self.base_ptr.add(page_offset as usize);
-        let page_next_atomic = &*(page_ptr as *const AtomicU32);
-
-        // CAS loop: standard lock-free stack push
-        loop {
-            let current_head = free_list.load(Ordering::Acquire);
-
-            // Point current page at old head
-            page_next_atomic.store(current_head, Ordering::Relaxed);
-
-            // Try to make free list head point to current page
-            if free_list
-                .compare_exchange(
-                    current_head,
-                    page_offset,
-                    Ordering::Release,
-                    Ordering::Relaxed,
-                )
-                .is_ok()
-            {
-                break;
-            }
-            // Retry on failure
-        }
+        let splice_addr = self.base_ptr as usize;
+        crate::runtime::reclaimer::free_page_chain(splice_addr, page_offset);
     }
 }

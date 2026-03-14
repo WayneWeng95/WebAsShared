@@ -214,9 +214,18 @@ fn take_snapshot(splice_addr: usize, opts: &PersistenceOptions) -> Snapshot {
 // SHM reading helpers
 // -----------------------------------------------------------------------------
 
-/// Walks the length-prefixed page chain for `slot` and returns every record.
+/// Walks the length-prefixed page chain for stream `slot` and returns every record.
 pub(super) fn read_stream_records(base: usize, sb: &Superblock, slot: usize) -> Vec<Vec<u8>> {
-    let head = sb.writer_heads[slot].load(Ordering::Acquire);
+    read_chain_records(base, sb.writer_heads[slot].load(Ordering::Acquire))
+}
+
+/// Walks the length-prefixed page chain for I/O `slot` and returns every record.
+pub(super) fn read_io_records(base: usize, sb: &Superblock, slot: usize) -> Vec<Vec<u8>> {
+    read_chain_records(base, sb.io_heads[slot].load(Ordering::Acquire))
+}
+
+/// Core page-chain walker: given a `head` offset, returns every length-prefixed record.
+fn read_chain_records(base: usize, head: u32) -> Vec<Vec<u8>> {
     if head == 0 { return Vec::new(); }
 
     let mut reader = PageReader::new(base, head);

@@ -141,6 +141,62 @@ pub extern "C" fn zip_results_node(id: u32) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Word count demo
+//
+// Two-stage map-reduce pipeline driven by the DAG runner:
+//
+//   Input node   → loads data/sample.txt into I/O slot 0 (one record per line)
+//   wc_map(0)    → reads each line from I/O slot 0, counts words, appends
+//                  "line=N,words=M" records to stream slot 10
+//   wc_reduce(10)→ reads all stream records from slot 10, accumulates totals,
+//                  writes "total_lines=N,total_words=M" to OUTPUT_IO_SLOT
+//   Output node  → flushes OUTPUT_IO_SLOT to /tmp/word_count_result.txt
+// ─────────────────────────────────────────────────────────────────────────────
+
+const WC_STREAM_SLOT: u32 = 10;
+
+/// Map stage: read every line from I/O slot `io_slot`, count words per line,
+/// and append one `"line=N,words=M"` record to `WC_STREAM_SLOT`.
+#[no_mangle]
+pub extern "C" fn wc_map(io_slot: u32) {
+    let lines = ShmApi::read_all_inputs_from(io_slot);
+    for (n, line) in lines.iter().enumerate() {
+        let words = core::str::from_utf8(line)
+            .unwrap_or("")
+            .split_whitespace()
+            .count();
+        let rec = alloc::format!("line={},words={}", n, words);
+        ShmApi::append_stream_data(WC_STREAM_SLOT, rec.as_bytes());
+    }
+}
+
+/// Reduce stage: read all `"line=N,words=M"` records from `stream_slot`,
+/// sum the word counts, and write one `"total_lines=N,total_words=M"` record
+/// to `OUTPUT_IO_SLOT`.
+#[no_mangle]
+pub extern "C" fn wc_reduce(stream_slot: u32) {
+    let records = ShmApi::read_all_stream_records(stream_slot);
+    let total_lines = records.len();
+    let mut total_words: u64 = 0;
+    for rec in &records {
+        if let Ok(s) = core::str::from_utf8(rec) {
+            // format: "line=N,words=M"
+            if let Some(words_part) = s.split(',').nth(1) {
+                if let Some(val) = words_part.split('=').nth(1) {
+                    if let Ok(n) = val.parse::<u64>() {
+                        total_words += n;
+                    }
+                }
+            }
+        }
+    }
+    ShmApi::write_output_str(&alloc::format!(
+        "total_lines={},total_words={}",
+        total_lines, total_words
+    ));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // 4-stage streaming pipeline
 //
 // The host's `StreamPipeline` DAG node drives these functions in a loop.

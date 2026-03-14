@@ -29,7 +29,7 @@ pub fn format_shared_memory(path: &str) -> Result<()> {
     file.write_all(&(0u32).to_le_bytes())?;               // +20: Next Atomic Index (Starts at 0)
     file.write_all(&(0u32).to_le_bytes())?;               // +24: Shared Map Base
     
-    file.write_all(&(0u32).to_le_bytes())?;               // +28: Free List Head
+    file.write_all(&(0u32).to_le_bytes())?;               // +28: free_list_heads[0] (remaining 15 shards zeroed by set_len)
 
     Ok(())
 }

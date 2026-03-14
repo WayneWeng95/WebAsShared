@@ -1,0 +1,30 @@
+{
+  "shm_path": "/dev/shm/word_count_demo",
+  "log_level": "info",
+  "nodes": [
+    {
+      "_comment": "Load data/sample.txt into I/O slot 0 (INPUT_IO_SLOT), one record per line.",
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": { "path": "../data/sample.txt", "slot": 0, "prefetch": true } }
+    },
+    {
+      "_comment": "Map: read lines from I/O slot 0, count words, emit 'line=N,words=M' to stream slot 10.",
+      "id": "map",
+      "deps": ["load"],
+      "kind": { "WasmVoid": { "func": "wc_map", "arg": 0 } }
+    },
+    {
+      "_comment": "Reduce: aggregate stream slot 10, write 'total_lines=N,total_words=M' to OUTPUT_IO_SLOT.",
+      "id": "reduce",
+      "deps": ["map"],
+      "kind": { "WasmVoid": { "func": "wc_reduce", "arg": 10 } }
+    },
+    {
+      "_comment": "Save the OUTPUT_IO_SLOT to disk.",
+      "id": "save",
+      "deps": ["reduce"],
+      "kind": { "Output": { "path": "/tmp/word_count_result.txt" } }
+    }
+  ]
+}
