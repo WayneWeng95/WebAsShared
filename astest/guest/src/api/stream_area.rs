@@ -50,15 +50,16 @@ pub(super) fn chain_append_raw(head: &AtomicU32, tail: &AtomicU32, mut data: &[u
     }
 }
 
-/// Write a 4-byte LE length header followed by `payload` into `(head, tail)`.
-pub(super) fn chain_append_prefixed(head: &AtomicU32, tail: &AtomicU32, payload: &[u8]) {
+/// Write a 4-byte LE length header, 4-byte LE origin, followed by `payload` into `(head, tail)`.
+pub(super) fn chain_append_prefixed(head: &AtomicU32, tail: &AtomicU32, origin: u32, payload: &[u8]) {
     chain_append_raw(head, tail, &(payload.len() as u32).to_le_bytes());
+    chain_append_raw(head, tail, &origin.to_le_bytes());
     chain_append_raw(head, tail, payload);
 }
 
 /// Walk the page chain starting at `head_offset` and return the last complete
-/// length-prefixed record.  Returns `None` when the chain is empty.
-pub(super) fn chain_read_latest(head_offset: u32) -> Option<Vec<u8>> {
+/// length-prefixed record as (origin, payload).  Returns `None` when the chain is empty.
+pub(super) fn chain_read_latest(head_offset: u32) -> Option<(u32, Vec<u8>)> {
     if head_offset == 0 { return None; }
     let sb = ShmApi::superblock();
     let mut current_offset = head_offset;
@@ -94,22 +95,25 @@ pub(super) fn chain_read_latest(head_offset: u32) -> Option<Vec<u8>> {
         true
     };
 
-    let mut latest_data = None;
+    let mut latest_data: Option<(u32, Vec<u8>)> = None;
     loop {
         let mut len_buf = [0u8; 4];
         if !read_exact(&mut len_buf) { break; }
         let record_len = u32::from_le_bytes(len_buf);
+        let mut origin_buf = [0u8; 4];
+        if !read_exact(&mut origin_buf) { break; }
+        let origin = u32::from_le_bytes(origin_buf);
         let mut payload = Vec::with_capacity(record_len as usize);
         unsafe { payload.set_len(record_len as usize); }
         if !read_exact(&mut payload) { break; }
-        latest_data = Some(payload);
+        latest_data = Some((origin, payload));
     }
     latest_data
 }
 
 /// Walk the page chain starting at `head_offset` and return every
-/// length-prefixed record in order.  Returns an empty Vec when the chain is empty.
-pub(super) fn chain_read_all(head_offset: u32) -> Vec<Vec<u8>> {
+/// length-prefixed record as (origin, payload) in order.  Returns an empty Vec when the chain is empty.
+pub(super) fn chain_read_all(head_offset: u32) -> Vec<(u32, Vec<u8>)> {
     if head_offset == 0 { return Vec::new(); }
     let sb = ShmApi::superblock();
     let mut current_offset = head_offset;
@@ -151,10 +155,13 @@ pub(super) fn chain_read_all(head_offset: u32) -> Vec<Vec<u8>> {
         let mut len_buf = [0u8; 4];
         if !read_exact(&mut len_buf) { break; }
         let record_len = u32::from_le_bytes(len_buf);
+        let mut origin_buf = [0u8; 4];
+        if !read_exact(&mut origin_buf) { break; }
+        let origin = u32::from_le_bytes(origin_buf);
         let mut payload = Vec::with_capacity(record_len as usize);
         unsafe { payload.set_len(record_len as usize); }
         if !read_exact(&mut payload) { break; }
-        records.push(payload);
+        records.push((origin, payload));
     }
     records
 }
@@ -179,19 +186,20 @@ impl ShmApi {
         chain_append_prefixed(
             &sb.writer_heads[writer_id as usize],
             &sb.writer_tails[writer_id as usize],
+            writer_id,
             payload,
         );
     }
 
     /// Return the most recent record from stream `target_worker_id`.
-    pub fn read_latest_stream_data(target_worker_id: u32) -> Option<Vec<u8>> {
+    pub fn read_latest_stream_data(target_worker_id: u32) -> Option<(u32, Vec<u8>)> {
         let head = Self::superblock().writer_heads[target_worker_id as usize]
             .load(Ordering::Acquire);
         chain_read_latest(head)
     }
 
     /// Return every record from stream `id` in order.
-    pub fn read_all_stream_records(id: u32) -> Vec<Vec<u8>> {
+    pub fn read_all_stream_records(id: u32) -> Vec<(u32, Vec<u8>)> {
         let head = Self::superblock().writer_heads[id as usize].load(Ordering::Acquire);
         chain_read_all(head)
     }

@@ -56,7 +56,7 @@ impl Outputer {
         }
 
         let mut f = fs::File::create(path)?;
-        for rec in &records {
+        for (_origin, rec) in &records {
             f.write_all(rec)?;
             f.write_all(b"\n")?;
         }
@@ -69,12 +69,12 @@ impl Outputer {
     }
 
     /// Collect all records from the default `OUTPUT_IO_SLOT` into memory without writing to disk.
-    pub fn collect(&self) -> Vec<Vec<u8>> {
+    pub fn collect(&self) -> Vec<(u32, Vec<u8>)> {
         self.collect_slot(OUTPUT_IO_SLOT)
     }
 
     /// Collect all records from I/O `slot` into memory without writing to disk.
-    pub fn collect_slot(&self, slot: u32) -> Vec<Vec<u8>> {
+    pub fn collect_slot(&self, slot: u32) -> Vec<(u32, Vec<u8>)> {
         let sb = unsafe { &*(self.splice_addr as *const Superblock) };
         read_io_records(self.splice_addr, sb, slot as usize)
     }

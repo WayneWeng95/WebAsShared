@@ -592,6 +592,41 @@ fn topo_sort(nodes: &[DagNode]) -> Result<Vec<usize>> {
     Ok(order)
 }
 
+// ─── Wave builder and WASM node classifier ───────────────────────────────────
+
+/// Compute execution waves: groups of nodes that can run concurrently.
+/// All nodes in a wave have all their dependencies in earlier waves.
+fn build_waves(nodes: &[DagNode], order: &[usize]) -> Vec<Vec<usize>> {
+    let id_to_idx: HashMap<&str, usize> = nodes.iter()
+        .enumerate()
+        .map(|(i, n)| (n.id.as_str(), i))
+        .collect();
+    let mut level = vec![0usize; nodes.len()];
+    for &idx in order {
+        for dep_id in &nodes[idx].deps {
+            if let Some(&dep_idx) = id_to_idx.get(dep_id.as_str()) {
+                level[idx] = level[idx].max(level[dep_idx] + 1);
+            }
+        }
+    }
+    let max_level = level.iter().copied().max().unwrap_or(0);
+    let mut waves: Vec<Vec<usize>> = vec![Vec::new(); max_level + 1];
+    for &idx in order {
+        waves[level[idx]].push(idx);
+    }
+    waves
+}
+
+/// Returns true for node kinds that require a Wasmtime Store + Instance to execute.
+fn is_wasm_node(kind: &NodeKind) -> bool {
+    matches!(kind,
+        NodeKind::WasmVoid(_)
+        | NodeKind::WasmU32(_)
+        | NodeKind::WasmFatPtr(_)
+        | NodeKind::StreamPipeline(_)
+    )
+}
+
 // ─── Public entry points ──────────────────────────────────────────────────────
 
 /// Load a DAG from a JSON **file** and execute it.
@@ -658,7 +693,35 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         lg.info("DAG", &format!("execution order: {}", node_ids.join(" → ")));
     }
 
+    let waves = build_waves(&dag.nodes, &order);
+    println!("[DAG] {} waves, {} nodes total", waves.len(), order.len());
+
     let has_persistence = dag.nodes.iter().any(|n| matches!(n.kind, NodeKind::Persist(_) | NodeKind::Watch(_)));
+
+    // Build a map from each Input node's id to (slot, number_of_direct_consumers).
+    // Input I/O slots must be freed after all nodes that list the Input as a dep
+    // have completed — this is computed once since the DAG structure is fixed.
+    let input_dep_counts: HashMap<String, (u32, usize)> = {
+        use common::INPUT_IO_SLOT;
+        let input_slots: HashMap<&str, u32> = dag.nodes.iter()
+            .filter_map(|n| {
+                if let NodeKind::Input(p) = &n.kind {
+                    Some((n.id.as_str(), p.slot.unwrap_or(INPUT_IO_SLOT)))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let mut counts: HashMap<String, (u32, usize)> = HashMap::new();
+        for node in &dag.nodes {
+            for dep_id in &node.deps {
+                if let Some(&slot) = input_slots.get(dep_id.as_str()) {
+                    counts.entry(dep_id.clone()).or_insert((slot, 0)).1 += 1;
+                }
+            }
+        }
+        counts
+    };
 
     let mut run_count = 0u32;
     loop {
@@ -674,62 +737,156 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         let mut persist_writer = if has_persistence { Some(PersistenceWriter::new()) } else { None };
         let mut prefetch_handles: HashMap<String, PrefetchHandle> = HashMap::new();
         let mut slot_refcounts = build_slot_refcounts(dag);
+        // Per-run countdown for Input slot reclamation (reset each iteration).
+        let mut input_dep_remaining = input_dep_counts.clone();
 
-        // Run each node
-        for &idx in &order {
-            let node = &dag.nodes[idx];
-            println!("[DAG] ── Node: {} ──", node.id);
-
-            // Join any prefetch launched by a dependency of this node.
-            for dep_id in &node.deps {
-                if let Some(handle) = prefetch_handles.remove(dep_id) {
-                    let slot = handle.slot;
-                    let count = handle.join()
-                        .map_err(|e| anyhow!("prefetch '{}' failed: {}", dep_id, e))?;
-                    println!("[DAG] Prefetch '{}' ready ({} records in slot {})", dep_id, count, slot);
+        // Run each wave
+        for wave in &waves {
+            // 1. Pre-join prefetches for all deps of nodes in this wave.
+            for &idx in wave {
+                let node = &dag.nodes[idx];
+                for dep_id in &node.deps {
+                    if let Some(handle) = prefetch_handles.remove(dep_id) {
+                        let slot = handle.slot;
+                        let count = handle.join()
+                            .map_err(|e| anyhow!("prefetch '{}' failed: {}", dep_id, e))?;
+                        println!("[DAG] Prefetch '{}' ready ({} records in slot {})", dep_id, count, slot);
+                    }
                 }
             }
 
-            execute_node(node, &mut store, &instance, &memory, persist_writer.as_ref(), logger, &mut prefetch_handles, (run_count - 1) as usize)?;
+            // 2. Split wave into WASM vs host nodes.
+            let (wasm_idxs, host_idxs): (Vec<usize>, Vec<usize>) = wave.iter()
+                .partition(|&&idx| is_wasm_node(&dag.nodes[idx].kind));
 
-            // ── Reclaim / clear slot chains ───────────────────────────────────
+            // 3. Execute nodes.
+            if wasm_idxs.len() >= 2 {
+                println!("[DAG] Wave: {} nodes in parallel ({} WASM + {} host)",
+                    wave.len(), wasm_idxs.len(), host_idxs.len());
+
+                let scope_result = std::thread::scope(|s| -> Result<()> {
+                    // Spawn each WASM node in its own thread.
+                    let handles: Vec<_> = wasm_idxs.iter().map(|&idx| {
+                        let node = &dag.nodes[idx];
+                        let engine = &engine;
+                        let module = &module;
+                        let file = &file;
+                        let pw = persist_writer.as_ref().map(|w| w as &PersistenceWriter);
+                        let lg = logger.as_ref().map(|l| l as &HostLogger);
+                        let run_idx = (run_count - 1) as usize;
+                        s.spawn(move || -> Result<()> {
+                            let mut tstore = Store::new(engine, WorkerState {
+                                file: file.try_clone()?,
+                                splice_addr: 0,
+                            });
+                            let mut tlinker = Linker::new(engine);
+                            let tmemory = setup_vma_environment(&mut tstore, &mut tlinker, file)?;
+                            let tinstance = tlinker.instantiate(&mut tstore, module)?;
+                            let mut dummy_ph: HashMap<String, PrefetchHandle> = HashMap::new();
+                            execute_node(node, &mut tstore, &tinstance, &tmemory,
+                                         pw, lg, &mut dummy_ph, run_idx)
+                        })
+                    }).collect();
+
+                    // Run host nodes on main thread while WASM threads run.
+                    for &idx in &host_idxs {
+                        let node = &dag.nodes[idx];
+                        println!("[DAG] ── Node: {} ──", node.id);
+                        execute_node(node, &mut store, &instance, &memory,
+                                     persist_writer.as_ref().map(|w| w as &PersistenceWriter),
+                                     logger.as_ref().map(|l| l as &HostLogger),
+                                     &mut prefetch_handles, (run_count - 1) as usize)?;
+                    }
+
+                    // Join all WASM threads.
+                    for h in handles {
+                        h.join().map_err(|_| anyhow!("WASM thread panicked"))??;
+                    }
+                    Ok(())
+                });
+                scope_result?;
+            } else {
+                // Sequential path.
+                for &idx in wave {
+                    let node = &dag.nodes[idx];
+                    println!("[DAG] ── Node: {} ──", node.id);
+                    execute_node(node, &mut store, &instance, &memory,
+                                 persist_writer.as_ref().map(|w| w as &PersistenceWriter),
+                                 logger.as_ref().map(|l| l as &HostLogger),
+                                 &mut prefetch_handles, (run_count - 1) as usize)?;
+                }
+            }
+
+            // 4. Post-wave slot reclamation for all nodes in wave.
             let splice_addr = store.data().splice_addr;
+            for &idx in wave {
+                let node = &dag.nodes[idx];
 
-            // Routing upstreams: page chains have been transferred into downstream
-            // slots by chain_onto.  Zero only the metadata.
-            for s in node_routed_upstream_slots(&node.kind) {
-                reclaimer::clear_stream_slot(splice_addr, s);
-            }
+                // Routing upstreams: page chains have been transferred into downstream
+                // slots by chain_onto.  Zero only the metadata.
+                for s in node_routed_upstream_slots(&node.kind) {
+                    reclaimer::clear_stream_slot(splice_addr, s);
+                }
 
-            // Exclusively-owned slots: freed when the last reader finishes.
-            let (owned_streams, owned_ios) = node_owned_slots(&node.kind);
+                // Exclusively-owned slots: freed when the last reader finishes.
+                let (owned_streams, owned_ios) = node_owned_slots(&node.kind);
 
-            for s in owned_streams {
-                let key = (SlotKind::Stream, s);
-                if let Some(count) = slot_refcounts.get_mut(&key) {
-                    *count -= 1;
-                    if *count == 0 {
-                        reclaimer::free_stream_slot(splice_addr, s);
-                        println!("[DAG] Reclaimed stream slot {}", s);
+                for s in owned_streams {
+                    let key = (SlotKind::Stream, s);
+                    if let Some(count) = slot_refcounts.get_mut(&key) {
+                        *count -= 1;
+                        if *count == 0 {
+                            reclaimer::free_stream_slot(splice_addr, s);
+                            println!("[DAG] Reclaimed stream slot {}", s);
+                        }
                     }
                 }
-            }
-            for s in owned_ios {
-                let key = (SlotKind::Io, s);
-                if let Some(count) = slot_refcounts.get_mut(&key) {
-                    *count -= 1;
-                    if *count == 0 {
-                        reclaimer::free_io_slot(splice_addr, s);
-                        println!("[DAG] Reclaimed I/O slot {}", s);
+                for s in owned_ios {
+                    let key = (SlotKind::Io, s);
+                    if let Some(count) = slot_refcounts.get_mut(&key) {
+                        *count -= 1;
+                        if *count == 0 {
+                            reclaimer::free_io_slot(splice_addr, s);
+                            println!("[DAG] Reclaimed I/O slot {}", s);
+                        }
                     }
                 }
+                // StreamPipeline intermediate slots are exclusively owned and internal.
+                if let NodeKind::StreamPipeline(p) = &node.kind {
+                    reclaimer::free_stream_slot(splice_addr, p.filter_slot as usize);
+                    reclaimer::free_stream_slot(splice_addr, p.transform_slot as usize);
+                    println!("[DAG] Reclaimed StreamPipeline internal slots {} {}", p.filter_slot, p.transform_slot);
+                }
+
+                // Input slots: freed when all direct consumer nodes have run.
+                // If an Input node has no consumers at all, free it immediately after it runs.
+                if let NodeKind::Input(p) = &node.kind {
+                    use common::INPUT_IO_SLOT;
+                    if !input_dep_counts.contains_key(node.id.as_str()) {
+                        let slot = p.slot.unwrap_or(INPUT_IO_SLOT);
+                        reclaimer::free_io_slot(splice_addr, slot as usize);
+                        println!("[DAG] Reclaimed Input slot {} (no consumers)", slot);
+                    }
+                }
+                // Decrement the consumer counter for any Input-node dependencies.
+                // When the last consumer of an Input node finishes, free the slot.
+                let to_free: Vec<(String, u32)> = node.deps.iter()
+                    .filter_map(|dep_id| {
+                        let entry = input_dep_remaining.get_mut(dep_id.as_str())?;
+                        entry.1 -= 1;
+                        if entry.1 == 0 { Some((dep_id.clone(), entry.0)) } else { None }
+                    })
+                    .collect();
+                for (dep_id, slot) in to_free {
+                    input_dep_remaining.remove(&dep_id);
+                    reclaimer::free_io_slot(splice_addr, slot as usize);
+                    println!("[DAG] Reclaimed Input slot {} (all consumers done)", slot);
+                }
             }
-            // StreamPipeline intermediate slots are exclusively owned and internal.
-            if let NodeKind::StreamPipeline(p) = &node.kind {
-                reclaimer::free_stream_slot(splice_addr, p.filter_slot as usize);
-                reclaimer::free_stream_slot(splice_addr, p.transform_slot as usize);
-                println!("[DAG] Reclaimed StreamPipeline internal slots {} {}", p.filter_slot, p.transform_slot);
-            }
+
+            // After all per-node reclamation in this wave, check whether the
+            // free list has grown past the configured threshold and trim it.
+            reclaimer::trim_free_list(splice_addr);
         }
 
         // Drain any orphaned prefetch handles.
@@ -769,7 +926,7 @@ fn execute_node(
     instance: &Instance,
     memory: &Memory,
     persist_writer: Option<&PersistenceWriter>,
-    logger: Option<HostLogger>,
+    logger: Option<&HostLogger>,
     prefetch_handles: &mut HashMap<String, PrefetchHandle>,
     run_index: usize,
 ) -> Result<()> {

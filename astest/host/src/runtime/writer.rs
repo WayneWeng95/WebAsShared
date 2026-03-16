@@ -46,7 +46,7 @@ pub struct PersistenceOptions {
 // -----------------------------------------------------------------------------
 
 struct AtomicEntry  { name: String, value: u64 }
-struct StreamEntry  { slot_id: usize, records: Vec<Vec<u8>> }
+struct StreamEntry  { slot_id: usize, records: Vec<(u32, Vec<u8>)> }
 struct SharedEntry  { name: String, payload: Vec<u8> }
 
 struct Snapshot {
@@ -63,8 +63,8 @@ struct Snapshot {
 /// The item captured by a single `watch_stream` / `watch_shared` call.
 /// Carries only heap-allocated data — no raw pointers, fully `Send`.
 enum WatchItem {
-    Stream { slot_id: usize, records: Vec<Vec<u8>>, output: PathBuf },
-    Shared { name: String,   payload: Vec<u8>,      output: PathBuf },
+    Stream { slot_id: usize, records: Vec<(u32, Vec<u8>)>, output: PathBuf },
+    Shared { name: String,   payload: Vec<u8>,             output: PathBuf },
 }
 
 // -----------------------------------------------------------------------------
@@ -215,17 +215,17 @@ fn take_snapshot(splice_addr: usize, opts: &PersistenceOptions) -> Snapshot {
 // -----------------------------------------------------------------------------
 
 /// Walks the length-prefixed page chain for stream `slot` and returns every record.
-pub(super) fn read_stream_records(base: usize, sb: &Superblock, slot: usize) -> Vec<Vec<u8>> {
+pub(super) fn read_stream_records(base: usize, sb: &Superblock, slot: usize) -> Vec<(u32, Vec<u8>)> {
     read_chain_records(base, sb.writer_heads[slot].load(Ordering::Acquire))
 }
 
 /// Walks the length-prefixed page chain for I/O `slot` and returns every record.
-pub(super) fn read_io_records(base: usize, sb: &Superblock, slot: usize) -> Vec<Vec<u8>> {
+pub(super) fn read_io_records(base: usize, sb: &Superblock, slot: usize) -> Vec<(u32, Vec<u8>)> {
     read_chain_records(base, sb.io_heads[slot].load(Ordering::Acquire))
 }
 
-/// Core page-chain walker: given a `head` offset, returns every length-prefixed record.
-fn read_chain_records(base: usize, head: u32) -> Vec<Vec<u8>> {
+/// Core page-chain walker: given a `head` offset, returns every length-prefixed record as (origin, payload).
+fn read_chain_records(base: usize, head: u32) -> Vec<(u32, Vec<u8>)> {
     if head == 0 { return Vec::new(); }
 
     let mut reader = PageReader::new(base, head);
@@ -234,9 +234,12 @@ fn read_chain_records(base: usize, head: u32) -> Vec<Vec<u8>> {
         let mut len_buf = [0u8; 4];
         if !reader.read(&mut len_buf) { break; }
         let record_len = u32::from_le_bytes(len_buf) as usize;
+        let mut origin_buf = [0u8; 4];
+        if !reader.read(&mut origin_buf) { break; }
+        let origin = u32::from_le_bytes(origin_buf);
         let mut payload = vec![0u8; record_len];
         if !reader.read(&mut payload) { break; }
-        records.push(payload);
+        records.push((origin, payload));
     }
     records
 }
@@ -328,8 +331,8 @@ fn write_watch(item: WatchItem) {
             if let Some(parent) = output.parent() { let _ = fs::create_dir_all(parent); }
             match fs::File::create(&output) {
                 Ok(mut f) => {
-                    for (i, rec) in records.iter().enumerate() {
-                        let _ = writeln!(f, "[{:4}] {}", i, String::from_utf8_lossy(rec));
+                    for (i, (origin, rec)) in records.iter().enumerate() {
+                        let _ = writeln!(f, "[{:4}][src={}] {}", i, origin, String::from_utf8_lossy(rec));
                     }
                     println!("[PersistenceWriter] watch stream {} ({} records) → {}",
                         slot_id, records.len(), output.display());
@@ -372,8 +375,8 @@ fn write_snapshot(s: Snapshot) {
         let path = s.output_dir.join(format!("stream_{}.txt", st.slot_id));
         match fs::File::create(&path) {
             Ok(mut f) => {
-                for (i, rec) in st.records.iter().enumerate() {
-                    let _ = writeln!(f, "[{:4}] {}", i, String::from_utf8_lossy(rec));
+                for (i, (origin, rec)) in st.records.iter().enumerate() {
+                    let _ = writeln!(f, "[{:4}][src={}] {}", i, origin, String::from_utf8_lossy(rec));
                 }
                 println!("[PersistenceWriter] stream {} ({} records) → {}",
                     st.slot_id, st.records.len(), path.display());

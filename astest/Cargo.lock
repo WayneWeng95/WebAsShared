@@ -758,6 +758,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "py_guest"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "common",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"

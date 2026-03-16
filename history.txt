@@ -7,6 +7,18 @@
    14  cargo +nightly build --release
    15  cd WebAsShared/astest/
 
+
+  Tobuild:
+  # 1. Clone MicroPython once 
+  git clone https://github.com/micropython/micropython.git astest/py_guest/micropython
+  cd astest/py_guest/micropython && make -C mpy-cross && cd - 
+
+  # 2. Build the WASM module 
+  cd astest
+  rustup target add wasm32-unknown-unknown 
+  cargo build -p py_guest --target wasm32-unknown-unknown --release
+  # → target/wasm32-unknown-unknown/release/py_guest.wasm  
+
    55  cd /opt/myapp/
 
    cargo run dag ../demo_dag/dag_demo.json 

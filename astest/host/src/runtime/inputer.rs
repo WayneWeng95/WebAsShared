@@ -212,6 +212,7 @@ impl Inputer {
 
     fn append_record(&self, slot: u32, payload: &[u8]) -> Result<()> {
         self.write_bytes(slot, &(payload.len() as u32).to_le_bytes())?;
+        self.write_bytes(slot, &slot.to_le_bytes())?;  // origin = slot
         self.write_bytes(slot, payload)
     }
 

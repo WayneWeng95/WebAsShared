@@ -36,6 +36,7 @@ impl ShmApi {
         chain_append_prefixed(
             &sb.io_heads[io_slot as usize],
             &sb.io_tails[io_slot as usize],
+            io_slot,
             payload,
         );
     }
@@ -43,7 +44,7 @@ impl ShmApi {
     /// Return the most recent record from I/O slot `io_slot`.
     ///
     /// Returns `None` when the host has not written any data into this slot.
-    pub fn read_latest_io_data(io_slot: u32) -> Option<Vec<u8>> {
+    pub fn read_latest_io_data(io_slot: u32) -> Option<(u32, Vec<u8>)> {
         let head = Self::superblock().io_heads[io_slot as usize].load(Ordering::Acquire);
         chain_read_latest(head)
     }
@@ -53,7 +54,7 @@ impl ShmApi {
     /// The host `Inputer` writes one record per non-empty line of the loaded
     /// file; this returns them all so the guest can iterate over every line.
     /// Returns an empty `Vec` when no input has been written.
-    pub fn read_all_io_records(io_slot: u32) -> Vec<Vec<u8>> {
+    pub fn read_all_io_records(io_slot: u32) -> Vec<(u32, Vec<u8>)> {
         let head = Self::superblock().io_heads[io_slot as usize].load(Ordering::Acquire);
         chain_read_all(head)
     }

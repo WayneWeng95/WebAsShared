@@ -64,6 +64,29 @@ pub const BUCKET_COUNT: usize = (PAGE_SIZE / 4) as usize;
 // Shuffle
 pub const PARALLEL_THRESHOLD: usize = 50;
 
+// ─── Free-list trim policy ────────────────────────────────────────────────────
+
+/// Master switch for free-list trimming.
+///
+/// Set to `false` to disable `trim_free_list` entirely (it becomes a no-op).
+/// Useful when profiling or when the working set is small enough that the
+/// free list never grows large.
+pub const FREE_LIST_TRIM_ENABLED: bool = true;
+
+/// Maximum total pages across all free-list shards before a trim fires.
+///
+/// When `trim_free_list` is called and the total free-list page count exceeds
+/// this threshold, the physical backing of half the excess pages is released
+/// to the OS via `madvise(MADV_DONTNEED)`.  The pages stay in the free list
+/// (virtual address space is preserved) so they remain immediately recyclable;
+/// the OS will zero-fill them again on the next write (soft page fault).
+///
+/// Sizing guide:
+///   Increase for workloads with large bursty allocations to reduce page-fault
+///   frequency; decrease to keep resident memory tighter.
+///   Set to 0 to trim unconditionally whenever the free list is non-empty.
+pub const FREE_LIST_TRIM_THRESHOLD: usize = 204800; // 800 MiB total free list (across all shards)
+
 // -------------------------------------------------------
 // Shared Data Structures (Guarantees ABI matching)
 // -------------------------------------------------------

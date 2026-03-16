@@ -62,32 +62,34 @@ impl ShmApi {
 
 impl ShmApi {
     /// Read the most recent record from the default `INPUT_IO_SLOT`.
-    pub fn read_input() -> Option<alloc::vec::Vec<u8>> {
+    pub fn read_input() -> Option<(u32, alloc::vec::Vec<u8>)> {
         Self::read_input_from(INPUT_IO_SLOT)
     }
 
     /// Read every record from the default `INPUT_IO_SLOT` in order.
-    pub fn read_all_inputs() -> alloc::vec::Vec<alloc::vec::Vec<u8>> {
+    pub fn read_all_inputs() -> alloc::vec::Vec<(u32, alloc::vec::Vec<u8>)> {
         Self::read_all_inputs_from(INPUT_IO_SLOT)
     }
 
     /// Read the most recent input record as UTF-8 from the default `INPUT_IO_SLOT`.
-    pub fn read_input_str() -> Option<alloc::string::String> {
+    pub fn read_input_str() -> Option<(u32, alloc::string::String)> {
         Self::read_input_str_from(INPUT_IO_SLOT)
     }
 
     /// Read the most recent record from an explicit I/O `slot`.
-    pub fn read_input_from(slot: u32) -> Option<alloc::vec::Vec<u8>> {
+    pub fn read_input_from(slot: u32) -> Option<(u32, alloc::vec::Vec<u8>)> {
         Self::read_latest_io_data(slot)
     }
 
     /// Read every record from an explicit I/O `slot` in order.
-    pub fn read_all_inputs_from(slot: u32) -> alloc::vec::Vec<alloc::vec::Vec<u8>> {
+    pub fn read_all_inputs_from(slot: u32) -> alloc::vec::Vec<(u32, alloc::vec::Vec<u8>)> {
         Self::read_all_io_records(slot)
     }
 
     /// Read the most recent record as UTF-8 from an explicit I/O `slot`.
-    pub fn read_input_str_from(slot: u32) -> Option<alloc::string::String> {
-        Self::read_input_from(slot).and_then(|b| alloc::string::String::from_utf8(b).ok())
+    pub fn read_input_str_from(slot: u32) -> Option<(u32, alloc::string::String)> {
+        Self::read_input_from(slot).and_then(|(origin, b)| {
+            alloc::string::String::from_utf8(b).ok().map(|s| (origin, s))
+        })
     }
 }

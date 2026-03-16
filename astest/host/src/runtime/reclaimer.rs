@@ -47,7 +47,10 @@ use anyhow::{anyhow, Result};
 use std::hint::spin_loop;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use common::{Page, Superblock, FREE_LIST_SHARD_COUNT, PAGE_SIZE};
+use nix::sys::mman::{madvise, MmapAdvise};
+
+use common::{Page, Superblock, FREE_LIST_SHARD_COUNT, FREE_LIST_TRIM_ENABLED,
+             FREE_LIST_TRIM_THRESHOLD, PAGE_SIZE};
 
 // ─── Global round-robin shard counter ────────────────────────────────────────
 
@@ -215,4 +218,130 @@ pub fn free_io_slot(splice_addr: usize, slot: usize) {
     let head = sb.io_heads[slot].swap(0, Ordering::AcqRel);
     sb.io_tails[slot].store(0, Ordering::Release);
     free_page_chain(splice_addr, head);
+}
+
+// ─── Free-list trim ───────────────────────────────────────────────────────────
+
+/// Count the total number of pages sitting in the free list across all shards.
+///
+/// Walks every shard's linked list.  This is a **best-effort heuristic** —
+/// it is not atomic with respect to concurrent alloc/free, so the result may
+/// be slightly stale.  That is acceptable: the trim decision only needs to be
+/// approximately correct.
+pub fn count_free_list_pages(splice_addr: usize) -> usize {
+    let sb = unsafe { &*(splice_addr as *const Superblock) };
+    let mut total = 0usize;
+    for shard in 0..FREE_LIST_SHARD_COUNT {
+        let mut current = sb.free_list_heads[shard].load(Ordering::Acquire);
+        while current != 0 {
+            total += 1;
+            let page = unsafe { &*((splice_addr + current as usize) as *const Page) };
+            current = page.next_offset.load(Ordering::Relaxed);
+        }
+    }
+    total
+}
+
+/// CAS-pop one page from the first non-empty shard.  Returns its byte offset
+/// from `splice_addr`, or `None` if all shards are empty.
+fn pop_one_free_page(splice_addr: usize) -> Option<u32> {
+    let sb = unsafe { &*(splice_addr as *const Superblock) };
+    for shard in 0..FREE_LIST_SHARD_COUNT {
+        loop {
+            let head = sb.free_list_heads[shard].load(Ordering::Acquire);
+            if head == 0 { break; }
+            let page = unsafe { &*((splice_addr + head as usize) as *const Page) };
+            let next = page.next_offset.load(Ordering::Relaxed);
+            match sb.free_list_heads[shard]
+                .compare_exchange(head, next, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => return Some(head),
+                Err(_) => spin_loop(),
+            }
+        }
+    }
+    None
+}
+
+/// CAS-push a single page back onto its deterministic shard.
+fn push_page_to_free_list(splice_addr: usize, offset: u32) {
+    let sb = unsafe { &*(splice_addr as *const Superblock) };
+    let shard = (offset / PAGE_SIZE) as usize % FREE_LIST_SHARD_COUNT;
+    let page = unsafe { &*((splice_addr + offset as usize) as *const Page) };
+    loop {
+        let old_head = sb.free_list_heads[shard].load(Ordering::Acquire);
+        // Writing next_offset after MADV_DONTNEED causes a soft page fault
+        // that allocates a fresh zero physical page — this is intentional and correct.
+        page.next_offset.store(old_head, Ordering::Relaxed);
+        match sb.free_list_heads[shard]
+            .compare_exchange(old_head, offset, Ordering::SeqCst, Ordering::SeqCst)
+        {
+            Ok(_) => break,
+            Err(_) => spin_loop(),
+        }
+    }
+}
+
+/// Release the physical memory backing of excess free-list pages to the OS.
+///
+/// Controlled by two constants in `common`:
+///   - [`FREE_LIST_TRIM_ENABLED`]  — master on/off switch (compile-time).
+///   - [`FREE_LIST_TRIM_THRESHOLD`] — page count at which trimming fires.
+///
+/// # What it does
+///
+/// 1. Counts total pages in the free list (approximate, lock-free walk).
+/// 2. If the count ≤ threshold, returns immediately — nothing to do.
+/// 3. Otherwise pops **half the excess** pages one by one with a CAS-pop,
+///    calls `madvise(MADV_DONTNEED)` on each to release physical RAM, then
+///    pushes them back onto the free list.
+///
+/// The pages are NOT removed from the virtual address space — they stay in
+/// the free list so future allocations can reuse their offsets without growing
+/// the bump pointer.  On the next write the OS will zero-fill them again via
+/// a soft page fault.  Physical RAM is only re-consumed when the page is
+/// actually written to again.
+///
+/// # When to call
+///
+/// Call this after each DAG wave's post-wave reclamation, or any point where
+/// many pages have just been freed and the working set is expected to shrink.
+/// The function is a no-op when `FREE_LIST_TRIM_ENABLED = false`.
+pub fn trim_free_list(splice_addr: usize) {
+    if !FREE_LIST_TRIM_ENABLED {
+        return;
+    }
+
+    let total = count_free_list_pages(splice_addr);
+    if total <= FREE_LIST_TRIM_THRESHOLD {
+        return;
+    }
+
+    // Release physical backing for half the excess pages.
+    let to_advise = (total - FREE_LIST_TRIM_THRESHOLD) / 2;
+    let mut advised = 0usize;
+
+    while advised < to_advise {
+        let Some(offset) = pop_one_free_page(splice_addr) else { break };
+
+        let page_ptr = (splice_addr + offset as usize) as *mut std::ffi::c_void;
+        // SAFETY: `page_ptr` is a valid SHM-backed 4 KiB page just removed
+        // from the free list.  MADV_DONTNEED releases its physical backing
+        // while keeping the virtual mapping — the OS zero-fills on next access.
+        unsafe {
+            let _ = madvise(page_ptr, PAGE_SIZE as usize, MmapAdvise::MADV_DONTNEED);
+        }
+
+        // Push back so the virtual offset stays recyclable.
+        push_page_to_free_list(splice_addr, offset);
+        advised += 1;
+    }
+
+    if advised > 0 {
+        println!(
+            "[Reclaimer] Trim: {advised} pages ({} KiB) released to OS \
+             (free-list had {total}, threshold {FREE_LIST_TRIM_THRESHOLD})",
+            advised * PAGE_SIZE as usize / 1024,
+        );
+    }
 }
