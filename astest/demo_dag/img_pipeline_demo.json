@@ -14,30 +14,44 @@
           "../data/img_checkerboard.ppm",
           "../data/img_rings.ppm"
         ],
-        "slot": 10
+        "slot": 10,
+        "binary": true
       }}
     },
-    { "id": "parse",    "deps": ["load"],    "kind": { "WasmVoid": { "func": "img_load_ppm",   "arg": 0 } } },
-    { "id": "rotate",   "deps": ["parse"],   "kind": { "WasmVoid": { "func": "img_rotate",     "arg": 0 } } },
-    { "id": "gray",     "deps": ["rotate"],  "kind": { "WasmVoid": { "func": "img_grayscale",  "arg": 0 } } },
-    { "id": "equalize", "deps": ["gray"],    "kind": { "WasmVoid": { "func": "img_equalize",   "arg": 0 } } },
-    { "id": "blur",     "deps": ["equalize"],"kind": { "WasmVoid": { "func": "img_blur",       "arg": 0 } } },
-    { "id": "export",   "deps": ["blur"],    "kind": { "WasmVoid": { "func": "img_export_ppm", "arg": 0 } } },
+
+    {
+      "id": "pipeline",
+      "deps": ["load"],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_load_ppm",   "arg0": 10, "arg1": 20 },
+          { "func": "img_rotate",     "arg0": 20, "arg1": 30 },
+          { "func": "img_grayscale",  "arg0": 30, "arg1": 40 },
+          { "func": "img_equalize",   "arg0": 40, "arg1": 50 },
+          { "func": "img_blur",       "arg0": 50, "arg1": 60 },
+          { "func": "img_export_ppm", "arg0": 60, "arg1": 1  }
+        ]
+      }}
+    },
+
     {
       "id": "save",
-      "deps": ["export"],
+      "deps": ["pipeline"],
       "kind": { "Output": {
         "paths": [
           "/tmp/img_pipeline_out/gradient_processed.pgm",
           "/tmp/img_pipeline_out/checkerboard_processed.pgm",
           "/tmp/img_pipeline_out/rings_processed.pgm"
-        ]
+        ],
+        "slot": 1
       }}
     },
+
     {
       "id": "free",
       "deps": ["save"],
-      "kind": { "FreeSlots": { "stream": [20, 30, 40, 50, 60], "io": [10] } }
+      "kind": { "FreeSlots": { "stream": [20, 30, 40, 50, 60], "io": [1] } }
     }
   ]
 }

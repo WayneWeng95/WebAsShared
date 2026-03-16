@@ -204,6 +204,21 @@ impl ShmApi {
         chain_read_all(head)
     }
 
+    /// Return the next unconsumed record from stream slot `id`, advancing a
+    /// per-slot cursor stored as a named SHM atomic (`"stream_cursor_{id}"`).
+    ///
+    /// Returns `None` when no new record has arrived since the last call —
+    /// allowing pipeline stages to return early and idle cleanly.
+    pub fn read_next_stream_record(id: u32) -> Option<(u32, Vec<u8>)> {
+        let name = alloc::format!("stream_cursor_{}", id);
+        let atomic = Self::get_named_atomic(&name);
+        let idx = atomic.load(Ordering::Acquire) as usize;
+        let records = Self::read_all_stream_records(id);
+        if idx >= records.len() { return None; }
+        atomic.fetch_add(1, Ordering::Release);
+        records.into_iter().nth(idx)
+    }
+
     /// Read `length` bytes from stream `writer_id` starting at absolute byte `offset`.
     /// Returns `None` if the stream is empty or `offset` is beyond all written data.
     pub fn read_stream_range(writer_id: u32, offset: u32, length: usize) -> Option<Vec<u8>> {

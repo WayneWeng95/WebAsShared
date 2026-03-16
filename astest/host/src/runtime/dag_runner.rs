@@ -298,28 +298,46 @@ pub struct WatchParams {
     pub shared: Option<String>,
 }
 
+/// One stage in a `StreamPipeline`.
+///
+/// The host calls `func(arg0, arg1_resolved)` as an isolated subprocess each
+/// tick the stage is active.  When `arg1` is `None` the host injects the
+/// current round number in its place — this is the convention for source
+/// stages that need to know which batch to produce.
+#[derive(Debug, Deserialize)]
+pub struct PipelineStage {
+    /// Exported WASM function name.
+    pub func: String,
+    /// First argument (typically the input slot).
+    pub arg0: u32,
+    /// Second argument.  `null` / `None` → inject the current round number.
+    pub arg1: Option<u32>,
+}
+
 /// Parameters for the `StreamPipeline` node.
 ///
-/// The host calls each stage WASM function once per round:
-///   1. `pipeline_source(source_slot, round)` — appends a fresh batch
-///   2. `pipeline_filter(source_slot, filter_slot)` — keeps even-indexed items
-///   3. `pipeline_transform(filter_slot, transform_slot)` — appends "|T" tag
-///   4. `pipeline_sink(transform_slot, summary_slot)` — emits a count/sum record
+/// Stages are executed in a pipelined wave schedule so adjacent rounds
+/// overlap.  For N rounds and D stages the total ticks = N + D − 1 instead
+/// of N × D for a naïve serial approach.
 ///
-/// Per-stage cursors are stored as named SHM atomics inside the WASM instance,
-/// so each stage only processes records written since the previous round.
+/// Per-stage cursors live in SHM atomics so they survive the process
+/// boundary between ticks.
+///
+/// Example (4-stage word-count pipeline):
+/// ```json
+/// { "rounds": 8, "stages": [
+///     { "func": "pipeline_source",    "arg0": 10, "arg1": null },
+///     { "func": "pipeline_filter",    "arg0": 10, "arg1": 20 },
+///     { "func": "pipeline_transform", "arg0": 20, "arg1": 30 },
+///     { "func": "pipeline_sink",      "arg0": 30, "arg1": 40 }
+/// ]}
+/// ```
 #[derive(Debug, Deserialize)]
 pub struct StreamPipelineParams {
     /// Number of rounds to execute.
     pub rounds: u32,
-    /// Slot written by the source stage (input to filter).
-    pub source_slot: u32,
-    /// Slot written by the filter stage (input to transform).
-    pub filter_slot: u32,
-    /// Slot written by the transform stage (input to sink).
-    pub transform_slot: u32,
-    /// Slot where the sink writes one summary record per round.
-    pub summary_slot: u32,
+    /// Ordered list of pipeline stages.  Must contain at least one entry.
+    pub stages: Vec<PipelineStage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -417,8 +435,10 @@ pub struct InputParams {
     /// Ignored when `paths` is non-empty.
     #[serde(default)]
     pub path: String,
-    /// Per-iteration paths for `reset` mode.  On run N the path used is
-    /// `paths[N % paths.len()]`.  Takes priority over `path` when non-empty.
+    /// When `binary` is false (default): on run N the path used is
+    /// `paths[N % paths.len()]` — one file per run.
+    /// When `binary` is true: ALL paths are loaded on every run, each as one
+    /// record, enabling cursor-based per-record consumption by the guest.
     #[serde(default)]
     pub paths: Vec<String>,
     /// Target I/O slot.  Defaults to `INPUT_IO_SLOT` when omitted.
@@ -430,6 +450,11 @@ pub struct InputParams {
     /// about to execute) to ensure the data is ready before it is consumed.
     #[serde(default)]
     pub prefetch: bool,
+    /// If `true`, load each file as a single binary record instead of
+    /// line-by-line.  All paths in `paths` are loaded on every run, producing
+    /// one SHM record per file.  Guests consume them with `read_next_io_record`.
+    #[serde(default)]
+    pub binary: bool,
 }
 
 // ─── Logger helpers ───────────────────────────────────────────────────────────
@@ -478,12 +503,10 @@ fn validate_dag(dag: &Dag) -> Result<()> {
                 stream_slots.extend_from_slice(&p.downstream);
             }
             NodeKind::StreamPipeline(p) => {
-                stream_slots.extend_from_slice(&[
-                    p.source_slot as usize,
-                    p.filter_slot as usize,
-                    p.transform_slot as usize,
-                    p.summary_slot as usize,
-                ]);
+                for s in &p.stages {
+                    stream_slots.push(s.arg0 as usize);
+                    if let Some(a1) = s.arg1 { stream_slots.push(a1 as usize); }
+                }
             }
             NodeKind::Watch(p) => {
                 if let Some(s) = p.stream { stream_slots.push(s); }
@@ -565,7 +588,8 @@ fn node_owned_slots(kind: &NodeKind) -> (Vec<usize>, Vec<usize>) {
         NodeKind::Output(p) =>
             (vec![], vec![p.slot.unwrap_or(OUTPUT_IO_SLOT) as usize]),
         NodeKind::StreamPipeline(p) =>
-            (vec![p.source_slot as usize], vec![]),
+            // stages[0].arg0 is the pipeline's source slot, owned by the upstream node.
+            (p.stages.first().map(|s| vec![s.arg0 as usize]).unwrap_or_default(), vec![]),
         _ => (vec![], vec![]),
     }
 }
@@ -670,10 +694,6 @@ fn is_subprocess_wasm_node(kind: &NodeKind) -> bool {
     )
 }
 
-/// Returns true for node kinds that require an in-process Wasmtime Store + Instance.
-fn is_wasm_node(kind: &NodeKind) -> bool {
-    matches!(kind, NodeKind::StreamPipeline(_))
-}
 
 // ─── Public entry points ──────────────────────────────────────────────────────
 
@@ -806,15 +826,13 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 }
             }
 
-            // 2. Partition wave: subprocess WASM, in-process WASM (StreamPipeline), host.
-            let (sub_idxs, rest_idxs): (Vec<usize>, Vec<usize>) = wave.iter()
+            // 2. Partition wave: subprocess WASM vs host (routing + StreamPipeline).
+            let (sub_idxs, host_idxs): (Vec<usize>, Vec<usize>) = wave.iter()
                 .partition(|&&idx| is_subprocess_wasm_node(&dag.nodes[idx].kind));
-            let (wasm_idxs, host_idxs): (Vec<usize>, Vec<usize>) = rest_idxs.iter()
-                .partition(|&&idx| is_wasm_node(&dag.nodes[idx].kind));
 
             if wave.len() > 1 {
-                println!("[DAG] Wave: {} nodes in parallel ({} subprocess + {} WASM + {} host)",
-                    wave.len(), sub_idxs.len(), wasm_idxs.len(), host_idxs.len());
+                println!("[DAG] Wave: {} nodes in parallel ({} subprocess + {} host)",
+                    wave.len(), sub_idxs.len(), host_idxs.len());
             }
 
             // 3a. Spawn all subprocess WASM nodes in parallel.
@@ -828,52 +846,8 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            // 3b. Run in-process WASM nodes (StreamPipeline) — threaded if multiple.
-            if wasm_idxs.len() >= 2 {
-                let scope_result = std::thread::scope(|s| -> Result<()> {
-                    let handles: Vec<_> = wasm_idxs.iter().map(|&idx| {
-                        let node = &dag.nodes[idx];
-                        let engine = &engine;
-                        let module = &module;
-                        let file = &file;
-                        let pw = persist_writer.as_ref().map(|w| w as &PersistenceWriter);
-                        let lg = logger.as_ref().map(|l| l as &HostLogger);
-                        let run_idx = (run_count - 1) as usize;
-                        let shm_path = dag.shm_path.as_str();
-                        let py_script = py_script;
-                        let py_wasm = py_wasm;
-                        let wasm_path = wasm_path;
-                        s.spawn(move || -> Result<()> {
-                            let mut tstore = Store::new(engine, WorkerState {
-                                file: file.try_clone()?,
-                                splice_addr: 0,
-                            });
-                            let mut tlinker = Linker::new(engine);
-                            let tmemory = setup_vma_environment(&mut tstore, &mut tlinker, file)?;
-                            let tinstance = tlinker.instantiate(&mut tstore, module)?;
-                            let mut dummy_ph: HashMap<String, PrefetchHandle> = HashMap::new();
-                            execute_node(node, &mut tstore, &tinstance, &tmemory,
-                                         pw, lg, &mut dummy_ph, run_idx,
-                                         shm_path, py_script, py_wasm, wasm_path)
-                        })
-                    }).collect();
-                    for h in handles {
-                        h.join().map_err(|_| anyhow!("WASM thread panicked"))??;
-                    }
-                    Ok(())
-                });
-                scope_result?;
-            } else if let Some(&idx) = wasm_idxs.first() {
-                let node = &dag.nodes[idx];
-                println!("[DAG] ── Node: {} ──", node.id);
-                execute_node(node, &mut store, &instance, &memory,
-                             persist_writer.as_ref().map(|w| w as &PersistenceWriter),
-                             logger.as_ref().map(|l| l as &HostLogger),
-                             &mut prefetch_handles, (run_count - 1) as usize,
-                             &dag.shm_path, py_script, py_wasm, wasm_path)?;
-            }
-
-            // 3c. Run host nodes on main thread (concurrent with subprocess children).
+            // 3b. Run host nodes on main thread (concurrent with subprocess children).
+            // StreamPipeline falls here and spawns its own sequential subprocesses per stage.
             for &idx in &host_idxs {
                 let node = &dag.nodes[idx];
                 println!("[DAG] ── Node: {} ──", node.id);
@@ -884,7 +858,7 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                              &dag.shm_path, py_script, py_wasm, wasm_path)?;
             }
 
-            // 3d. Wait for all subprocess WASM children.
+            // 3c. Wait for all subprocess WASM children.
             for (id, mut child) in children {
                 let status = child.wait()
                     .map_err(|e| anyhow!("[{}] failed to wait for WASM worker: {}", id, e))?;
@@ -928,11 +902,17 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                         }
                     }
                 }
-                // StreamPipeline intermediate slots are exclusively owned and internal.
+                // StreamPipeline: free all intermediate output slots (stages[1..depth-1]).
+                // stages[0].arg0 is the pipeline input (freed via node_owned_slots refcount).
+                // stages[last].arg1 is the summary output (consumed by downstream nodes).
                 if let NodeKind::StreamPipeline(p) = &node.kind {
-                    reclaimer::free_stream_slot(splice_addr, p.filter_slot as usize);
-                    reclaimer::free_stream_slot(splice_addr, p.transform_slot as usize);
-                    println!("[DAG] Reclaimed StreamPipeline internal slots {} {}", p.filter_slot, p.transform_slot);
+                    let depth = p.stages.len();
+                    for s in p.stages[1..depth.saturating_sub(1)].iter() {
+                        if let Some(slot) = s.arg1 {
+                            reclaimer::free_stream_slot(splice_addr, slot as usize);
+                            println!("[DAG] Reclaimed StreamPipeline internal slot {}", slot);
+                        }
+                    }
                 }
 
                 // Input slots: freed when all direct consumer nodes have run.
@@ -1021,6 +1001,25 @@ fn spawn_wasm_subprocess(
         .arg(arg.to_string())
         .spawn()
         .map_err(|e| anyhow!("[{}] failed to spawn WASM worker: {}", node.id, e))
+}
+
+/// Spawns `./host wasm-call <shm_path> <wasm_path> <func> void2 <arg0> <arg1>` as a child
+/// process for a single StreamPipeline stage and returns the handle.
+fn spawn_pipeline_stage(
+    func: &str,
+    arg0: u32,
+    arg1: u32,
+    shm_path: &str,
+    wasm_path: &str,
+    node_id: &str,
+) -> Result<std::process::Child> {
+    let exe = std::env::current_exe()
+        .map_err(|e| anyhow!("cannot find current exe: {}", e))?;
+    std::process::Command::new(exe)
+        .args(["wasm-call", shm_path, wasm_path, func, "void2",
+               &arg0.to_string(), &arg1.to_string()])
+        .spawn()
+        .map_err(|e| anyhow!("[{}] failed to spawn {}: {}", node_id, func, e))
 }
 
 // ─── Node executor ────────────────────────────────────────────────────────────
@@ -1134,45 +1133,68 @@ fn execute_node(
             }
         }
 
-        // ── Streaming pipeline: multi-round source→filter→transform→sink ─────
+        // ── Streaming pipeline: pipelined execution over DAG-defined stages ──
+        //
+        // Stage S is active on tick T when S ≤ T < rounds + S.
+        // Active stages within a tick are independent and run as parallel
+        // subprocesses; the tick barrier ensures each stage only sees data
+        // committed by the previous stage in the prior tick.
+        //
+        //   tick 0:  [stage·0·r0]
+        //   tick 1:  [stage·0·r1]  [stage·1·r0]
+        //   tick 2:  [stage·0·r2]  [stage·1·r1]  [stage·2·r0]
+        //   ...
+        //
+        // Total ticks = rounds + depth − 1.
         NodeKind::StreamPipeline(p) => {
-            let source_fn    = instance.get_typed_func::<(u32, u32), ()>(&mut *store, "pipeline_source")
-                .map_err(|e| anyhow!("[{}] pipeline_source: {}", node.id, e))?;
-            let filter_fn    = instance.get_typed_func::<(u32, u32), ()>(&mut *store, "pipeline_filter")
-                .map_err(|e| anyhow!("[{}] pipeline_filter: {}", node.id, e))?;
-            let transform_fn = instance.get_typed_func::<(u32, u32), ()>(&mut *store, "pipeline_transform")
-                .map_err(|e| anyhow!("[{}] pipeline_transform: {}", node.id, e))?;
-            let sink_fn      = instance.get_typed_func::<(u32, u32), ()>(&mut *store, "pipeline_sink")
-                .map_err(|e| anyhow!("[{}] pipeline_sink: {}", node.id, e))?;
-            let dump_fn      = instance.get_typed_func::<u32, u64>(&mut *store, "dump_stream_records")
-                .map_err(|e| anyhow!("[{}] dump_stream_records: {}", node.id, e))?;
+            let rounds = p.rounds as usize;
+            let depth  = p.stages.len();
+            if depth == 0 {
+                return Err(anyhow!("[{}] StreamPipeline has no stages", node.id));
+            }
+            let slot_chain: Vec<String> = p.stages.iter()
+                .map(|s| s.arg1.map_or_else(|| format!("{}(r)", s.arg0), |a| format!("{}→{}", s.arg0, a)))
+                .collect();
+            println!("  StreamPipeline: {} rounds, {} stages | {}",
+                rounds, depth, slot_chain.join(" › "));
+            log(&format!("pipeline {} rounds {} stages", rounds, depth));
 
-            println!("  StreamPipeline: {} rounds | slots {}→{}→{}→{}",
-                p.rounds, p.source_slot, p.filter_slot, p.transform_slot, p.summary_slot);
-            log(&format!(
-                "pipeline {} rounds: slots {}→{}→{}→{}",
-                p.rounds, p.source_slot, p.filter_slot, p.transform_slot, p.summary_slot
-            ));
+            let total_ticks = rounds + depth - 1;
+            for tick in 0..total_ticks {
+                let mut children: Vec<(&str, std::process::Child)> = Vec::new();
 
-            for round in 0..p.rounds {
-                source_fn.call(&mut *store, (p.source_slot, round))?;
-                filter_fn.call(&mut *store, (p.source_slot, p.filter_slot))?;
-                transform_fn.call(&mut *store, (p.filter_slot, p.transform_slot))?;
-                sink_fn.call(&mut *store, (p.transform_slot, p.summary_slot))?;
-                println!("    round {} complete", round);
-                log_debug(&format!("round {} complete", round));
+                for (s_idx, stage) in p.stages.iter().enumerate() {
+                    let tick_round = tick as isize - s_idx as isize;
+                    if tick_round >= 0 && (tick_round as usize) < rounds {
+                        // arg1 = None → inject round number; Some(v) → fixed slot arg
+                        let a1 = stage.arg1.unwrap_or(tick_round as u32);
+                        children.push((stage.func.as_str(),
+                            spawn_pipeline_stage(&stage.func, stage.arg0, a1, shm_path, wasm_path, &node.id)?));
+                    }
+                }
+
+                for (stage_func, mut child) in children {
+                    let status = child.wait()
+                        .map_err(|e| anyhow!("[{}] {} wait: {}", node.id, stage_func, e))?;
+                    if !status.success() {
+                        return Err(anyhow!("[{}] {} failed", node.id, stage_func));
+                    }
+                }
+                println!("    tick {} complete", tick);
+                log_debug(&format!("tick {} complete", tick));
             }
 
-            // Print the accumulated per-round summaries from the sink slot.
-            let packed = dump_fn.call(&mut *store, p.summary_slot)?;
-            if packed > 0 {
-                let ptr = (packed >> 32) as usize;
-                let len = (packed & 0xFFFF_FFFF) as usize;
-                let raw = unsafe { std::slice::from_raw_parts(base_ptr.add(ptr), len) };
-                let text = String::from_utf8_lossy(raw);
-                println!("  Pipeline sink summaries (slot {}):", p.summary_slot);
-                for line in text.lines() {
-                    println!("    {}", line);
+            // Dump the accumulated per-round summaries from the last stage's output slot.
+            if let Some(summary_slot) = p.stages.last().and_then(|s| s.arg1) {
+                let exe = std::env::current_exe()
+                    .map_err(|e| anyhow!("cannot find current exe: {}", e))?;
+                let status = std::process::Command::new(exe)
+                    .args(["wasm-call", shm_path, wasm_path, "dump_stream_records", "fatptr",
+                           &summary_slot.to_string()])
+                    .status()
+                    .map_err(|e| anyhow!("[{}] dump_stream_records spawn: {}", node.id, e))?;
+                if !status.success() {
+                    return Err(anyhow!("[{}] dump_stream_records failed", node.id));
                 }
             }
         }
@@ -1315,12 +1337,23 @@ fn execute_node(
         NodeKind::Input(p) => {
             use common::INPUT_IO_SLOT;
             let slot = p.slot.unwrap_or(INPUT_IO_SLOT);
-            let path = if !p.paths.is_empty() {
-                p.paths[run_index % p.paths.len()].as_str()
-            } else {
-                p.path.as_str()
-            };
-            if p.prefetch {
+            if p.binary {
+                // Load every path as a single binary record each run.
+                // Guests consume them one-at-a-time via read_next_io_record.
+                let paths: &[String] = if !p.paths.is_empty() { &p.paths } else { std::slice::from_ref(&p.path) };
+                let inputer = Inputer::new(splice_addr);
+                for path in paths {
+                    inputer.load_as_single_record(Path::new(path), slot)
+                        .map_err(|e| anyhow!("[{}] binary input load failed: {}", node.id, e))?;
+                    println!("  Input ← \"{}\" slot {} [binary]", path, slot);
+                    log(&format!("binary input loaded '{}' → slot {}", path, slot));
+                }
+            } else if p.prefetch {
+                let path = if !p.paths.is_empty() {
+                    p.paths[run_index % p.paths.len()].as_str()
+                } else {
+                    p.path.as_str()
+                };
                 // Fire off the load in a background thread; the executor will
                 // join this handle before the first node that lists us as a dep.
                 let handle = Inputer::prefetch(splice_addr, PathBuf::from(path), slot);
@@ -1328,6 +1361,11 @@ fn execute_node(
                 println!("  Input ← \"{}\" slot {} [prefetch started]", path, slot);
                 log(&format!("input prefetch started: '{}' → slot {}", path, slot));
             } else {
+                let path = if !p.paths.is_empty() {
+                    p.paths[run_index % p.paths.len()].as_str()
+                } else {
+                    p.path.as_str()
+                };
                 let count = Inputer::new(splice_addr)
                     .load(Path::new(path), slot)
                     .map_err(|e| anyhow!("[{}] input load failed: {}", node.id, e))?;

@@ -58,4 +58,20 @@ impl ShmApi {
         let head = Self::superblock().io_heads[io_slot as usize].load(Ordering::Acquire);
         chain_read_all(head)
     }
+
+    /// Return the next unconsumed record from I/O slot `io_slot`, advancing a
+    /// per-slot cursor stored as a named SHM atomic (`"io_cursor_{slot}"`).
+    ///
+    /// Returns `None` when no new record has arrived since the last call —
+    /// allowing pipeline stages to return early and idle cleanly.
+    pub fn read_next_io_record(io_slot: u32) -> Option<(u32, Vec<u8>)> {
+        use core::sync::atomic::Ordering;
+        let name = alloc::format!("io_cursor_{}", io_slot);
+        let atomic = Self::get_named_atomic(&name);
+        let idx = atomic.load(Ordering::Acquire) as usize;
+        let records = Self::read_all_io_records(io_slot);
+        if idx >= records.len() { return None; }
+        atomic.fetch_add(1, Ordering::Release);
+        records.into_iter().nth(idx)
+    }
 }

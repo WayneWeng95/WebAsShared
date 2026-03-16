@@ -183,10 +183,11 @@ pub fn setup_vma_environment(
     Ok(memory)
 }
 
-/// Loads the guest WASM module, calls `func(arg)` with the given return type, and exits.
-/// `ret_type` is one of `"void"`, `"u32"`, or `"fatptr"`.
-/// Called by the DAG runner as a subprocess for each WasmVoid/WasmU32/WasmFatPtr node.
-pub fn run_wasm_call(shm_path: &str, wasm_path: &str, func: &str, ret_type: &str, arg: u32) -> Result<()> {
+/// Loads the guest WASM module, calls `func` with the given return type, and exits.
+/// `ret_type` is one of `"void"`, `"void2"`, `"u32"`, or `"fatptr"`.
+/// `"void2"` calls `func(arg, arg1)` — used by StreamPipeline stages.
+/// Called by the DAG runner as a subprocess for each WASM node.
+pub fn run_wasm_call(shm_path: &str, wasm_path: &str, func: &str, ret_type: &str, arg: u32, arg1: Option<u32>) -> Result<()> {
     let file = OpenOptions::new().read(true).write(true).open(shm_path)?;
     let engine = create_wasmtime_engine()?;
     let mut store = Store::new(&engine, WorkerState {
@@ -199,6 +200,12 @@ pub fn run_wasm_call(shm_path: &str, wasm_path: &str, func: &str, ret_type: &str
     let instance = linker.instantiate(&mut store, &module)?;
 
     match ret_type {
+        "void2" => {
+            let a1 = arg1.unwrap_or(0);
+            let f = instance.get_typed_func::<(u32, u32), ()>(&mut store, func)
+                .map_err(|e| anyhow::anyhow!("no export '{}': {}", func, e))?;
+            f.call(&mut store, (arg, a1))?;
+        }
         "u32" => {
             let f = instance.get_typed_func::<u32, u32>(&mut store, func)
                 .map_err(|e| anyhow::anyhow!("no export '{}': {}", func, e))?;

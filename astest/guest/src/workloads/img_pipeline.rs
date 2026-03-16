@@ -1,14 +1,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Image processing pipeline demo  —  fixed-slot single-image pipeline
+// Image processing pipeline demo — slot arguments driven by the DAG JSON
 //
-// Slot layout:
-//   PIPE_IO_IN  (I/O 10)  ← host Input node writes raw PPM lines here
-//   PIPE_LOAD   (str 20)  ← img_load_ppm   : parsed internal image
-//   PIPE_ROT    (str 30)  ← img_rotate     : 90° CW rotated
-//   PIPE_GRAY   (str 40)  ← img_grayscale  : grayscale
-//   PIPE_EQ     (str 50)  ← img_equalize   : histogram equalised
-//   PIPE_BLUR   (str 60)  ← img_blur       : box blurred
-//   OUTPUT_IO_SLOT (I/O 1) ← img_export_ppm: binary PGM, flushed by Output node
+// Every function follows the StreamPipeline two-arg convention:
+//   (in_slot, out_slot)  —  read from in_slot, write to out_slot
+//
+// Boundary stages:
+//   img_load_ppm  (io_slot, out_stream)  — I/O area → stream area
+//   img_export_ppm(in_stream, out_io)    — stream area → I/O area
+//
+// Intermediate stages (stream → stream):
+//   img_rotate, img_grayscale, img_equalize, img_blur
+//
+// All stages use cursor-based reads (read_next_*) so each round processes
+// exactly one image and returns early (no-op) when no new record has arrived.
+// Cursors are stored as named SHM atomics keyed by slot, surviving across
+// the subprocess boundary between pipeline ticks.
 //
 // Internal image record format (one SHM record per image):
 //   [width: u16 LE][height: u16 LE][channels: u8][pixels: w*h*ch bytes]
@@ -16,13 +22,6 @@
 
 use alloc::vec::Vec;
 use crate::api::ShmApi;
-
-const PIPE_IO_IN: u32 = 10;
-const PIPE_LOAD:  u32 = 20;
-const PIPE_ROT:   u32 = 30;
-const PIPE_GRAY:  u32 = 40;
-const PIPE_EQ:    u32 = 50;
-const PIPE_BLUR:  u32 = 60;
 
 /// Decode a 5-byte image header. Returns (width, height, channels, pixel_slice).
 #[inline]
@@ -42,14 +41,18 @@ fn img_header(w: usize, h: usize, ch: usize) -> [u8; 5] {
     [wb[0], wb[1], hb[0], hb[1], ch as u8]
 }
 
-/// Load an ASCII PPM (P3) or PGM (P2) image from `PIPE_IO_IN` (I/O slot 10)
-/// and write the internal binary image format to `PIPE_LOAD` (stream slot 20).
+/// Load the next unread ASCII PPM (P3) or PGM (P2) image from I/O slot `io_slot`
+/// and write the internal binary image format to stream slot `out_slot`.
+/// Returns immediately (no-op) if no new record is available.
 #[no_mangle]
-pub extern "C" fn img_load_ppm(_: u32) {
-    let lines = ShmApi::read_all_inputs_from(PIPE_IO_IN);
+pub extern "C" fn img_load_ppm(io_slot: u32, out_slot: u32) {
+    let (_origin, raw) = match ShmApi::read_next_io_record(io_slot) {
+        Some(r) => r,
+        None => return,
+    };
 
     let mut all = alloc::string::String::new();
-    for (_origin, line) in &lines {
+    for line in raw.split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
         if let Ok(s) = core::str::from_utf8(line) {
             if !s.trim_start().starts_with('#') {
                 all.push_str(s.trim());
@@ -79,15 +82,14 @@ pub extern "C" fn img_load_ppm(_: u32) {
     let mut data = Vec::with_capacity(5 + expected);
     data.extend_from_slice(&img_header(w, h, ch));
     data.extend_from_slice(&pixels);
-    ShmApi::append_stream_data(PIPE_LOAD, &data);
+    ShmApi::append_stream_data(out_slot, &data);
 }
 
-/// Rotate 90° CW: reads `PIPE_LOAD` (stream 20), writes to `PIPE_ROT` (stream 30).
+/// Rotate 90° CW: reads next record from stream `in_slot`, writes to stream `out_slot`.
 #[no_mangle]
-pub extern "C" fn img_rotate(_: u32) {
-    let records = ShmApi::read_all_stream_records(PIPE_LOAD);
-    if records.is_empty() { return; }
-    let (w, h, ch, pixels) = match img_decode(&records[0].1) { Some(v) => v, None => return };
+pub extern "C" fn img_rotate(in_slot: u32, out_slot: u32) {
+    let (_origin, data) = match ShmApi::read_next_stream_record(in_slot) { Some(r) => r, None => return };
+    let (w, h, ch, pixels) = match img_decode(&data) { Some(v) => v, None => return };
     let (out_w, out_h) = (h, w);
     let mut buf = vec![0u8; out_w * out_h * ch];
     for r in 0..out_h {
@@ -97,36 +99,34 @@ pub extern "C" fn img_rotate(_: u32) {
             buf[dst..dst + ch].copy_from_slice(&pixels[src..src + ch]);
         }
     }
-    let mut data = Vec::with_capacity(5 + buf.len());
-    data.extend_from_slice(&img_header(out_w, out_h, ch));
-    data.extend_from_slice(&buf);
-    ShmApi::append_stream_data(PIPE_ROT, &data);
+    let mut out = Vec::with_capacity(5 + buf.len());
+    out.extend_from_slice(&img_header(out_w, out_h, ch));
+    out.extend_from_slice(&buf);
+    ShmApi::append_stream_data(out_slot, &out);
 }
 
-/// Grayscale: reads `PIPE_ROT` (stream 30), writes to `PIPE_GRAY` (stream 40).
+/// Grayscale: reads next record from stream `in_slot`, writes to stream `out_slot`.
 #[no_mangle]
-pub extern "C" fn img_grayscale(_: u32) {
-    let records = ShmApi::read_all_stream_records(PIPE_ROT);
-    if records.is_empty() { return; }
-    let (w, h, ch, pixels) = match img_decode(&records[0].1) { Some(v) => v, None => return };
-    let mut data = Vec::with_capacity(5 + w * h);
-    data.extend_from_slice(&img_header(w, h, 1));
+pub extern "C" fn img_grayscale(in_slot: u32, out_slot: u32) {
+    let (_origin, data) = match ShmApi::read_next_stream_record(in_slot) { Some(r) => r, None => return };
+    let (w, h, ch, pixels) = match img_decode(&data) { Some(v) => v, None => return };
+    let mut out = Vec::with_capacity(5 + w * h);
+    out.extend_from_slice(&img_header(w, h, 1));
     for i in 0..w * h {
         let b = i * ch;
         let gray = if ch >= 3 {
             ((pixels[b] as u32 * 77 + pixels[b+1] as u32 * 150 + pixels[b+2] as u32 * 29) >> 8) as u8
         } else { pixels[b] };
-        data.push(gray);
+        out.push(gray);
     }
-    ShmApi::append_stream_data(PIPE_GRAY, &data);
+    ShmApi::append_stream_data(out_slot, &out);
 }
 
-/// Histogram equalisation: reads `PIPE_GRAY` (stream 40), writes to `PIPE_EQ` (stream 50).
+/// Histogram equalisation: reads next record from stream `in_slot`, writes to stream `out_slot`.
 #[no_mangle]
-pub extern "C" fn img_equalize(_: u32) {
-    let records = ShmApi::read_all_stream_records(PIPE_GRAY);
-    if records.is_empty() { return; }
-    let (w, h, _ch, pixels) = match img_decode(&records[0].1) { Some(v) => v, None => return };
+pub extern "C" fn img_equalize(in_slot: u32, out_slot: u32) {
+    let (_origin, data) = match ShmApi::read_next_stream_record(in_slot) { Some(r) => r, None => return };
+    let (w, h, _ch, pixels) = match img_decode(&data) { Some(v) => v, None => return };
     let total = w * h;
     let mut hist = [0u32; 256];
     for &p in &pixels[..total] { hist[p as usize] += 1; }
@@ -142,20 +142,19 @@ pub extern "C" fn img_equalize(_: u32) {
             ((n as u64 * 255 + denom as u64 / 2) / denom as u64) as u8
         };
     }
-    let mut data = Vec::with_capacity(5 + total);
-    data.extend_from_slice(&records[0].1[..5]);
-    for &p in &pixels[..total] { data.push(lut[p as usize]); }
-    ShmApi::append_stream_data(PIPE_EQ, &data);
+    let mut out = Vec::with_capacity(5 + total);
+    out.extend_from_slice(&data[..5]);
+    for &p in &pixels[..total] { out.push(lut[p as usize]); }
+    ShmApi::append_stream_data(out_slot, &out);
 }
 
-/// 3×3 box blur: reads `PIPE_EQ` (stream 50), writes to `PIPE_BLUR` (stream 60).
+/// 3×3 box blur: reads next record from stream `in_slot`, writes to stream `out_slot`.
 #[no_mangle]
-pub extern "C" fn img_blur(_: u32) {
-    let records = ShmApi::read_all_stream_records(PIPE_EQ);
-    if records.is_empty() { return; }
-    let (w, h, _ch, pixels) = match img_decode(&records[0].1) { Some(v) => v, None => return };
-    let mut data = Vec::with_capacity(5 + w * h);
-    data.extend_from_slice(&records[0].1[..5]);
+pub extern "C" fn img_blur(in_slot: u32, out_slot: u32) {
+    let (_origin, data) = match ShmApi::read_next_stream_record(in_slot) { Some(r) => r, None => return };
+    let (w, h, _ch, pixels) = match img_decode(&data) { Some(v) => v, None => return };
+    let mut out = Vec::with_capacity(5 + w * h);
+    out.extend_from_slice(&data[..5]);
     for r in 0..h {
         for c in 0..w {
             let mut sum = 0u32; let mut cnt = 0u32;
@@ -164,22 +163,21 @@ pub extern "C" fn img_blur(_: u32) {
                     sum += pixels[nr * w + nc] as u32; cnt += 1;
                 }
             }
-            data.push((sum / cnt) as u8);
+            out.push((sum / cnt) as u8);
         }
     }
-    ShmApi::append_stream_data(PIPE_BLUR, &data);
+    ShmApi::append_stream_data(out_slot, &out);
 }
 
-/// Encode the blurred image from `PIPE_BLUR` (stream 60) as binary PGM (P5)
-/// and write it to `OUTPUT_IO_SLOT` for the host `Output` node to flush to disk.
+/// Encode the next image from stream slot `in_slot` as binary PGM (P5)
+/// and write it to I/O slot `out_io_slot` for the host `Output` node.
 #[no_mangle]
-pub extern "C" fn img_export_ppm(_: u32) {
-    let records = ShmApi::read_all_stream_records(PIPE_BLUR);
-    if records.is_empty() { return; }
-    let (w, h, _ch, pixels) = match img_decode(&records[0].1) { Some(v) => v, None => return };
+pub extern "C" fn img_export_ppm(in_slot: u32, out_io_slot: u32) {
+    let (_origin, data) = match ShmApi::read_next_stream_record(in_slot) { Some(r) => r, None => return };
+    let (w, h, _ch, pixels) = match img_decode(&data) { Some(v) => v, None => return };
     let hdr = alloc::format!("P5\n{} {}\n255\n", w, h);
     let mut pgm = Vec::with_capacity(hdr.len() + w * h);
     pgm.extend_from_slice(hdr.as_bytes());
     pgm.extend_from_slice(&pixels[..w * h]);
-    ShmApi::write_output(&pgm);
+    ShmApi::write_output_to(out_io_slot, &pgm);
 }
