@@ -8,10 +8,8 @@
 //   3. Calls `consume_routed_stream(id)` or `dump_stream_records(id)` to verify.
 // ─────────────────────────────────────────────────────────────────────────────
 
-use alloc::vec::Vec;
 use crate::api::ShmApi;
-
-static mut READ_BUFFER: Vec<u8> = Vec::new();
+use common::READ_BUFFER;
 
 /// Routing test (light): writes 3 labeled records to stream slot `id`.
 #[no_mangle]

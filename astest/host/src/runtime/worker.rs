@@ -7,7 +7,7 @@ use wasmtime::*;
 
 use crate::shm::{expand_mapping, map_into_memory};
 
-use common::{RegistryEntry, Superblock, INITIAL_SHM_SIZE, REGISTRY_OFFSET, REGISTRY_SIZE, TARGET_OFFSET};
+use common::{RegistryEntry, Superblock, INITIAL_SHM_SIZE, REGISTRY_OFFSET, REGISTRY_SIZE, TARGET_OFFSET, WASM_PATH};
 
 use crate::runtime::organizer::BucketOrganizer;
 use crate::policy::{LastWriteWinsPolicy, MajorityWinsPolicy, MaxIdWinsPolicy, MinIdWinsPolicy};
@@ -16,8 +16,6 @@ use crate::routing::aggregate::AggregateConnection;
 use crate::routing::broadcast::BroadcastConnection;
 use crate::routing::shuffle::ShuffleConnection;
 use crate::policy::{ModuloPartition, RoundRobinPartition, FixedMapPartition};
-
-const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";
 
 // Config constants
 const WRITER_TOTAL_ITEMS: u32 = 5000;

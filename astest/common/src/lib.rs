@@ -1,6 +1,17 @@
 #![no_std]
+extern crate alloc;
 
 use core::sync::atomic::AtomicU32;
+
+// ── Shared path / buffer constants ──────────────────────────────────────────
+
+/// Path to the compiled guest WASM module (relative to the host working dir).
+pub const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";
+
+/// Persistent buffer used to extend the lifetime of a returned payload across
+/// the WASM ABI boundary.  Shared by any guest function that returns a fat
+/// pointer — only one call is active at a time (WASM is single-threaded).
+pub static mut READ_BUFFER: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
 
 // -------------------------------------------------------
 // Memory Layout Constants (Single Source of Truth)

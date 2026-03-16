@@ -1,9 +1,7 @@
 use core::sync::atomic::Ordering;
 use alloc::format;
-use alloc::vec::Vec;
 use crate::api::ShmApi;
-
-static mut READ_BUFFER: Vec<u8> = Vec::new();
+use common::READ_BUFFER;
 
 /// WASM export: writer workload for worker `id`.
 /// Updates named atomics in the Registry, inserts a conflict node into the shared hash map,

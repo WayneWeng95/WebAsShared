@@ -118,8 +118,7 @@ use crate::runtime::slicer::Slicer;
 use crate::runtime::worker::{create_wasmtime_engine, setup_vma_environment, WorkerState};
 use crate::runtime::writer::{PersistenceOptions, PersistenceWriter};
 use crate::shm::format_shared_memory;
-
-const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";
+use common::WASM_PATH;
 
 // ─── JSON schema ─────────────────────────────────────────────────────────────
 
