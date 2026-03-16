@@ -87,6 +87,23 @@
 //! - `"reset"` — re-execute immediately from the first node using the **same**
 //!   WASM instance and SHM connection, looping until SIGINT (Ctrl-C).
 //!
+//! ## Python WASM execution
+//! Set the optional `"python_wasm"` field to run `PyFunc` nodes through a
+//! pre-built `python.wasm` binary via `wasmtime run` instead of the host's
+//! native `python3`:
+//! ```json
+//! {
+//!   "shm_path": "...",
+//!   "python_script": "../py_guest/python/runner.py",
+//!   "python_wasm": "/opt/myapp/python-3.12.0.wasm",
+//!   "nodes": [...]
+//! }
+//! ```
+//! The framework automatically mounts the SHM parent directory and the script
+//! directory as WASI preopens, so the guest can read/write the SHM file and
+//! import the `workloads` module.  Requires `wasmtime` to be on `PATH`.
+//! Omit `"python_wasm"` (or leave it `null`) to fall back to native `python3`.
+//!
 //! ## Logging
 //! Set the optional `"log_level"` field to enable host-side logging into the
 //! SHM LOG_ARENA (readable alongside guest log output via the `func_b` reader):
@@ -140,6 +157,20 @@ pub enum DagMode {
 pub struct Dag {
     /// Path to the SHM file; created and formatted automatically.
     pub shm_path: String,
+    /// Optional path to the WASM module.  Defaults to `WASM_PATH` (guest.wasm).
+    #[serde(default)]
+    pub wasm_path: Option<String>,
+    /// Path to the Python runner script (runner.py).  Required when any node
+    /// uses `PyFunc`.  Relative paths are resolved from the process working dir.
+    #[serde(default)]
+    pub python_script: Option<String>,
+    /// Optional path to a `python.wasm` binary.  When set, `PyFunc` nodes are
+    /// executed via `wasmtime run <python_wasm> -- <python_script>` instead of
+    /// the host's native `python3`.  Requires `wasmtime` to be on PATH.
+    /// The SHM parent directory and the script directory are automatically
+    /// mounted as WASI preopens so the guest can access both.
+    #[serde(default)]
+    pub python_wasm: Option<String>,
     /// Optional log level for host-side SHM logging.
     /// Accepted: `"debug"`, `"info"`, `"warn"`, `"error"`, `"off"` (default).
     #[serde(default)]
@@ -198,12 +229,26 @@ pub enum NodeKind {
     /// slot (INPUT_SLOT_ID), one record per non-empty line.  The guest reads
     /// the records via `ShmApi::read_input` / `ShmApi::read_all_inputs`.
     Input(InputParams),
+    /// Spawn the Python runner script with `WORKLOAD_FUNC` / `WORKLOAD_ARG`
+    /// env vars.  Uses the host's native `python3` (or a pre-built
+    /// `python.wasm` via `wasmtime run`) specified in the DAG `python_script`.
+    PyFunc(PyFuncCall),
 }
 
 #[derive(Debug, Deserialize)]
 pub struct WasmCall {
     pub func: String,
     pub arg: u32,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PyFuncCall {
+    pub func: String,
+    #[serde(default)]
+    pub arg: u32,
+    /// Optional second argument for two-parameter workload functions.
+    #[serde(default)]
+    pub arg2: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -616,14 +661,18 @@ fn build_waves(nodes: &[DagNode], order: &[usize]) -> Vec<Vec<usize>> {
     waves
 }
 
-/// Returns true for node kinds that require a Wasmtime Store + Instance to execute.
-fn is_wasm_node(kind: &NodeKind) -> bool {
+/// Returns true for node kinds executed as isolated subprocesses (WasmVoid/WasmU32/WasmFatPtr).
+fn is_subprocess_wasm_node(kind: &NodeKind) -> bool {
     matches!(kind,
         NodeKind::WasmVoid(_)
         | NodeKind::WasmU32(_)
         | NodeKind::WasmFatPtr(_)
-        | NodeKind::StreamPipeline(_)
     )
+}
+
+/// Returns true for node kinds that require an in-process Wasmtime Store + Instance.
+fn is_wasm_node(kind: &NodeKind) -> bool {
+    matches!(kind, NodeKind::StreamPipeline(_))
 }
 
 // ─── Public entry points ──────────────────────────────────────────────────────
@@ -670,8 +719,11 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
     let mut linker = Linker::new(&engine);
     let memory = setup_vma_environment(&mut store, &mut linker, &file)?;
 
-    let module = Module::from_file(&engine, WASM_PATH)?;
+    let wasm_path = dag.wasm_path.as_deref().unwrap_or(WASM_PATH);
+    let module = Module::from_file(&engine, wasm_path)?;
     let instance = linker.instantiate(&mut store, &module)?;
+    let py_script = dag.python_script.as_deref().unwrap_or("");
+    let py_wasm   = dag.python_wasm.as_deref();
 
     // Build an optional logger now that splice_addr is known.
     let splice_addr = store.data().splice_addr;
@@ -754,17 +806,31 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 }
             }
 
-            // 2. Split wave into WASM vs host nodes.
-            let (wasm_idxs, host_idxs): (Vec<usize>, Vec<usize>) = wave.iter()
+            // 2. Partition wave: subprocess WASM, in-process WASM (StreamPipeline), host.
+            let (sub_idxs, rest_idxs): (Vec<usize>, Vec<usize>) = wave.iter()
+                .partition(|&&idx| is_subprocess_wasm_node(&dag.nodes[idx].kind));
+            let (wasm_idxs, host_idxs): (Vec<usize>, Vec<usize>) = rest_idxs.iter()
                 .partition(|&&idx| is_wasm_node(&dag.nodes[idx].kind));
 
-            // 3. Execute nodes.
-            if wasm_idxs.len() >= 2 {
-                println!("[DAG] Wave: {} nodes in parallel ({} WASM + {} host)",
-                    wave.len(), wasm_idxs.len(), host_idxs.len());
+            if wave.len() > 1 {
+                println!("[DAG] Wave: {} nodes in parallel ({} subprocess + {} WASM + {} host)",
+                    wave.len(), sub_idxs.len(), wasm_idxs.len(), host_idxs.len());
+            }
 
+            // 3a. Spawn all subprocess WASM nodes in parallel.
+            let mut children: Vec<(String, std::process::Child)> = sub_idxs
+                .iter()
+                .map(|&idx| {
+                    let node = &dag.nodes[idx];
+                    println!("[DAG] ── Node: {} ──", node.id);
+                    let child = spawn_wasm_subprocess(node, dag.shm_path.as_str(), wasm_path)?;
+                    Ok((node.id.clone(), child))
+                })
+                .collect::<Result<Vec<_>>>()?;
+
+            // 3b. Run in-process WASM nodes (StreamPipeline) — threaded if multiple.
+            if wasm_idxs.len() >= 2 {
                 let scope_result = std::thread::scope(|s| -> Result<()> {
-                    // Spawn each WASM node in its own thread.
                     let handles: Vec<_> = wasm_idxs.iter().map(|&idx| {
                         let node = &dag.nodes[idx];
                         let engine = &engine;
@@ -773,6 +839,10 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                         let pw = persist_writer.as_ref().map(|w| w as &PersistenceWriter);
                         let lg = logger.as_ref().map(|l| l as &HostLogger);
                         let run_idx = (run_count - 1) as usize;
+                        let shm_path = dag.shm_path.as_str();
+                        let py_script = py_script;
+                        let py_wasm = py_wasm;
+                        let wasm_path = wasm_path;
                         s.spawn(move || -> Result<()> {
                             let mut tstore = Store::new(engine, WorkerState {
                                 file: file.try_clone()?,
@@ -783,37 +853,45 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                             let tinstance = tlinker.instantiate(&mut tstore, module)?;
                             let mut dummy_ph: HashMap<String, PrefetchHandle> = HashMap::new();
                             execute_node(node, &mut tstore, &tinstance, &tmemory,
-                                         pw, lg, &mut dummy_ph, run_idx)
+                                         pw, lg, &mut dummy_ph, run_idx,
+                                         shm_path, py_script, py_wasm, wasm_path)
                         })
                     }).collect();
-
-                    // Run host nodes on main thread while WASM threads run.
-                    for &idx in &host_idxs {
-                        let node = &dag.nodes[idx];
-                        println!("[DAG] ── Node: {} ──", node.id);
-                        execute_node(node, &mut store, &instance, &memory,
-                                     persist_writer.as_ref().map(|w| w as &PersistenceWriter),
-                                     logger.as_ref().map(|l| l as &HostLogger),
-                                     &mut prefetch_handles, (run_count - 1) as usize)?;
-                    }
-
-                    // Join all WASM threads.
                     for h in handles {
                         h.join().map_err(|_| anyhow!("WASM thread panicked"))??;
                     }
                     Ok(())
                 });
                 scope_result?;
-            } else {
-                // Sequential path.
-                for &idx in wave {
-                    let node = &dag.nodes[idx];
-                    println!("[DAG] ── Node: {} ──", node.id);
-                    execute_node(node, &mut store, &instance, &memory,
-                                 persist_writer.as_ref().map(|w| w as &PersistenceWriter),
-                                 logger.as_ref().map(|l| l as &HostLogger),
-                                 &mut prefetch_handles, (run_count - 1) as usize)?;
+            } else if let Some(&idx) = wasm_idxs.first() {
+                let node = &dag.nodes[idx];
+                println!("[DAG] ── Node: {} ──", node.id);
+                execute_node(node, &mut store, &instance, &memory,
+                             persist_writer.as_ref().map(|w| w as &PersistenceWriter),
+                             logger.as_ref().map(|l| l as &HostLogger),
+                             &mut prefetch_handles, (run_count - 1) as usize,
+                             &dag.shm_path, py_script, py_wasm, wasm_path)?;
+            }
+
+            // 3c. Run host nodes on main thread (concurrent with subprocess children).
+            for &idx in &host_idxs {
+                let node = &dag.nodes[idx];
+                println!("[DAG] ── Node: {} ──", node.id);
+                execute_node(node, &mut store, &instance, &memory,
+                             persist_writer.as_ref().map(|w| w as &PersistenceWriter),
+                             logger.as_ref().map(|l| l as &HostLogger),
+                             &mut prefetch_handles, (run_count - 1) as usize,
+                             &dag.shm_path, py_script, py_wasm, wasm_path)?;
+            }
+
+            // 3d. Wait for all subprocess WASM children.
+            for (id, mut child) in children {
+                let status = child.wait()
+                    .map_err(|e| anyhow!("[{}] failed to wait for WASM worker: {}", id, e))?;
+                if !status.success() {
+                    return Err(anyhow!("[{}] WASM worker exited with {}", id, status));
                 }
+                println!("  [{}] → ok", id);
             }
 
             // 4. Post-wave slot reclamation for all nodes in wave.
@@ -917,6 +995,34 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
     Ok(())
 }
 
+// ─── Subprocess WASM helpers ──────────────────────────────────────────────────
+
+/// Spawns `./host wasm-call <shm_path> <wasm_path> <func> <ret_type> <arg>` as a
+/// child process and returns the handle.  The caller must `.wait()` on it.
+fn spawn_wasm_subprocess(
+    node: &DagNode,
+    shm_path: &str,
+    wasm_path: &str,
+) -> Result<std::process::Child> {
+    let (func, ret_type, arg) = match &node.kind {
+        NodeKind::WasmVoid(c)   => (c.func.as_str(), "void",   c.arg),
+        NodeKind::WasmU32(c)    => (c.func.as_str(), "u32",    c.arg),
+        NodeKind::WasmFatPtr(c) => (c.func.as_str(), "fatptr", c.arg),
+        _ => return Err(anyhow!("[{}] not a subprocess WASM node", node.id)),
+    };
+    let exe = std::env::current_exe()
+        .map_err(|e| anyhow!("cannot find current exe: {}", e))?;
+    std::process::Command::new(exe)
+        .arg("wasm-call")
+        .arg(shm_path)
+        .arg(wasm_path)
+        .arg(func)
+        .arg(ret_type)
+        .arg(arg.to_string())
+        .spawn()
+        .map_err(|e| anyhow!("[{}] failed to spawn WASM worker: {}", node.id, e))
+}
+
 // ─── Node executor ────────────────────────────────────────────────────────────
 
 fn execute_node(
@@ -928,6 +1034,10 @@ fn execute_node(
     logger: Option<&HostLogger>,
     prefetch_handles: &mut HashMap<String, PrefetchHandle>,
     run_index: usize,
+    shm_path: &str,
+    python_script: &str,
+    python_wasm: Option<&str>,
+    wasm_path: &str,
 ) -> Result<()> {
     let splice_addr = store.data().splice_addr;
     let base_ptr = memory.data_ptr(&*store);
@@ -945,53 +1055,16 @@ fn execute_node(
     };
 
     match &node.kind {
-        // ── WASM: void return ────────────────────────────────────────────────
-        NodeKind::WasmVoid(call) => {
-            log_debug(&format!("call {}({})", call.func, call.arg));
-            let func = instance.get_typed_func::<u32, ()>(&mut *store, &call.func)
-                .map_err(|e| anyhow!("[{}] no WASM export '{}': {}", node.id, call.func, e))?;
-            func.call(&mut *store, call.arg)?;
-            println!("  {}({}) → ()", call.func, call.arg);
-            log(&format!("{}({}) done", call.func, call.arg));
-        }
-
-        // ── WASM: u32 return ─────────────────────────────────────────────────
-        NodeKind::WasmU32(call) => {
-            log_debug(&format!("call {}({})", call.func, call.arg));
-            let func = instance.get_typed_func::<u32, u32>(&mut *store, &call.func)
-                .map_err(|e| anyhow!("[{}] no WASM export '{}': {}", node.id, call.func, e))?;
-            let result = func.call(&mut *store, call.arg)?;
-            println!("  {}({}) → {}", call.func, call.arg, result);
-            log(&format!("{}({}) → {}", call.func, call.arg, result));
-        }
-
-        // ── WASM: fat-pointer return — prints all records ─────────────────────
-        NodeKind::WasmFatPtr(call) => {
-            log_debug(&format!("call {}({})", call.func, call.arg));
-            let func = instance.get_typed_func::<u32, u64>(&mut *store, &call.func)
-                .map_err(|e| anyhow!("[{}] no WASM export '{}': {}", node.id, call.func, e))?;
-            let packed = func.call(&mut *store, call.arg)?;
-            if packed > 0 {
-                let ptr = (packed >> 32) as usize;
-                let len = (packed & 0xFFFF_FFFF) as usize;
-                let raw = unsafe { std::slice::from_raw_parts(base_ptr.add(ptr), len) };
-                let text = String::from_utf8_lossy(raw);
-                let lines: Vec<&str> = text.lines().collect();
-                println!("  {}({}) → {} records:", call.func, call.arg, lines.len());
-                // Print first 5 and last 5 to keep output readable for large dumps.
-                let show_all = lines.len() <= 10;
-                for (i, line) in lines.iter().enumerate() {
-                    if show_all || i < 5 || i >= lines.len().saturating_sub(5) {
-                        println!("    [{:4}] {}", i, line);
-                    } else if i == 5 {
-                        println!("    ... {} records omitted ...", lines.len() - 10);
-                    }
-                }
-                log(&format!("{}({}) → {} records", call.func, call.arg, lines.len()));
-            } else {
-                println!("  {}({}) → (empty)", call.func, call.arg);
-                log(&format!("{}({}) → empty", call.func, call.arg));
+        // ── WASM subprocess nodes — spawned as isolated child processes ───────
+        NodeKind::WasmVoid(_) | NodeKind::WasmU32(_) | NodeKind::WasmFatPtr(_) => {
+            log_debug(&format!("spawn subprocess for node {}", node.id));
+            let mut child = spawn_wasm_subprocess(node, shm_path, wasm_path)?;
+            let status = child.wait()
+                .map_err(|e| anyhow!("[{}] failed to wait for WASM worker: {}", node.id, e))?;
+            if !status.success() {
+                return Err(anyhow!("[{}] WASM worker exited with {}", node.id, status));
             }
+            log(&format!("node {} done", node.id));
         }
 
         // ── Host routing: HostStream 1→1 bridge ──────────────────────────────
@@ -1261,6 +1334,86 @@ fn execute_node(
                 println!("  Input ← \"{}\" slot {} ({} records)", path, slot, count);
                 log(&format!("input loaded '{}' → slot {} ({} records)", path, slot, count));
             }
+        }
+
+        // ── PyFunc: spawn Python runner with env vars ─────────────────────────
+        NodeKind::PyFunc(call) => {
+            if python_script.is_empty() {
+                return Err(anyhow!(
+                    "[{}] PyFunc requires 'python_script' to be set in the DAG JSON",
+                    node.id
+                ));
+            }
+            log_debug(&format!("PyFunc {}({})", call.func, call.arg));
+
+            let status = if let Some(wasm_path) = python_wasm {
+                // ── WASM execution via `wasmtime run` ──────────────────────
+                // Mount the SHM parent dir and the script dir as WASI preopens
+                // so the guest can open both the SHM file and the Python modules.
+                let script_dir = Path::new(python_script)
+                    .parent()
+                    .unwrap_or(Path::new("."))
+                    .to_string_lossy();
+                let shm_dir = Path::new(shm_path)
+                    .parent()
+                    .unwrap_or(Path::new("/dev/shm"))
+                    .to_string_lossy();
+
+                // Resolve the wasmtime binary: prefer the WASMTIME env var,
+                // then $HOME/.wasmtime/bin/wasmtime, then fall back to PATH.
+                let wasmtime_bin = std::env::var("WASMTIME").unwrap_or_else(|_| {
+                    let candidate = std::env::var("HOME")
+                        .map(|h| format!("{}/.wasmtime/bin/wasmtime", h))
+                        .unwrap_or_default();
+                    if !candidate.is_empty() && std::path::Path::new(&candidate).exists() {
+                        candidate
+                    } else {
+                        "wasmtime".to_owned()
+                    }
+                });
+                let mut cmd = std::process::Command::new(&wasmtime_bin);
+                cmd.arg("run")
+                    .arg("--env").arg(format!("SHM_PATH={}", shm_path))
+                    .arg("--env").arg(format!("WORKLOAD_FUNC={}", call.func))
+                    .arg("--env").arg(format!("WORKLOAD_ARG={}", call.arg));
+                if let Some(a2) = call.arg2 {
+                    cmd.arg("--env").arg(format!("WORKLOAD_ARG2={}", a2));
+                }
+                // Mount SHM directory (may equal script_dir for some setups).
+                cmd.arg("--dir").arg(shm_dir.as_ref());
+                // Mount script directory (skipped if same as shm_dir to avoid
+                // duplicate preopen warnings from some wasmtime versions).
+                if script_dir != shm_dir {
+                    cmd.arg("--dir").arg(script_dir.as_ref());
+                }
+                cmd.arg(wasm_path)
+                    .arg("--")
+                    .arg(python_script);
+
+                println!("  PyFunc {}({}) via python.wasm", call.func, call.arg);
+                cmd.status()
+                    .map_err(|e| anyhow!("[{}] failed to spawn wasmtime: {}", node.id, e))?
+            } else {
+                // ── Native execution via `python3` ─────────────────────────
+                let mut cmd = std::process::Command::new("python3");
+                cmd.arg(python_script)
+                    .env("SHM_PATH",      shm_path)
+                    .env("WORKLOAD_FUNC", &call.func)
+                    .env("WORKLOAD_ARG",  call.arg.to_string());
+                if let Some(a2) = call.arg2 {
+                    cmd.env("WORKLOAD_ARG2", a2.to_string());
+                }
+                cmd.status()
+                    .map_err(|e| anyhow!("[{}] failed to spawn python3: {}", node.id, e))?
+            };
+
+            if !status.success() {
+                return Err(anyhow!(
+                    "[{}] Python exited with status {}", node.id, status
+                ));
+            }
+            println!("  PyFunc {}({}) → ok", call.func, call.arg);
+            log(&format!("PyFunc {}({}) done", call.func, call.arg));
         }
     }
 

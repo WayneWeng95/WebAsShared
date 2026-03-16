@@ -1,0 +1,55 @@
+{
+  "shm_path": "/dev/shm/py_word_count_demo",
+  "python_script": "../py_guest/python/runner.py",
+  "python_wasm": "/opt/myapp/python-3.12.0.wasm",
+  "log_level": "info",
+  "nodes": [
+
+    {
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+    },
+
+    {
+      "id": "distribute",
+      "deps": ["load"],
+      "kind": { "PyFunc": { "func": "wc_distribute", "arg": 10 } }
+    },
+
+    { "id": "map_0", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 10 } } },
+    { "id": "map_1", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 11 } } },
+    { "id": "map_2", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 12 } } },
+    { "id": "map_3", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 13 } } },
+    { "id": "map_4", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 14 } } },
+    { "id": "map_5", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 15 } } },
+    { "id": "map_6", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 16 } } },
+    { "id": "map_7", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 17 } } },
+    { "id": "map_8", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 18 } } },
+    { "id": "map_9", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 19 } } },
+
+    {
+      "id": "aggregate",
+      "deps": ["map_0","map_1","map_2","map_3","map_4","map_5","map_6","map_7","map_8","map_9"],
+      "kind": {
+        "Aggregate": {
+          "upstream": [110, 111, 112, 113, 114, 115, 116, 117, 118, 119],
+          "downstream": 200
+        }
+      }
+    },
+
+    {
+      "id": "reduce",
+      "deps": ["aggregate"],
+      "kind": { "PyFunc": { "func": "wc_reduce", "arg": 200 } }
+    },
+
+    {
+      "id": "save",
+      "deps": ["reduce"],
+      "kind": { "Output": { "path": "/tmp/py_word_count_result.txt" } }
+    }
+
+  ]
+}

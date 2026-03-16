@@ -153,7 +153,77 @@ pub fn setup_vma_environment(
     )?;
 
     linker.define(&mut *store, "env", "memory", memory)?;
+
+    // ── WASI stubs ────────────────────────────────────────────────────────────
+    // py_guest embeds MicroPython which links against wasi-libc and imports a
+    // handful of fd_* functions.  We provide no-op stubs so the module
+    // instantiates without a full WASI context.  Python output is discarded
+    // (workloads write results via shm.write_output instead of print()).
+    linker.func_wrap(
+        "wasi_snapshot_preview1", "fd_write",
+        |_caller: Caller<'_, WorkerState>,
+         _fd: i32, _iovs: i32, _iovs_len: i32, _nwritten_ptr: i32| -> i32 { 0 },
+    )?;
+    linker.func_wrap(
+        "wasi_snapshot_preview1", "fd_close",
+        |_caller: Caller<'_, WorkerState>, _fd: i32| -> i32 { 0 },
+    )?;
+    linker.func_wrap(
+        "wasi_snapshot_preview1", "fd_seek",
+        |_caller: Caller<'_, WorkerState>,
+         _fd: i32, _offset: i64, _whence: i32, _newoffset_ptr: i32| -> i32 { 0 },
+    )?;
+    linker.func_wrap(
+        "wasi_snapshot_preview1", "fd_fdstat_get",
+        |_caller: Caller<'_, WorkerState>, _fd: i32, _stat_ptr: i32| -> i32 {
+            8 // WASI errno: EBADF — no real file descriptors available
+        },
+    )?;
+
     Ok(memory)
+}
+
+/// Loads the guest WASM module, calls `func(arg)` with the given return type, and exits.
+/// `ret_type` is one of `"void"`, `"u32"`, or `"fatptr"`.
+/// Called by the DAG runner as a subprocess for each WasmVoid/WasmU32/WasmFatPtr node.
+pub fn run_wasm_call(shm_path: &str, wasm_path: &str, func: &str, ret_type: &str, arg: u32) -> Result<()> {
+    let file = OpenOptions::new().read(true).write(true).open(shm_path)?;
+    let engine = create_wasmtime_engine()?;
+    let mut store = Store::new(&engine, WorkerState {
+        file: file.try_clone()?,
+        splice_addr: 0,
+    });
+    let mut linker = Linker::new(&engine);
+    let memory = setup_vma_environment(&mut store, &mut linker, &file)?;
+    let module = Module::from_file(&engine, wasm_path)?;
+    let instance = linker.instantiate(&mut store, &module)?;
+
+    match ret_type {
+        "u32" => {
+            let f = instance.get_typed_func::<u32, u32>(&mut store, func)
+                .map_err(|e| anyhow::anyhow!("no export '{}': {}", func, e))?;
+            let result = f.call(&mut store, arg)?;
+            println!("  {}({}) → {}", func, arg, result);
+        }
+        "fatptr" => {
+            let f = instance.get_typed_func::<u32, u64>(&mut store, func)
+                .map_err(|e| anyhow::anyhow!("no export '{}': {}", func, e))?;
+            let packed = f.call(&mut store, arg)?;
+            if packed > 0 {
+                let ptr = (packed >> 32) as usize;
+                let len = (packed & 0xFFFF_FFFF) as usize;
+                let base_ptr = memory.data_ptr(&store);
+                let raw = unsafe { std::slice::from_raw_parts(base_ptr.add(ptr), len) };
+                print!("{}", String::from_utf8_lossy(raw));
+            }
+        }
+        _ => {
+            let f = instance.get_typed_func::<u32, ()>(&mut store, func)
+                .map_err(|e| anyhow::anyhow!("no export '{}': {}", func, e))?;
+            f.call(&mut store, arg)?;
+        }
+    }
+    Ok(())
 }
 
 /// Loads the guest WASM module and executes the function for `role` with the given `id`.

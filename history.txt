@@ -26,3 +26,11 @@
    cargo run dag ../demo_dag/word_count_demo.json 
 
    cargo run dag ../demo_dag/img_pipeline_demo.json 
+
+
+   install wasmtime to run the python verison
+   also need to pull a python.wasm, here I use python-3.12.0.wasm
+
+   cargo run dag ../demo_dag/py_word_count_demo.json
+
+   cargo run dag ../demo_dag/py_img_pipeline_demo.json 
