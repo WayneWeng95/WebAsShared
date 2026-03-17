@@ -51,7 +51,7 @@ use nix::sys::mman::{mmap, munmap, MapFlags, ProtFlags};
 
 use common::{Page, Superblock};
 
-use super::reclaimer;
+use crate::runtime::mem_operation::reclaimer;
 
 // ─── LoadedFile ───────────────────────────────────────────────────────────────
 

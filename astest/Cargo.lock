@@ -126,6 +126,14 @@ name = "common"
 version = "0.1.0"
 
 [[package]]
+name = "connect"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "cc",
+]
+
+[[package]]
 name = "cpp_demangle"
 version = "0.3.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

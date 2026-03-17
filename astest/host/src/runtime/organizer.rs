@@ -166,6 +166,6 @@ impl<'a> BucketOrganizer<'a> {
     /// spin_loop backoff, and ABA documentation are all in one place.
     unsafe fn push_to_free_list(&self, page_offset: u32) {
         let splice_addr = self.base_ptr as usize;
-        crate::runtime::reclaimer::free_page_chain(splice_addr, page_offset);
+        crate::runtime::mem_operation::reclaimer::free_page_chain(splice_addr, page_offset);
     }
 }

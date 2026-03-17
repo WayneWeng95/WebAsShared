@@ -1,0 +1,119 @@
+// TCP side-channel for exchanging Queue Pair metadata.
+//
+// RDMA connections require both sides to know each other's:
+//   - QPN  (queue pair number)
+//   - PSN  (initial packet sequence number)
+//   - GID  (global identifier — used for RoCE / routed IB)
+//   - LID  (local identifier — used for native IB; 0 for pure RoCE)
+//   - rkey (remote key protecting the registered memory region)
+//   - addr (virtual address of the registered memory region)
+//   - len  (size of the registered memory region)
+//
+// A TCP socket is the standard "out-of-band" path for this metadata swap
+// before the RDMA data-path is established.  After exchange(), both sides
+// call ibv_modify_qp to RTR and RTS using the peer's values.
+//
+// Wire format: two consecutive 46-byte little-endian fixed structs,
+// first written by the server, then by the client (or vice versa).
+
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+
+use anyhow::{anyhow, Result};
+
+/// All information a peer needs to target our QP and memory region.
+#[derive(Clone, Copy, Debug)]
+pub struct QpInfo {
+    pub qpn:  u32,
+    pub psn:  u32,
+    pub gid:  [u8; 16],
+    pub lid:  u16,
+    pub rkey: u32,
+    pub addr: u64,
+    pub len:  u32,
+}
+
+impl QpInfo {
+    const WIRE_LEN: usize = 46; // 4+4+16+2+4+8+4+4 (pad) = 46
+
+    fn to_bytes(&self) -> [u8; Self::WIRE_LEN] {
+        let mut b = [0u8; Self::WIRE_LEN];
+        b[0..4].copy_from_slice(&self.qpn.to_le_bytes());
+        b[4..8].copy_from_slice(&self.psn.to_le_bytes());
+        b[8..24].copy_from_slice(&self.gid);
+        b[24..26].copy_from_slice(&self.lid.to_le_bytes());
+        // 2 bytes padding at 26..28
+        b[28..32].copy_from_slice(&self.rkey.to_le_bytes());
+        b[32..40].copy_from_slice(&self.addr.to_le_bytes());
+        b[40..44].copy_from_slice(&self.len.to_le_bytes());
+        // 2 bytes padding at 44..46
+        b
+    }
+
+    fn from_bytes(b: &[u8; Self::WIRE_LEN]) -> Self {
+        let qpn  = u32::from_le_bytes(b[0..4].try_into().unwrap());
+        let psn  = u32::from_le_bytes(b[4..8].try_into().unwrap());
+        let gid: [u8; 16] = b[8..24].try_into().unwrap();
+        let lid  = u16::from_le_bytes(b[24..26].try_into().unwrap());
+        let rkey = u32::from_le_bytes(b[28..32].try_into().unwrap());
+        let addr = u64::from_le_bytes(b[32..40].try_into().unwrap());
+        let len  = u32::from_le_bytes(b[40..44].try_into().unwrap());
+        QpInfo { qpn, psn, gid, lid, rkey, addr, len }
+    }
+}
+
+/// Server side: listen on `tcp_port`, accept one connection, swap QP info.
+///
+/// Returns (remote_info, stream).  The caller keeps `stream` open to use
+/// as a control channel (e.g. to send a "done" signal after the RDMA write).
+pub fn server_exchange(tcp_port: u16, local: &QpInfo) -> Result<(QpInfo, TcpStream)> {
+    let listener = TcpListener::bind(("0.0.0.0", tcp_port))
+        .map_err(|e| anyhow!("bind {}:{}: {}", "0.0.0.0", tcp_port, e))?;
+    println!("[exchange] server listening on :{}", tcp_port);
+
+    let (mut stream, peer) = listener.accept()
+        .map_err(|e| anyhow!("accept: {}", e))?;
+    println!("[exchange] client connected from {}", peer);
+
+    // server sends first, then reads
+    stream.write_all(&local.to_bytes())?;
+    stream.flush()?;
+
+    let mut buf = [0u8; QpInfo::WIRE_LEN];
+    stream.read_exact(&mut buf)?;
+    let remote = QpInfo::from_bytes(&buf);
+    println!("[exchange] remote QPN={} PSN={} rkey={:#x} addr={:#x}",
+             remote.qpn, remote.psn, remote.rkey, remote.addr);
+    Ok((remote, stream))
+}
+
+/// Client side: connect to `host:tcp_port` and swap QP info.
+pub fn client_exchange(host: &str, tcp_port: u16, local: &QpInfo) -> Result<(QpInfo, TcpStream)> {
+    let mut stream = TcpStream::connect((host, tcp_port))
+        .map_err(|e| anyhow!("connect {}:{}: {}", host, tcp_port, e))?;
+    println!("[exchange] connected to {}:{}", host, tcp_port);
+
+    // read server's info first, then send ours
+    let mut buf = [0u8; QpInfo::WIRE_LEN];
+    stream.read_exact(&mut buf)?;
+    let remote = QpInfo::from_bytes(&buf);
+    println!("[exchange] remote QPN={} PSN={} rkey={:#x} addr={:#x}",
+             remote.qpn, remote.psn, remote.rkey, remote.addr);
+
+    stream.write_all(&local.to_bytes())?;
+    stream.flush()?;
+    Ok((remote, stream))
+}
+
+/// Send a one-byte "done" signal over the control channel.
+pub fn send_done(stream: &mut TcpStream) -> Result<()> {
+    stream.write_all(&[0xFFu8])?;
+    Ok(stream.flush()?)
+}
+
+/// Block until the peer sends its "done" signal.
+pub fn wait_done(stream: &mut TcpStream) -> Result<()> {
+    let mut b = [0u8; 1];
+    stream.read_exact(&mut b)?;
+    Ok(())
+}

@@ -48,7 +48,7 @@
     {
       "id": "save",
       "deps": ["reduce"],
-      "kind": { "Output": { "path": "/tmp/py_word_count_result.txt" } }
+      "kind": { "Output": { "path": "/tmp/py_word_count_result.txt", "slot": 1 } }
     }
 
   ]

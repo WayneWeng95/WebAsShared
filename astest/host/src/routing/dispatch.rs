@@ -31,7 +31,7 @@
 //   });
 
 use std::thread;
-use crate::runtime::slicer::FileSlice;
+use crate::runtime::mem_operation::slicer::FileSlice;
 
 // -----------------------------------------------------------------------------
 // DispatchSlice trait

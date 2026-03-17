@@ -19,27 +19,36 @@
         "slot": 10
       }}
     },
-    { "id": "parse",    "deps": ["load"],    "kind": { "PyFunc": { "func": "img_load_ppm",  "arg": 0 } } },
-    { "id": "rotate",   "deps": ["parse"],   "kind": { "PyFunc": { "func": "img_rotate",    "arg": 0 } } },
-    { "id": "gray",     "deps": ["rotate"],  "kind": { "PyFunc": { "func": "img_grayscale", "arg": 0 } } },
-    { "id": "equalize", "deps": ["gray"],    "kind": { "PyFunc": { "func": "img_equalize",  "arg": 0 } } },
-    { "id": "blur",     "deps": ["equalize"],"kind": { "PyFunc": { "func": "img_blur",      "arg": 0 } } },
-    { "id": "export",   "deps": ["blur"],    "kind": { "PyFunc": { "func": "img_export_ppm","arg": 0 } } },
+    {
+      "id": "pipeline",
+      "deps": ["load"],
+      "kind": { "PyPipeline": {
+        "stages": [
+          { "func": "img_load_ppm"   },
+          { "func": "img_rotate"     },
+          { "func": "img_grayscale"  },
+          { "func": "img_equalize"   },
+          { "func": "img_blur"       },
+          { "func": "img_export_ppm" }
+        ]
+      }}
+    },
     {
       "id": "save",
-      "deps": ["export"],
+      "deps": ["pipeline"],
       "kind": { "Output": {
         "paths": [
           "/tmp/py_img_out/gradient_processed.pgm",
           "/tmp/py_img_out/checkerboard_processed.pgm",
           "/tmp/py_img_out/rings_processed.pgm"
-        ]
+        ],
+        "slot": 1
       }}
     },
     {
       "id": "free",
       "deps": ["save"],
-      "kind": { "FreeSlots": { "stream": [20, 30, 40, 50, 60], "io": [10] } }
+      "kind": { "FreeSlots": { "stream": [20, 30, 40, 50, 60], "io": [10, 1] } }
     }
   ]
 }

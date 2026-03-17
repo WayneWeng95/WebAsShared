@@ -22,6 +22,14 @@ fn main() -> Result<()> {
         let arg: u32  = args.get(6).and_then(|s| s.parse().ok()).unwrap_or(0);
         let arg1: Option<u32> = args.get(7).and_then(|s| s.parse().ok());
         runtime::worker::run_wasm_call(shm_path, wasm_path, func, ret_type, arg, arg1)
+    } else if args.len() > 1 && args[1] == "wasm-loop" {
+        // Persistent pipeline worker: ./host wasm-loop <shm_path> <wasm_path> <func>
+        // Reads "arg0 arg1\n" lines from stdin, calls func(arg0, arg1) for each,
+        // writes "ok\n" back.  Exits when stdin is closed (EOF).
+        let shm_path  = args.get(2).map(String::as_str).unwrap_or("");
+        let wasm_path = args.get(3).map(String::as_str).unwrap_or(common::WASM_PATH);
+        let func      = args.get(4).map(String::as_str).unwrap_or("");
+        runtime::worker::run_wasm_loop(shm_path, wasm_path, func)
     } else if args.len() > 1 {
         let role = &args[1];
         let shm_path = &args[2];

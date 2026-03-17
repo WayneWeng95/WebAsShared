@@ -24,7 +24,7 @@ use std::path::Path;
 use anyhow::Result;
 use common::{OUTPUT_IO_SLOT, Superblock};
 
-use super::writer::read_io_records;
+use super::state_writer::read_io_records;
 
 pub struct Outputer {
     splice_addr: usize,

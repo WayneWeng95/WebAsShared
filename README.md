@@ -202,3 +202,57 @@ astest/
 - **Isolated execution**: each WASM node runs in its own `wasmtime` instance with a fresh linear memory, but shares the same SHM backing file.
 - **Fat-pointer returns**: WASM→host data transfer uses 64-bit fat pointers (`ptr << 32 | len`) to pass slice locations without copying.
 - **Dynamic SHM growth**: the host can grow the SHM file and remap the VMA in-place via a `host_remap` import callable from guests.
+
+
+  WebAsShared — WASM-Based Zero-Copy Stream Processing Engine
+
+  Core Idea: A DAG (Directed Acyclic Graph) pipeline executor where each stage runs inside an
+  isolated WebAssembly module, but all stages share the same physical memory (via mmap). This
+  enables zero-copy data routing — data never gets copied between stages, only pointers are
+  spliced.
+
+  Architecture
+
+  Host (Rust)                         Guest (WASM)
+  ─────────────────────────────────   ──────────────────────────────────
+  • Parses JSON DAG spec               • Each node = isolated wasmtime instance
+  • Creates/manages shared memory      • Fixed address 0x80000000 → SHM file
+  • Runs topological DAG execution     • Implements algorithms (word count,
+  • Zero-copy routing between stages     image processing, etc.)
+  • File I/O, allocation, logging      • Calls back host for SHM growth
+
+  Shared Memory Layout (at 0x80000000 in every WASM instance)
+
+  - Superblock — stream/IO slot heads/tails + free-list shards
+  - Registry Arena — name → index mapping
+  - Stream Pages — 4 KiB linked-list pages, bump-allocated + Treiber stack free-list
+
+  Routing Operations (all zero-copy, lock-free)
+
+  ┌───────────┬──────────────────────────────────────────────┐
+  │ Operation │                 Description                  │
+  ├───────────┼──────────────────────────────────────────────┤
+  │ Bridge    │ 1→1 passthrough (pointer remap)              │
+  ├───────────┼──────────────────────────────────────────────┤
+  │ Aggregate │ N→1 merge (atomic chain splice)              │
+  ├───────────┼──────────────────────────────────────────────┤
+  │ Shuffle   │ N→M partitioned (round-robin, modulo, fixed) │
+  ├───────────┼──────────────────────────────────────────────┤
+  │ Broadcast │ 1→M fan-out                                  │
+  └───────────┴──────────────────────────────────────────────┘
+
+  Example Pipelines
+
+  - Word Count: Load corpus → distribute lines → 10 parallel mappers → aggregate → reduce
+  - Image Pipeline: Load PPMs → rotate → grayscale → equalize → blur → save
+
+  Tech Stack
+
+  - Rust workspace with 3 crates: host, guest, common
+  - wasmtime for WASM execution
+  - Python support via python.wasm + WASI (subprocess per node)
+  - Lock-free allocation with sharded Treiber stacks
+
+  The key innovation is that all WASM instances share the same physical backing file mapped at
+  the same virtual address, so routing between pipeline stages is just atomic pointer
+  manipulation — no data copying at all.

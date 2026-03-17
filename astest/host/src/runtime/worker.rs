@@ -183,6 +183,49 @@ pub fn setup_vma_environment(
     Ok(memory)
 }
 
+/// Loads the guest WASM module and enters a persistent call loop.
+///
+/// Reads lines from stdin with format `"<arg0> <arg1>\n"`, calls
+/// `func(arg0, arg1) -> ()` for each, and writes `"ok\n"` (or `"err: …\n"`)
+/// to stdout.  Exits cleanly when stdin is closed (EOF).
+///
+/// Used by `StreamPipeline` workers: one process per stage, kept alive for
+/// the full pipeline duration so wasmtime setup and SHM mmap are paid once.
+pub fn run_wasm_loop(shm_path: &str, wasm_path: &str, func: &str) -> Result<()> {
+    use std::io::{BufRead, Write};
+
+    let file = OpenOptions::new().read(true).write(true).open(shm_path)?;
+    let engine = create_wasmtime_engine()?;
+    let mut store = Store::new(&engine, WorkerState {
+        file: file.try_clone()?,
+        splice_addr: 0,
+    });
+    let mut linker = Linker::new(&engine);
+    setup_vma_environment(&mut store, &mut linker, &file)?;
+    let module = Module::from_file(&engine, wasm_path)?;
+    let instance = linker.instantiate(&mut store, &module)?;
+    let f = instance
+        .get_typed_func::<(u32, u32), ()>(&mut store, func)
+        .map_err(|e| anyhow::anyhow!("no export '{}': {}", func, e))?;
+
+    let stdin  = std::io::stdin();
+    let stdout = std::io::stdout();
+    let mut out = stdout.lock();
+
+    for line in stdin.lock().lines() {
+        let line = line?;
+        let mut parts = line.split_whitespace();
+        let arg0: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        let arg1: u32 = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+        match f.call(&mut store, (arg0, arg1)) {
+            Ok(())  => writeln!(out, "ok")?,
+            Err(e)  => writeln!(out, "err: {}", e)?,
+        }
+        out.flush()?;
+    }
+    Ok(())
+}
+
 /// Loads the guest WASM module, calls `func` with the given return type, and exits.
 /// `ret_type` is one of `"void"`, `"void2"`, `"u32"`, or `"fatptr"`.
 /// `"void2"` calls `func(arg, arg1)` — used by StreamPipeline stages.

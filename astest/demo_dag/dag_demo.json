@@ -120,10 +120,12 @@
       "kind": {
         "StreamPipeline": {
           "rounds": 5,
-          "source_slot": 200,
-          "filter_slot": 201,
-          "transform_slot": 202,
-          "summary_slot": 203
+          "stages": [
+            { "func": "pipeline_source",    "arg0": 200, "arg1": null },
+            { "func": "pipeline_filter",    "arg0": 200, "arg1": 201 },
+            { "func": "pipeline_transform", "arg0": 201, "arg1": 202 },
+            { "func": "pipeline_sink",      "arg0": 202, "arg1": 203 }
+          ]
         }
       }
     },

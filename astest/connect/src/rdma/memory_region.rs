@@ -1,0 +1,72 @@
+// Registered memory region for RDMA operations.
+
+use std::alloc::{alloc_zeroed, dealloc, Layout};
+use std::ptr::NonNull;
+
+use anyhow::{anyhow, Result};
+
+use crate::ffi::*;
+use super::context::RdmaContext;
+
+pub struct MemoryRegion {
+    mr:     NonNull<ibv_mr>,
+    buf:    NonNull<u8>,
+    layout: Layout,
+}
+
+unsafe impl Send for MemoryRegion {}
+unsafe impl Sync for MemoryRegion {}
+
+impl MemoryRegion {
+    /// Allocate `size` bytes and register them with `ctx` for local + remote access.
+    pub fn alloc_and_register(ctx: &RdmaContext, size: usize) -> Result<Self> {
+        let layout = Layout::from_size_align(size, 4096)
+            .map_err(|e| anyhow!("layout error: {}", e))?;
+
+        let buf_ptr = unsafe { alloc_zeroed(layout) };
+        let buf = NonNull::new(buf_ptr)
+            .ok_or_else(|| anyhow!("allocation failed ({} bytes)", size))?;
+
+        let access = IBV_ACCESS_LOCAL_WRITE
+            | IBV_ACCESS_REMOTE_WRITE
+            | IBV_ACCESS_REMOTE_READ;
+
+        let mr_ptr = unsafe {
+            ibv_reg_mr(ctx.pd.as_ptr(), buf_ptr as *mut _, size, access)
+        };
+        if mr_ptr.is_null() {
+            unsafe { dealloc(buf_ptr, layout) };
+            return Err(anyhow!("ibv_reg_mr failed (size={})", size));
+        }
+        let mr = unsafe { NonNull::new_unchecked(mr_ptr) };
+
+        println!("[RDMA] MR registered: addr={:#x} len={} lkey={:#x} rkey={:#x}",
+                 buf_ptr as u64, size,
+                 unsafe { (*mr_ptr).lkey },
+                 unsafe { (*mr_ptr).rkey });
+
+        Ok(MemoryRegion { mr, buf, layout })
+    }
+
+    pub fn addr(&self)  -> u64   { self.buf.as_ptr() as u64 }
+    pub fn len(&self)   -> usize { self.layout.size() }
+    pub fn lkey(&self)  -> u32   { unsafe { (*self.mr.as_ptr()).lkey } }
+    pub fn rkey(&self)  -> u32   { unsafe { (*self.mr.as_ptr()).rkey } }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.buf.as_ptr(), self.layout.size()) }
+    }
+
+    pub fn as_bytes_mut(&mut self) -> &mut [u8] {
+        unsafe { std::slice::from_raw_parts_mut(self.buf.as_ptr(), self.layout.size()) }
+    }
+}
+
+impl Drop for MemoryRegion {
+    fn drop(&mut self) {
+        unsafe {
+            ibv_dereg_mr(self.mr.as_ptr());
+            dealloc(self.buf.as_ptr(), self.layout);
+        }
+    }
+}
