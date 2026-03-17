@@ -16,6 +16,32 @@ pub enum DagMode {
     Reset,
 }
 
+/// RDMA full-mesh configuration — required when any node uses `RemoteSend`
+/// or `RemoteRecv`.  All machines must include an identical `ips` list and
+/// set `node_id` to their own index.
+#[derive(Debug, Deserialize)]
+pub struct RdmaConfig {
+    /// Index of this node in the mesh (0-based).
+    pub node_id: usize,
+    /// Total number of nodes in the mesh.
+    pub total: usize,
+    /// IP address or hostname of each node, in index order.
+    pub ips: Vec<String>,
+    /// Enable RDMA data transfer for `RemoteSend` / `RemoteRecv` nodes.
+    ///
+    /// When `true` (default) the SHM is registered as the RDMA Memory Region
+    /// and a staging area is pre-allocated so slot data can be transferred via
+    /// one-sided RDMA WRITE with no TCP memcopy.
+    ///
+    /// Set to `false` to use the mesh only for RDMA atomic operations
+    /// (`fetch_and_add`, `compare_and_swap`) without the staging overhead.
+    /// `RemoteSend` / `RemoteRecv` nodes will fail at runtime when `false`.
+    #[serde(default = "default_transfer")]
+    pub transfer: bool,
+}
+
+fn default_transfer() -> bool { true }
+
 #[derive(Debug, Deserialize)]
 pub struct Dag {
     /// Path to the SHM file; created and formatted automatically.
@@ -45,6 +71,11 @@ pub struct Dag {
     /// an infinite loop.  Ignored in `one_shot` mode.
     #[serde(default)]
     pub runs: Option<u32>,
+    /// Optional RDMA full-mesh configuration.  Required when any node uses
+    /// `RemoteSend` or `RemoteRecv`.  All nodes in the mesh must specify
+    /// matching `total` / `ips` lists and distinct `node_id` values.
+    #[serde(default)]
+    pub rdma: Option<RdmaConfig>,
     pub nodes: Vec<DagNode>,
 }
 
@@ -112,6 +143,20 @@ pub enum NodeKind {
     /// rounds run concurrently across stages.
     /// Equivalent to `StreamPipeline` but for Python workloads.
     PyPipeline(PyPipelineParams),
+    /// Send all records from a local SHM slot to a remote peer over the RDMA
+    /// control channel (TCP).  Requires `dag.rdma` to be configured.
+    ///
+    /// ```json
+    /// { "kind": { "RemoteSend": { "slot": 30, "slot_kind": "Stream", "peer": 1 } } }
+    /// ```
+    RemoteSend(RemoteSendParams),
+    /// Receive records from a remote peer and append them into a local SHM slot.
+    /// Blocks until the peer's `RemoteSend` has completed.  Requires `dag.rdma`.
+    ///
+    /// ```json
+    /// { "kind": { "RemoteRecv": { "slot": 30, "slot_kind": "Stream", "peer": 0 } } }
+    /// ```
+    RemoteRecv(RemoteRecvParams),
 }
 
 #[derive(Debug, Deserialize)]
@@ -455,4 +500,36 @@ pub struct PyPipelineParams {
     pub rounds: u32,
     /// Ordered list of pipeline stages.  Must contain at least one entry.
     pub stages: Vec<PyStreamPipelineStage>,
+}
+
+/// Which SHM slot area a `RemoteSend` / `RemoteRecv` node operates on.
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum RemoteSlotKind {
+    /// Stream slot area (`writer_heads` / `writer_tails`).
+    Stream,
+    /// I/O slot area (`io_heads` / `io_tails`).
+    Io,
+}
+
+/// Parameters for the `RemoteSend` node.
+#[derive(Debug, Deserialize)]
+pub struct RemoteSendParams {
+    /// Local SHM slot index to read records from.
+    pub slot: usize,
+    /// Whether the slot is in the Stream or Io area.
+    pub slot_kind: RemoteSlotKind,
+    /// Mesh peer index to send records to.
+    pub peer: usize,
+}
+
+/// Parameters for the `RemoteRecv` node.
+#[derive(Debug, Deserialize)]
+pub struct RemoteRecvParams {
+    /// Local SHM slot index to write received records into.
+    pub slot: usize,
+    /// Whether the slot is in the Stream or Io area.
+    pub slot_kind: RemoteSlotKind,
+    /// Mesh peer index to receive records from.
+    pub peer: usize,
 }

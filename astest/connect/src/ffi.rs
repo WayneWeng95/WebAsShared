@@ -167,12 +167,23 @@ pub const IBV_ACCESS_REMOTE_READ:  i32 = 1 << 2;
 pub const IBV_SEND_SIGNALED: u32 = 1 << 1;
 
 // ibv_wr_opcode
-pub const IBV_WR_RDMA_WRITE: u32 = 0;
+pub const IBV_WR_RDMA_WRITE:           u32 = 0;
+pub const IBV_WR_ATOMIC_CMP_AND_SWP:   u32 = 5;
+pub const IBV_WR_ATOMIC_FETCH_AND_ADD: u32 = 6;
+
+// ibv_access_flags (additional)
+pub const IBV_ACCESS_REMOTE_ATOMIC: i32 = 1 << 3;
 
 // ─── ibv_send_wr (128 bytes) ──────────────────────────────────────────────────
 //
-// Only the fields relevant to a signaled RDMA WRITE are named.
-// wr.rdma.remote_addr sits at offset +40, wr.rdma.rkey at +48.
+// The wr union at +40 covers both rdma and atomic variants:
+//
+//   RDMA WRITE  : remote_addr(+40) compare_add_as_rkey(+48, low 32 bits only)
+//   ATOMIC FAA  : remote_addr(+40) compare_add(+48, u64)  atomic_rkey(+64)
+//   ATOMIC CAS  : remote_addr(+40) compare_add(+48, u64)  swap(+56)  atomic_rkey(+64)
+//
+// For RDMA WRITE: set compare_add = rkey as u64 (little-endian puts rkey in
+// the correct +48..+51 byte position, matching wr.rdma.rkey in the C struct).
 
 #[repr(C)]
 pub struct ibv_send_wr {
@@ -183,9 +194,11 @@ pub struct ibv_send_wr {
     pub opcode:      u32,              // +28
     pub send_flags:  u32,              // +32
     _imm:            u32,              // +36  (imm_data / invalidate_rkey)
-    pub remote_addr: u64,              // +40  (wr.rdma.remote_addr)
-    pub rkey:        u32,              // +48  (wr.rdma.rkey)
-    _tail:           [u8; 76],         // +52..+128
+    pub remote_addr: u64,              // +40  (wr.rdma.remote_addr / wr.atomic.remote_addr)
+    pub compare_add: u64,              // +48  (wr.atomic.compare_add; low 32 bits = wr.rdma.rkey)
+    pub swap:        u64,              // +56  (wr.atomic.swap)
+    pub atomic_rkey: u32,              // +64  (wr.atomic.rkey)
+    _tail:           [u8; 60],         // +68..+128
 }
 
 // ─── ibv_wc (48 bytes) ────────────────────────────────────────────────────────

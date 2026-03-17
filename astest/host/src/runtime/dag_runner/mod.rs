@@ -137,6 +137,7 @@ use common::WASM_PATH;
 use plan::{build_slot_refcounts, build_waves, is_oneshot_node, node_owned_slots, node_routed_upstream_slots, parse_level, topo_sort, validate_dag};
 use workers::{spawn_python_subprocess, spawn_wasm_subprocess};
 use dispatch::execute_node;
+use crate::runtime::remote::{pre_alloc_staging, STAGE_BYTES_PER_PEER};
 
 // ─── Public entry points ──────────────────────────────────────────────────────
 
@@ -209,6 +210,51 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
 
     let waves = build_waves(&dag.nodes, &order);
     println!("[DAG] {} waves, {} nodes total", waves.len(), order.len());
+
+    // Set up the RDMA full-mesh if any RemoteSend/RemoteRecv nodes are present.
+    //
+    // Pre-allocate staging pages FIRST (before any DAG nodes run), then
+    // register the SHM itself as the RDMA Memory Region via connect_all_on_shm.
+    // Both machines pre-allocate the same number of pages from identical
+    // initial SHM states (format_shared_memory), so the staging page offsets
+    // are byte-for-byte identical on every machine — enabling the receiver to
+    // read data that the sender RDMA-WROTEinto the same SHM offset.
+    let mut mesh: Option<connect::MeshNode> = if let Some(ref rdma) = dag.rdma {
+        let splice_addr = store.data().splice_addr;
+
+        // Reserve staging pages only when RDMA data transfer is enabled.
+        // Both machines must use the same `transfer` value so the bump
+        // allocator advances identically and staging offsets stay in sync.
+        if rdma.transfer {
+            pre_alloc_staging(splice_addr, rdma.total)?;
+            println!(
+                "[DAG] RDMA staging reserved: {} peers × {} KiB = {} MiB",
+                rdma.total,
+                STAGE_BYTES_PER_PEER / 1024,
+                rdma.total * STAGE_BYTES_PER_PEER / (1024 * 1024),
+            );
+        } else {
+            println!("[DAG] RDMA transfer disabled — skipping staging pre-alloc");
+        }
+
+        // Register the full SHM as the RDMA MR so peers can RDMA-WRITE
+        // directly into our staging area, and so RDMA atomics (FAA/CAS)
+        // can target arbitrary SHM locations.
+        let ip_refs: Vec<&str> = rdma.ips.iter().map(|s| s.as_str()).collect();
+        let node = unsafe {
+            connect::MeshNode::connect_all_on_shm(
+                rdma.node_id,
+                rdma.total,
+                &ip_refs,
+                splice_addr as *mut u8,
+                common::INITIAL_SHM_SIZE as usize,
+            )
+        }.map_err(|e| anyhow!("RDMA mesh setup failed: {}", e))?;
+        println!("[DAG] RDMA mesh ready (node {} of {})", rdma.node_id, rdma.total);
+        Some(node)
+    } else {
+        None
+    };
 
     let has_persistence = dag.nodes.iter().any(|n| matches!(n.kind, NodeKind::Persist(_) | NodeKind::Watch(_)));
 
@@ -305,7 +351,8 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                              persist_writer.as_ref().map(|w| w as &PersistenceWriter),
                              logger.as_ref().map(|l| l as &HostLogger),
                              &mut prefetch_handles, (run_count - 1) as usize,
-                             &dag.shm_path, py_script, py_wasm, wasm_path)?;
+                             &dag.shm_path, py_script, py_wasm, wasm_path,
+                             mesh.as_mut().map(|m| m as &mut connect::MeshNode))?;
             }
 
             // 3c. Wait for all subprocess WASM children.

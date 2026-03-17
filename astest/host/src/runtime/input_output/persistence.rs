@@ -215,12 +215,12 @@ fn take_snapshot(splice_addr: usize, opts: &PersistenceOptions) -> Snapshot {
 // -----------------------------------------------------------------------------
 
 /// Walks the length-prefixed page chain for stream `slot` and returns every record.
-pub(super) fn read_stream_records(base: usize, sb: &Superblock, slot: usize) -> Vec<(u32, Vec<u8>)> {
+pub(crate) fn read_stream_records(base: usize, sb: &Superblock, slot: usize) -> Vec<(u32, Vec<u8>)> {
     read_chain_records(base, sb.writer_heads[slot].load(Ordering::Acquire))
 }
 
 /// Walks the length-prefixed page chain for I/O `slot` and returns every record.
-pub(super) fn read_io_records(base: usize, sb: &Superblock, slot: usize) -> Vec<(u32, Vec<u8>)> {
+pub(crate) fn read_io_records(base: usize, sb: &Superblock, slot: usize) -> Vec<(u32, Vec<u8>)> {
     read_chain_records(base, sb.io_heads[slot].load(Ordering::Acquire))
 }
 

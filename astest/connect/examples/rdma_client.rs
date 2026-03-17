@@ -24,7 +24,7 @@ fn main() -> Result<()> {
     let mut remote = RdmaRemote::connect(&server, TCP_PORT, STATE_SIZE)?;
 
     // Compose a state payload.
-    let payload = b"hello from RDMA client — direct memory write, no server CPU";
+    let payload = b"hello from RDMA client - direct memory write, no server CPU";
 
     println!("\n[client] writing {} bytes via RDMA WRITE ...", payload.len());
     remote.write_state(payload)?;

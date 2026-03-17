@@ -15,6 +15,7 @@ use crate::runtime::mem_operation::reclaimer::{self, SlotKind};
 use crate::runtime::mem_operation::slicer::Slicer;
 use crate::runtime::worker::WorkerState;
 use crate::runtime::input_output::persistence::{PersistenceOptions, PersistenceWriter};
+use crate::runtime::remote::{execute_remote_recv, execute_remote_send};
 use super::types::*;
 use super::workers::{spawn_wasm_subprocess, spawn_python_subprocess};
 use super::grouping::{execute_wasm_grouping, execute_py_grouping};
@@ -35,6 +36,7 @@ pub(super) fn execute_node(
     python_script: &str,
     python_wasm: Option<&str>,
     wasm_path: &str,
+    mesh: Option<&mut connect::MeshNode>,
 ) -> Result<()> {
     let splice_addr = store.data().splice_addr;
     let base_ptr = memory.data_ptr(&*store);
@@ -370,6 +372,26 @@ pub(super) fn execute_node(
             log(&format!("py pipeline {} rounds {} stages", p.rounds, p.stages.len()));
             execute_py_pipeline(p, &node.id, shm_path, python_script, python_wasm)?;
             log("py pipeline done");
+        }
+
+        // ── RemoteSend: send SHM slot records to a mesh peer ─────────────────
+        NodeKind::RemoteSend(p) => {
+            let mesh = mesh.ok_or_else(|| anyhow!(
+                "[{}] RemoteSend requires dag.rdma to be configured", node.id
+            ))?;
+            log(&format!("remote send slot {} ({:?}) → peer {}", p.slot, p.slot_kind, p.peer));
+            execute_remote_send(store.data().splice_addr, p.slot, p.slot_kind, p.peer, mesh)?;
+            log(&format!("remote send slot {} done", p.slot));
+        }
+
+        // ── RemoteRecv: receive SHM slot records from a mesh peer ─────────────
+        NodeKind::RemoteRecv(p) => {
+            let mesh = mesh.ok_or_else(|| anyhow!(
+                "[{}] RemoteRecv requires dag.rdma to be configured", node.id
+            ))?;
+            log(&format!("remote recv slot {} ({:?}) ← peer {}", p.slot, p.slot_kind, p.peer));
+            execute_remote_recv(store.data().splice_addr, p.slot, p.slot_kind, p.peer, mesh)?;
+            log(&format!("remote recv slot {} done", p.slot));
         }
     }
 

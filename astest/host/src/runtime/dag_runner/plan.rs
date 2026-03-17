@@ -67,6 +67,40 @@ pub(super) fn validate_dag(dag: &Dag) -> Result<()> {
             NodeKind::Output(p) => {
                 if let Some(s) = p.slot { io_slots.push((s as usize, "Output")); }
             }
+            NodeKind::RemoteSend(p) => {
+                match p.slot_kind {
+                    RemoteSlotKind::Stream => stream_slots.push(p.slot),
+                    RemoteSlotKind::Io    => io_slots.push((p.slot, "RemoteSend")),
+                }
+                // The slot producer must be a DAG dep so it finishes before
+                // the RDMA DMA reads from those pages.  A missing dep means
+                // the producer could still be writing while we're reading.
+                if node.deps.is_empty() {
+                    errors.push(format!(
+                        "node '{}' (RemoteSend): must list the slot producer as a \
+                         dependency to guarantee the page chain is sealed before RDMA.",
+                        node.id
+                    ));
+                }
+                if dag.rdma.as_ref().map_or(true, |r| !r.transfer) {
+                    errors.push(format!(
+                        "node '{}' (RemoteSend): requires dag.rdma with transfer=true.",
+                        node.id
+                    ));
+                }
+            }
+            NodeKind::RemoteRecv(p) => {
+                match p.slot_kind {
+                    RemoteSlotKind::Stream => stream_slots.push(p.slot),
+                    RemoteSlotKind::Io    => io_slots.push((p.slot, "RemoteRecv")),
+                }
+                if dag.rdma.as_ref().map_or(true, |r| !r.transfer) {
+                    errors.push(format!(
+                        "node '{}' (RemoteRecv): requires dag.rdma with transfer=true.",
+                        node.id
+                    ));
+                }
+            }
             _ => {}
         }
 

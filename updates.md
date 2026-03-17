@@ -6,54 +6,21 @@ Changes made since the initial README, in order.
 
 ## 1. PyFunc parallel wave execution
 
-**Files:** `host/src/runtime/dag_runner/plan.rs`, `subprocess.rs`, `executor.rs`
+**Files:** `dag_runner/plan.rs`, `subprocess.rs`, `executor.rs`
 
-`PyFunc` nodes were previously treated as host-executed nodes and ran **sequentially and blocking** inside `execute_node()` via `.status()`. They are now classified as subprocess nodes alongside `WasmVoid` / `WasmU32` / `WasmFatPtr`.
-
-- `is_subprocess_node()` (renamed from `is_subprocess_wasm_node`) now includes `NodeKind::PyFunc`.
-- A new `spawn_python_subprocess()` function extracts the `python3` / `wasmtime run` command building from `execute_node` and returns a `Child` handle instead of blocking.
-- The wave executor (step 3a) dispatches to `spawn_python_subprocess` for `PyFunc` nodes and to `spawn_wasm_subprocess` for WASM nodes. All active subprocess nodes in a wave are spawned first, then waited on together — giving intra-wave parallelism to Python nodes the same way WASM nodes already had it.
-- The `execute_node` `PyFunc` branch is retained as a sequential fallback (spawn + wait) but is no longer reached in normal wave execution.
+`PyFunc` nodes were blocking-sequential inside `execute_node`. They are now classified as subprocess nodes alongside WASM kinds. `spawn_python_subprocess()` returns a `Child` handle; the wave executor spawns all subprocess nodes first then waits on them together, giving PyFunc the same intra-wave parallelism WASM nodes already had.
 
 ---
 
 ## 2. StreamPipeline persistent worker reuse
 
-**Files:** `host/src/main.rs`, `host/src/runtime/worker.rs`, `host/src/runtime/dag_runner/subprocess.rs`, `executor.rs`
+**Files:** `host/src/main.rs`, `worker.rs`, `subprocess.rs`, `executor.rs`
 
-Previously, each `StreamPipeline` tick spawned a fresh `./host wasm-call` subprocess per active stage, paying the full wasmtime JIT + SHM mmap cost on every tick.
-
-### New `wasm-loop` subcommand
-
-```
-./host wasm-loop <shm_path> <wasm_path> <func>
-```
-
-`run_wasm_loop()` in `worker.rs` sets up wasmtime and the SHM mapping **once**, then enters a blocking stdin loop:
-
-- Reads `"arg0 arg1\n"` from stdin (OS blocks the process between reads — no busy-waiting).
-- Calls `func(arg0, arg1)`.
-- Writes `"ok\n"` (or `"err: …\n"`) to stdout and flushes.
-- Exits when stdin closes (EOF).
-
-### `PipelineWorker` struct
-
-`subprocess.rs` now contains `PipelineWorker`, which wraps a `wasm-loop` child process with typed `send(arg0, arg1)` and `recv()` methods and a `finish()` shutdown path. `Drop` closes stdin before waiting so the worker exits cleanly even on error paths.
-
-### Scatter / gather tick dispatch
-
-The `StreamPipeline` executor in `executor.rs`:
-
-1. **Before the tick loop** — spawns one `PipelineWorker` per stage (wasmtime init paid once per pipeline execution).
-2. **Each tick — scatter** — writes commands to all active stage workers' stdin pipes in order. Workers wake up and execute concurrently (OS-level parallelism via the pipe wait queues).
-3. **Each tick — gather** — reads responses from each active stage in order.
-4. **After the tick loop** — calls `finish()` on all workers (closes stdin → EOF → processes exit).
-
-Cost comparison for a 6-stage pipeline over 3 reset-mode runs:
+Added `wasm-loop` subcommand: sets up wasmtime and the SHM mapping once, then loops on stdin reading `"arg0 arg1\n"` → calls func → writes `"ok\n"`. `PipelineWorker` wraps a `wasm-loop` child with typed `send`/`recv`/`finish`. The `StreamPipeline` executor spawns one worker per stage before the tick loop (wasmtime JIT paid once), scatter-writes commands each tick, gather-reads responses, then shuts down after the loop.
 
 | | Before | After |
 |--|--|--|
-| Subprocess spawns | `ticks × active_stages × runs` | `stages × runs` |
+| Subprocess spawns | `ticks × stages × runs` | `stages × runs` |
 | wasmtime JIT per stage | every tick | once per run |
 
 ---
@@ -62,12 +29,7 @@ Cost comparison for a 6-stage pipeline over 3 reset-mode runs:
 
 **Files:** `demo_dag/py_img_pipeline_demo.json`, `demo_dag/py_word_count_demo.json`
 
-### `py_img_pipeline_demo.json`
-- `Output` node: added explicit `"slot": 1` (OUTPUT_IO_SLOT) for clarity, matching the Rust version.
-- `FreeSlots` node: `"io": [10]` → `"io": [10, 1]` to also release the output I/O slot between reset runs.
-
-### `py_word_count_demo.json`
-- `Output` node: added explicit `"slot": 1` to match the Rust `word_count_demo.json` convention.
+Added explicit `"slot": 1` on `Output` nodes; extended `FreeSlots` in `py_img_pipeline_demo.json` to also release the output I/O slot between reset runs.
 
 ---
 
@@ -75,15 +37,15 @@ Cost comparison for a 6-stage pipeline over 3 reset-mode runs:
 
 **Files:** `host/src/runtime/dag_runner/` (new directory)
 
-The 1538-line `dag_runner.rs` was split into five focused files. `runtime/mod.rs` is unchanged — `pub mod dag_runner;` resolves to `dag_runner/mod.rs` automatically.
+The 1538-line `dag_runner.rs` split into five files:
 
-| File | Lines | Contents |
-|------|-------|----------|
-| `mod.rs` | ~424 | Module doc, `run_dag_file`, `run_dag_json`, `run_dag` |
-| `types.rs` | ~321 | All JSON schema structs and enums |
-| `plan.rs` | ~244 | `validate_dag`, `topo_sort`, `build_waves`, slot tracking, `is_subprocess_node` |
-| `subprocess.rs` | ~164 | `PipelineWorker`, `spawn_wasm_subprocess`, `spawn_python_subprocess` |
-| `executor.rs` | ~413 | `execute_node` and all `NodeKind` match arms |
+| File | Contents |
+|------|----------|
+| `mod.rs` | `run_dag_file`, `run_dag_json`, `run_dag` |
+| `types.rs` | All JSON schema structs and enums |
+| `plan.rs` | `validate_dag`, `topo_sort`, `build_waves`, slot tracking |
+| `subprocess.rs` | `PipelineWorker`, `spawn_wasm_subprocess`, `spawn_python_subprocess` |
+| `executor.rs` | `execute_node` and all `NodeKind` match arms |
 
 ---
 
@@ -91,76 +53,15 @@ The 1538-line `dag_runner.rs` was split into five focused files. `runtime/mod.rs
 
 **File:** `demo_dag/dag_demo.json`
 
-The `stream_pipeline_demo` node used a flat schema (`source_slot`, `filter_slot`, `transform_slot`, `summary_slot`) that no longer matches `StreamPipelineParams`. Updated to the current `stages` array format:
-
-```json
-"StreamPipeline": {
-  "rounds": 5,
-  "stages": [
-    { "func": "pipeline_source",    "arg0": 200, "arg1": null },
-    { "func": "pipeline_filter",    "arg0": 200, "arg1": 201 },
-    { "func": "pipeline_transform", "arg0": 201, "arg1": 202 },
-    { "func": "pipeline_sink",      "arg0": 202, "arg1": 203 }
-  ]
-}
-```
-
-`arg1: null` on `pipeline_source` tells the executor to inject the current round number as the second argument.
+Updated `stream_pipeline_demo` from the old flat schema to the current `stages` array format. `arg1: null` on the source stage tells the executor to inject the current round number.
 
 ---
 
 ## 6. `PyPipeline` node kind
 
-**Files:** `types.rs`, `subprocess.rs`, `executor.rs`, `py_guest/python/runner.py`, `demo_dag/py_img_pipeline_demo.json`
+**Files:** `types.rs`, `subprocess.rs`, `executor.rs`, `runner.py`, `py_img_pipeline_demo.json`
 
-Adds the Python equivalent of `StreamPipeline` worker reuse.
-
-### `runner.py --loop` mode
-
-When invoked with `--loop`, `runner.py` stays alive reading `"func [arg [arg2]]\n"` from stdin, dispatching to `workloads`, writing `"ok\n"` or `"err: …\n"` back, then blocking again. The original one-shot env-var mode is unchanged (no `--loop` argument).
-
-### New types
-
-```
-PyPipelineStage  { func: String, arg: u32, arg2: Option<u32> }
-PyPipelineParams { stages: Vec<PyPipelineStage> }
-NodeKind::PyPipeline(PyPipelineParams)
-```
-
-### `PyPipelineWorker`
-
-One persistent `runner.py --loop` process per `PyPipeline` node (not one per stage — Python stages are sequential with no intra-tick overlap). Supports both `python3` and `wasmtime run python.wasm` backends. `call(func, arg, arg2)` writes the command and reads the response synchronously. `finish()` closes stdin → EOF → process exits.
-
-### `py_img_pipeline_demo.json`
-
-The six individual `PyFunc` nodes (`parse`, `rotate`, `gray`, `equalize`, `blur`, `export`) are replaced by a single `PyPipeline` node:
-
-```json
-{
-  "id": "pipeline",
-  "deps": ["load"],
-  "kind": { "PyPipeline": {
-    "stages": [
-      { "func": "img_load_ppm"   },
-      { "func": "img_rotate"     },
-      { "func": "img_grayscale"  },
-      { "func": "img_equalize"   },
-      { "func": "img_blur"       },
-      { "func": "img_export_ppm" }
-    ]
-  }}
-}
-```
-
-Cost comparison (3 reset-mode runs):
-
-| | Before (6 × PyFunc) | After (1 × PyPipeline) |
-|--|--|--|
-| Process spawns per run | 6 | 1 |
-| Process spawns for 3 runs | 18 | 3 |
-| Python / wasmtime startup cost | paid 6× per run | paid 1× per run |
-
-The `save` node's `deps` is updated from `["export"]` to `["pipeline"]`.
+Python equivalent of `StreamPipeline` worker reuse. `runner.py --loop` stays alive reading `"func [arg [arg2]]\n"` from stdin. `PyPipelineWorker` wraps one persistent process per `PyPipeline` node. The six individual `PyFunc` nodes in `py_img_pipeline_demo.json` are replaced by a single `PyPipeline` node — reducing process spawns from 18 to 3 across 3 reset-mode runs.
 
 ---
 
@@ -168,33 +69,21 @@ The `save` node's `deps` is updated from `["export"]` to `["pipeline"]`.
 
 **Files:** `host/src/runtime/input_output/` (new directory)
 
-`inputer.rs`, `outputer.rs`, and `logger.rs` were moved from `host/src/runtime/` into a new `input_output/` subdirectory. A `mod.rs` was added to declare the three submodules. `runtime/mod.rs` now declares `pub mod input_output;` in place of the three individual entries.
+`inputer.rs`, `outputer.rs`, and `logger.rs` moved into `input_output/`. All import sites updated.
 
-| Old path | New path |
-|---|---|
+| Old | New |
+|-----|-----|
 | `runtime/inputer.rs` | `runtime/input_output/inputer.rs` |
 | `runtime/outputer.rs` | `runtime/input_output/outputer.rs` |
 | `runtime/logger.rs` | `runtime/input_output/logger.rs` |
-
-All `use crate::runtime::{inputer, outputer, logger}` references across `slicer.rs`, `dag_runner/plan.rs`, `dag_runner/mod.rs`, and `dag_runner/executor.rs` were updated to `crate::runtime::input_output::{inputer, outputer, logger}`.
-
-The only internal path fix was in `inputer.rs`: `use super::reclaimer` → `use crate::runtime::reclaimer` (now `crate::runtime::mem_operation::reclaimer` after update 9), and in `outputer.rs`: `use super::writer::read_io_records` → `use crate::runtime::writer::read_io_records` (now `use super::state_writer::read_io_records` after update 8).
 
 ---
 
 ## 8. `writer.rs` → `input_output/state_writer.rs`
 
-**Files:** `host/src/runtime/input_output/state_writer.rs` (renamed and moved)
+**File:** `host/src/runtime/input_output/state_writer.rs`
 
-`writer.rs` was renamed to `state_writer.rs` and moved into `input_output/`. The module is declared in `input_output/mod.rs` alongside the other three submodules. `runtime/mod.rs` no longer declares `pub mod writer;`.
-
-Import sites updated:
-
-| File | Old import | New import |
-|---|---|---|
-| `input_output/outputer.rs` | `crate::runtime::writer::read_io_records` | `super::state_writer::read_io_records` |
-| `dag_runner/executor.rs` | `crate::runtime::writer::{PersistenceOptions, PersistenceWriter}` | `crate::runtime::input_output::state_writer::{…}` |
-| `dag_runner/mod.rs` | `crate::runtime::writer::PersistenceWriter` | `crate::runtime::input_output::state_writer::PersistenceWriter` |
+Renamed and moved into `input_output/`. Import sites in `outputer.rs`, `executor.rs`, and `dag_runner/mod.rs` updated accordingly.
 
 ---
 
@@ -202,79 +91,93 @@ Import sites updated:
 
 **Files:** `host/src/runtime/mem_operation/` (new directory)
 
-`reclaimer.rs` and `slicer.rs` were moved from `host/src/runtime/` into a new `mem_operation/` subdirectory. `runtime/mod.rs` now declares `pub mod mem_operation;` in place of the two individual entries.
+`reclaimer.rs` and `slicer.rs` moved into `mem_operation/`. All references updated across the dag runner, routing, and input_output modules.
 
-| Old path | New path |
-|---|---|
+| Old | New |
+|-----|-----|
 | `runtime/reclaimer.rs` | `runtime/mem_operation/reclaimer.rs` |
 | `runtime/slicer.rs` | `runtime/mem_operation/slicer.rs` |
 
-All references updated across `input_output/inputer.rs`, `runtime/organizer.rs`, `dag_runner/plan.rs`, `dag_runner/mod.rs`, `dag_runner/executor.rs`, and `routing/dispatch.rs`.
-
 ---
 
-## 10. `connect` crate — RDMA state-sharing demo
+## 10. `connect` crate — initial RDMA two-node demo
 
 **Files:** `connect/` (new workspace crate)
 
-A new `connect` crate was added to the workspace for RDMA-based state sharing between two nodes.  The existing placeholder `connect/remote.rs` was moved to `connect/src/remote.rs` and filled in as the high-level API.
+Hand-crafted libibverbs FFI (`src/ffi.rs`) instead of `rdma-sys`, which panics on the anonymous union in rdma-core 50.0. Static-inline ibv functions re-exported via `ibverbs_helpers.c`. Implements `RdmaContext`, `MemoryRegion`, `QueuePair` (RESET→INIT→RTR→RTS), and `RdmaRemote` for a basic two-node WRITE + TCP-signal demo.
 
-### Why a custom FFI instead of `rdma-sys`
+---
 
-`rdma-sys 0.3.0` uses `bindgen 0.59.2`, which panics on an anonymous union introduced in the `ib_user_ioctl_verbs.h` header of `rdma-core 50.0` (the version installed on this machine).  Rather than forking the crate, all libibverbs types and function declarations are hand-written in `src/ffi.rs` with layouts verified against the installed headers using `offsetof`/`sizeof` probes.
+## 11. Full-mesh RDMA, atomic ops, SHM integration, RemoteSend / RemoteRecv (Phase 1 & 2)
 
-`ibv_post_send`, `ibv_poll_cq`, `ibv_post_recv`, and `ibv_query_port` are `static inline` in the libibverbs headers and therefore not exported symbols.  `src/ibverbs_helpers.c` (compiled via the `cc` build dependency) re-exports them as real C symbols callable from Rust FFI.
+**Files:** `connect/src/mesh.rs`, `connect/src/rdma/queue_pair.rs`, `host/src/runtime/remote/mod.rs`, `host/src/runtime/dag_runner/{types,dispatch,mod}.rs`
 
-### File layout
+### Full-mesh QP topology — `MeshNode`
 
+`MeshNode::connect_all(node_id, total, ips)` establishes N×(N-1)/2 RC QP pairs.
+Deadlock-free: lower-ID node acts as TCP server on `BASE_PORT + i*MAX_NODES + j`.
+Data-path: `write_to`, `broadcast`, `wait_from`, `wait_all_writes`, `slot`, `slot_str`.
+
+### RDMA atomic operations
+
+Added to `QueuePair` and exposed on `MeshNode`:
+- `fetch_and_add(peer_id, byte_offset, add_val)` — hardware-atomic FAA on a remote u64.
+- `compare_and_swap(peer_id, byte_offset, compare_val, swap_val)` — hardware-atomic CAS.
+
+Both target `remote_mr_base + byte_offset`, addressing any 8-byte-aligned location within the peer's MR.
+
+### SHM as the RDMA Memory Region — `connect_all_on_shm`
+
+Registers the mmap'd SHM as the single RDMA MR. `remote_mr_base + shm_offset` targets any byte in the peer's SHM directly; RDMA WRITEs land there with no intermediate copy.
+
+### RemoteSend / RemoteRecv DAG nodes
+
+New types: `RdmaConfig`, `RemoteSlotKind` (`Stream`/`Io`), `RemoteSendParams`, `RemoteRecvParams`, `NodeKind::RemoteSend/RemoteRecv`, `Dag.rdma: Option<RdmaConfig>`.
+
+Staging area pre-allocated from the SHM bump allocator (`STAGE_PAGES_PER_PEER = 256`, 1 MiB per peer). Both machines format SHM identically then pre-allocate the same pages in the same order, so staging offsets are byte-for-byte identical everywhere:
+
+`staging_offset(peer_id) = BUMP_ALLOCATOR_START + peer_id × STAGE_BYTES_PER_PEER`
+
+**Phase 2 protocol:** sender serialises records into local staging → RDMA WRITE to peer's staging at the same offset → TCP 1-byte signal. Receiver waits on TCP, issues Acquire fence, deserialises records, appends to target slot.
+
+`dispatch.rs` gains `mesh: Option<&mut MeshNode>` on `execute_node`; `mod.rs` sets up the mesh and passes it through every call. `host/Cargo.toml` gains `connect` dependency.
+
+---
+
+## 12. RDMA RemoteSend / RemoteRecv — Phase 3, zero-copy scatter-gather
+
+**Files:** `connect/src/rdma/queue_pair.rs`, `connect/src/mesh.rs`, `host/src/runtime/remote/mod.rs`, `host/src/runtime/dag_runner/{types,mod,plan}.rs`
+
+### `rdma.transfer` enable/disable switch
+
+`RdmaConfig` gains `transfer: bool` (default `true`). When `false`, staging pre-allocation is skipped and `RemoteSend`/`RemoteRecv` nodes fail validation; the mesh still connects so RDMA atomics remain available.
+
+### Eliminated serialisation — raw page-chain transfer
+
+Replaced the `Vec<(u32, Vec<u8>)>` round-trip with a direct page-chain walk. Sender writes a 12-byte header (`u64` ready-counter = 0, `u32` total_bytes) into local staging then scatters source page data via RDMA (no CPU copy of payload). Receiver appends raw bytes from `staging[12+]` directly into the target slot — same byte format the WASM guest uses, no parsing.
+
+**Staging layout:**
 ```
-connect/
-  build.rs                    link libibverbs + compile ibverbs_helpers.c
-  src/
-    ibverbs_helpers.c         C wrappers for static-inline ibv_ functions
-    ffi.rs                    hand-written FFI types + extern "C" declarations
-    lib.rs
-    remote.rs                 RdmaRemote — high-level two-node API
-    rdma/
-      mod.rs
-      context.rs              RdmaContext  (ibv_context + ibv_pd + ibv_cq)
-      memory_region.rs        MemoryRegion (registered buffer, lkey/rkey)
-      queue_pair.rs           QueuePair    (RESET→INIT→RTR→RTS, post_rdma_write)
-      exchange.rs             TCP side-channel for QpInfo swap + done signal
-  examples/
-    rdma_server.rs
-    rdma_client.rs
+staging_offset(sender_id):
+  [0..8]   u64  ready_counter  — 0 before write; RDMA FAA sets to 1
+  [8..12]  u32  total_bytes    — byte count of raw page content
+  [12+]         raw page data  — concatenated page.data[..cursor] bytes
 ```
 
-### QP state machine
+### RDMA FAA primary signal, TCP backup
 
-`QueuePair` drives the standard RC transition sequence:
+`rdma_write_staging` is now data-only. Two new methods on `MeshNode`:
+- `rdma_signal_staging(peer_id, staging_offset)` — RDMA FAA increments peer's `staging[0..8]` counter (0 → 1); TCP `send_done` sent as backup.
+- `wait_staging(peer_id, counter_ptr)` — spin-polls the u64 for up to 100 ms (Acquire fence on non-zero), then falls back to TCP `wait_done`.
 
-| Step | ibv call | Key fields set |
-|---|---|---|
-| `to_init(port)` | `ibv_modify_qp` | `IBV_QPS_INIT`, access flags, port |
-| `to_rtr(remote, port, gid_idx)` | `ibv_modify_qp` | `IBV_QPS_RTR`, peer QPN/PSN, AH attr (GID for RoCE) |
-| `to_rts(psn)` | `ibv_modify_qp` | `IBV_QPS_RTS`, local PSN, timeout/retry |
+### Zero-copy scatter-gather WRITE with automatic chunking
 
-### Data path
+`max_send_sge` raised to `MAX_SEND_SGE` (16). `post_rdma_write_sge_list` gains `signaled: bool`.
 
-`RdmaRemote::write_state(data)` (client side):
-1. Copies `data` into the local registered MR.
-2. Posts `IBV_WR_RDMA_WRITE | IBV_SEND_SIGNALED` — the HCA DMA-writes directly into the server's MR with no server CPU involvement.
-3. Busy-polls the local CQ for the write completion.
-4. Sends a one-byte TCP signal so the server knows to read its buffer.
+`MeshNode::rdma_write_sge(peer_id, remote_off, sge_pairs: &[(u64, u32)])` accepts an unlimited number of SGE pairs. It chunks into slices of `MAX_SEND_SGE`, posts all but the last unsignaled, posts the last signaled, then polls the CQ once. RC QPs deliver completions in order, so the single CQ entry proves every preceding write landed at the remote.
 
-`RdmaRemote::wait_peer_write()` (server side): blocks on the TCP control channel for that signal, then the application reads `local_state()`.
+`execute_remote_send` builds `sges = [(header_vaddr, 12), (page1.data, cursor1), …]` and calls `rdma_write_sge` — the HCA DMA-reads source pages directly into peer's staging. CPU touches only the 12-byte header.
 
-### Running the demo
+### DAG validation
 
-```bash
-# terminal 1 — start server first
-cargo run --example rdma_server
-
-# terminal 2
-cargo run --example rdma_client           # loopback
-cargo run --example rdma_client -- <ip>   # cross-node
-```
-
-The machine has an active `mlx4_0` port 1 (RoCE, netdev `eno1`), so the demo runs without any additional hardware configuration.
+`validate_dag` now rejects: `RemoteSend`/`RemoteRecv` without `rdma.transfer: true`; `RemoteSend` with no dependencies (required to guarantee the slot producer finishes before the RDMA DMA reads from its pages).
