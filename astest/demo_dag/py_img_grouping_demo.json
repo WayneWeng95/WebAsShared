@@ -24,12 +24,12 @@
       "deps": ["load"],
       "kind": { "PyGrouping": {
         "stages": [
-          { "func": "img_load_ppm"   },
-          { "func": "img_rotate"     },
-          { "func": "img_grayscale"  },
-          { "func": "img_equalize"   },
-          { "func": "img_blur"       },
-          { "func": "img_export_ppm" }
+          { "func": "img_load_ppm",   "arg": 10, "arg2": 20 },
+          { "func": "img_rotate",     "arg": 20, "arg2": 30 },
+          { "func": "img_grayscale",  "arg": 30, "arg2": 40 },
+          { "func": "img_equalize",   "arg": 40, "arg2": 50 },
+          { "func": "img_blur",       "arg": 50, "arg2": 60 },
+          { "func": "img_export_ppm", "arg": 60, "arg2":  1 }
         ]
       }}
     },

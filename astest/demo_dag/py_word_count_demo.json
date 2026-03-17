@@ -14,19 +14,19 @@
     {
       "id": "distribute",
       "deps": ["load"],
-      "kind": { "PyFunc": { "func": "wc_distribute", "arg": 10 } }
+      "kind": { "PyFunc": { "func": "wc_distribute", "arg": 10, "arg2": 10 } }
     },
 
-    { "id": "map_0", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 10 } } },
-    { "id": "map_1", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 11 } } },
-    { "id": "map_2", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 12 } } },
-    { "id": "map_3", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 13 } } },
-    { "id": "map_4", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 14 } } },
-    { "id": "map_5", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 15 } } },
-    { "id": "map_6", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 16 } } },
-    { "id": "map_7", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 17 } } },
-    { "id": "map_8", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 18 } } },
-    { "id": "map_9", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 19 } } },
+    { "id": "map_0", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 10, "arg2": 110 } } },
+    { "id": "map_1", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 11, "arg2": 111 } } },
+    { "id": "map_2", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 12, "arg2": 112 } } },
+    { "id": "map_3", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 13, "arg2": 113 } } },
+    { "id": "map_4", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 14, "arg2": 114 } } },
+    { "id": "map_5", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 15, "arg2": 115 } } },
+    { "id": "map_6", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 16, "arg2": 116 } } },
+    { "id": "map_7", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 17, "arg2": 117 } } },
+    { "id": "map_8", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 18, "arg2": 118 } } },
+    { "id": "map_9", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 19, "arg2": 119 } } },
 
     {
       "id": "aggregate",
@@ -49,6 +49,12 @@
       "id": "save",
       "deps": ["reduce"],
       "kind": { "Output": { "path": "/tmp/py_word_count_result.txt", "slot": 1 } }
+    },
+
+    {
+      "id": "save_copy",
+      "deps": ["reduce"],
+      "kind": { "Output": { "path": "/tmp/py_word_count_result_copy.txt", "slot": 2 } }
     }
 
   ]

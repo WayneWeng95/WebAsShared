@@ -20,7 +20,14 @@ import sys
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _script_dir)
 
-import workloads  # noqa: E402
+import word_count    # noqa: E402
+import image_process  # noqa: E402
+
+
+def _lookup(name):
+    """Find a workload function by name, searching word_count then image_process."""
+    return getattr(word_count, name, None) or getattr(image_process, name, None)
+
 
 if len(sys.argv) > 1 and sys.argv[1] == "--loop":
     # ── Loop mode ──────────────────────────────────────────────────────────────
@@ -32,7 +39,7 @@ if len(sys.argv) > 1 and sys.argv[1] == "--loop":
         func_name = parts[0]
         arg  = int(parts[1]) if len(parts) > 1 else 0
         arg2 = int(parts[2]) if len(parts) > 2 else None
-        fn = getattr(workloads, func_name, None)
+        fn = _lookup(func_name)
         if fn is None:
             sys.stdout.write(f"err: unknown function {func_name!r}\n")
         else:
@@ -52,7 +59,7 @@ else:
     arg  = int(os.environ.get("WORKLOAD_ARG",  "0"))
     arg2 = os.environ.get("WORKLOAD_ARG2")
 
-    fn = getattr(workloads, func_name, None)
+    fn = _lookup(func_name)
     if fn is None:
         sys.exit(f"[runner] unknown function: {func_name!r}")
 
