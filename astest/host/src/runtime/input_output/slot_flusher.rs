@@ -3,7 +3,7 @@
 // The guest calls `ShmApi::write_output` / `ShmApi::write_output_str` to
 // append final result records into `OUTPUT_SLOT_ID`, or calls
 // `ShmApi::write_output_to(slot, data)` to target any other slot.  After
-// the producing DAG node completes, an `Output` node triggers `Outputer::save`
+// the producing DAG node completes, an `Output` node triggers `SlotFlusher::save`
 // (or `save_slot` for a non-default slot) which reads those records from SHM
 // and writes them to the given file path, one record per line.
 //
@@ -11,7 +11,7 @@
 // file is guaranteed to exist before the next node runs.
 //
 // Usage:
-//   let outputer = Outputer::new(splice_addr);
+//   let outputer = SlotFlusher::new(splice_addr);
 //   // Default slot (OUTPUT_SLOT_ID):
 //   let n = outputer.save(Path::new("/tmp/result.txt"))?;
 //   // Explicit slot:
@@ -24,13 +24,13 @@ use std::path::Path;
 use anyhow::Result;
 use common::{OUTPUT_IO_SLOT, Superblock};
 
-use super::state_writer::read_io_records;
+use super::persistence::read_io_records;
 
-pub struct Outputer {
+pub struct SlotFlusher {
     splice_addr: usize,
 }
 
-impl Outputer {
+impl SlotFlusher {
     pub fn new(splice_addr: usize) -> Self {
         Self { splice_addr }
     }
@@ -62,7 +62,7 @@ impl Outputer {
         }
 
         println!(
-            "[Outputer] slot {} ({} records) → {}",
+            "[SlotFlusher] slot {} ({} records) → {}",
             slot, count, path.display()
         );
         Ok(count)

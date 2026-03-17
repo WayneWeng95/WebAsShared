@@ -1,28 +1,28 @@
-// Internal SHM I/O primitive shared by all routing connection types.
+// Internal SHM page-chain splice primitive shared by all routing connection types.
 //
-// ShmIo wraps a splice_addr (the SHM superblock base) and provides the two
-// building blocks every connection needs:
+// ChainSplicer wraps a splice_addr (the SHM superblock base) and provides the
+// two building blocks every connection needs:
 //   chain_onto  — O(1) splice: link src's page chain onto the end of dst's.
 //   merge_into  — merge N upstream chains into one dst; sequential for
 //                 N ≤ PARALLEL_THRESHOLD, parallel tree-merge beyond that.
 //
-// ShmIo is Copy (one usize) so it can be moved into thread closures for free.
+// ChainSplicer is Copy (one usize) so it can be moved into thread closures for free.
 
 use std::sync::atomic::Ordering;
 use std::thread;
 use common::{Page, Superblock, PARALLEL_THRESHOLD};
 
 #[derive(Clone, Copy)]
-pub(super) struct ShmIo {
+pub(super) struct ChainSplicer {
     base: usize,
 }
 
 // Safe: all mutations go through atomics on shared memory that both host
 // and guest already access concurrently.
-unsafe impl Send for ShmIo {}
-unsafe impl Sync for ShmIo {}
+unsafe impl Send for ChainSplicer {}
+unsafe impl Sync for ChainSplicer {}
 
-impl ShmIo {
+impl ChainSplicer {
     pub(super) fn new(splice_addr: usize) -> Self {
         Self { base: splice_addr }
     }

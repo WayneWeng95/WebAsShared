@@ -2,17 +2,15 @@
     9  rustup toolchain install nightly
    10  rustup target add wasm32-unknown-unknown --toolchain nightly
    11  rustup component add rust-src --toolchain nightly
-   12  ls
-   13  cd guest/
-   14  cargo +nightly build --release
-   15  cd WebAsShared/astest/
 
+   cargo +nightly build --release
 
-   55  cd /opt/myapp/
 
    cargo run dag ../demo_dag/dag_demo.json 
 
    cargo run dag ../demo_dag/word_count_demo.json 
+
+   cargo run dag ../demo_dag/img_grouping_demo.json
 
    cargo run dag ../demo_dag/img_pipeline_demo.json 
 
@@ -20,6 +18,8 @@
    install wasmtime to run the python verison also need to pull a python.wasm, here I use python-3.12.0.wasm
 
    cargo run dag ../demo_dag/py_word_count_demo.json
+
+   cargo run dag ../demo_dag/py_img_grouping_demo.json 
 
    cargo run dag ../demo_dag/py_img_pipeline_demo.json 
 

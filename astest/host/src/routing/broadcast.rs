@@ -1,6 +1,6 @@
 // N→M broadcast connection: fans every upstream into every downstream slot.
 
-use super::shm_io::ShmIo;
+use super::chain_splicer::ChainSplicer;
 
 /// Routes every upstream stream to every downstream slot.
 ///
@@ -28,7 +28,7 @@ impl BroadcastConnection {
 
     /// Merge all upstreams into each downstream slot in turn.
     pub fn bridge(&self, splice_addr: usize) {
-        let io = ShmIo::new(splice_addr);
+        let io = ChainSplicer::new(splice_addr);
         for &dst_id in &self.downstream_ids {
             io.merge_into(&self.upstream_ids, dst_id);
         }

@@ -1,5 +1,5 @@
 {
-  "shm_path": "/dev/shm/py_img_pipeline_demo",
+  "shm_path": "/dev/shm/py_img_grouping_demo",
   "python_script": "../py_guest/python/runner.py",
   "python_wasm": "/opt/myapp/python-3.12.0.wasm",
   "log_level": "info",
@@ -16,40 +16,35 @@
           "../data/img_checkerboard.ppm",
           "../data/img_rings.ppm"
         ],
-        "slot": 10,
-        "binary": true
+        "slot": 10
       }}
     },
-
     {
       "id": "pipeline",
       "deps": ["load"],
-      "kind": { "PyPipeline": {
-        "rounds": 3,
+      "kind": { "PyGrouping": {
         "stages": [
-          { "func": "img_load_ppm",   "arg": 10, "arg2": 20 },
-          { "func": "img_rotate",     "arg": 20, "arg2": 30 },
-          { "func": "img_grayscale",  "arg": 30, "arg2": 40 },
-          { "func": "img_equalize",   "arg": 40, "arg2": 50 },
-          { "func": "img_blur",       "arg": 50, "arg2": 60 },
-          { "func": "img_export_ppm", "arg": 60, "arg2": 1  }
+          { "func": "img_load_ppm"   },
+          { "func": "img_rotate"     },
+          { "func": "img_grayscale"  },
+          { "func": "img_equalize"   },
+          { "func": "img_blur"       },
+          { "func": "img_export_ppm" }
         ]
       }}
     },
-
     {
       "id": "save",
       "deps": ["pipeline"],
       "kind": { "Output": {
         "paths": [
-          "/tmp/py_img_pipeline_out/gradient_processed.pgm",
-          "/tmp/py_img_pipeline_out/checkerboard_processed.pgm",
-          "/tmp/py_img_pipeline_out/rings_processed.pgm"
+          "/tmp/py_img_out/gradient_processed.pgm",
+          "/tmp/py_img_out/checkerboard_processed.pgm",
+          "/tmp/py_img_out/rings_processed.pgm"
         ],
         "slot": 1
       }}
     },
-
     {
       "id": "free",
       "deps": ["save"],

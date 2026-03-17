@@ -1,4 +1,4 @@
-use crate::policy::{ConsumptionPolicy, ConsumptionResult, HostNode};
+use crate::policy::{ConsumptionPolicy, ConsumptionResult, ConflictNode};
 use crate::runtime::worker::WorkerState;
 use std::sync::atomic::{AtomicU32, Ordering};
 use wasmtime::{Memory, Store};
@@ -53,19 +53,19 @@ impl<'a> BucketOrganizer<'a> {
     /// Applies `policy` to the already-detached linked list rooted at `head_offset`.
     /// Deserializes each node's multi-page payload, invokes the policy, stores the winning
     /// node's offset and length into the Registry, and frees all losing nodes' page chains.
-    unsafe fn process_detached_list<P: ConsumptionPolicy>(&self, head_offset: u32, bucket_idx: usize, policy: &P) {
+    unsafe fn process_detached_list<P: ConsumptionPolicy>(&self, head_offset: u32, _bucket_idx: usize, policy: &P) {
         let mut nodes = Vec::new();
         let mut current_offset = head_offset;
 
         while current_offset != 0 {
             let node_ptr = self.base_ptr.add(current_offset as usize);
-            
+
             let writer_id = *(node_ptr.add(4) as *const u32);
             let data_len = *(node_ptr.add(8) as *const u32);
             let registry_index = *(node_ptr.add(12) as *const u32);
             let next_offset = (*(node_ptr as *const AtomicU32)).load(Ordering::Relaxed);
 
-            
+
             let mut payload = Vec::with_capacity(data_len as usize);
             let mut lob_offset = current_offset;
             let mut bytes_read = 0;
@@ -89,13 +89,13 @@ impl<'a> BucketOrganizer<'a> {
                 is_head = false;
             }
 
-            nodes.push(HostNode { offset: current_offset, writer_id, data_len, registry_index, payload });
+            nodes.push(ConflictNode { offset: current_offset, writer_id, data_len, registry_index, payload });
             current_offset = next_offset;
         }
 
         let result = policy.process(&nodes);
 
-        
+
         let free_lob_chain = |start_offset: u32| {
             let mut free_offset = start_offset;
             let mut is_head = true;
@@ -112,25 +112,25 @@ impl<'a> BucketOrganizer<'a> {
             }
         };
 
-        
+
         if let ConsumptionResult::Winner(winner_id, _content) = result {
             let winner_node = nodes.iter().find(|n| n.writer_id == winner_id).unwrap();
 
             let registry_base = self.base_ptr.add(common::REGISTRY_OFFSET as usize);
             let entry_ptr = registry_base.add(winner_node.registry_index as usize * std::mem::size_of::<RegistryEntry>()) as *const RegistryEntry;
             let entry = &*entry_ptr;
-            
+
             entry.payload_offset.store(winner_node.offset, Ordering::Release);
             entry.payload_len.store(winner_node.data_len, Ordering::Release);
 
             for node in &nodes {
                 if node.offset != winner_node.offset {
-                    free_lob_chain(node.offset); 
+                    free_lob_chain(node.offset);
                 }
             }
         } else {
-            for node in &nodes { 
-                free_lob_chain(node.offset); 
+            for node in &nodes {
+                free_lob_chain(node.offset);
             }
         }
     }
@@ -141,10 +141,6 @@ impl<'a> BucketOrganizer<'a> {
         if list_head == 0 {
             return;
         }
-
-        // Walk the list and push each node onto the free list one by one.
-        // A simple per-node push gives a safe Treiber stack; avoids race conditions
-        // from splicing the whole chain at once.
 
         let mut current = list_head;
         while current != 0 {

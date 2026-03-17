@@ -5,13 +5,13 @@
 // inside a `thread::scope`.
 //
 // Two built-in slice types are provided:
-//   - `FileSlice<'a>`  — zero-copy view into a memory-mapped `LoadedFile`
+//   - `FileSlice<'a>`  — zero-copy view into a memory-mapped `MappedFile`
 //   - `OwnedSlice`     — worker-produced data held in a `Vec<u8>`
 //
 // Custom slice types can be dispatched by implementing `DispatchSlice`.
 //
 // Usage (file-backed):
-//   let loaded  = load_file(Path::new("/data/input.csv"))?;
+//   let loaded  = mmap_file(Path::new("/data/input.csv"))?;
 //   let slicer  = Slicer::new(&loaded);
 //   let slices  = slicer.slice(&LineBoundarySlice, 8);
 //

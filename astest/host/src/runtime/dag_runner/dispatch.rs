@@ -7,16 +7,18 @@ use crate::routing::aggregate::AggregateConnection;
 use crate::routing::broadcast::BroadcastConnection;
 use crate::routing::dispatch::{FileDispatcher, OwnedSlice};
 use crate::routing::shuffle::ShuffleConnection;
-use crate::routing::stream::HostStream;
-use crate::runtime::input_output::inputer::{Inputer, PrefetchHandle};
+use crate::routing::stream::StreamBridge;
+use crate::runtime::input_output::slot_loader::{SlotLoader, PrefetchHandle};
 use crate::runtime::input_output::logger::HostLogger;
-use crate::runtime::input_output::outputer::Outputer;
-use crate::runtime::mem_operation::reclaimer;
+use crate::runtime::input_output::slot_flusher::SlotFlusher;
+use crate::runtime::mem_operation::reclaimer::{self, SlotKind};
 use crate::runtime::mem_operation::slicer::Slicer;
 use crate::runtime::worker::WorkerState;
-use crate::runtime::input_output::state_writer::{PersistenceOptions, PersistenceWriter};
+use crate::runtime::input_output::persistence::{PersistenceOptions, PersistenceWriter};
 use super::types::*;
-use super::subprocess::{spawn_wasm_subprocess, spawn_python_subprocess, PipelineWorker, PyPipelineWorker};
+use super::workers::{spawn_wasm_subprocess, spawn_python_subprocess};
+use super::grouping::{execute_wasm_grouping, execute_py_grouping};
+use super::pipeline::{execute_stream_pipeline, execute_py_pipeline};
 
 // ─── Node executor ────────────────────────────────────────────────────────────
 
@@ -62,11 +64,11 @@ pub(super) fn execute_node(
             log(&format!("node {} done", node.id));
         }
 
-        // ── Host routing: HostStream 1→1 bridge ──────────────────────────────
+        // ── Host routing: StreamBridge 1→1 bridge ──────────────────────────────
         NodeKind::Bridge(p) => {
-            let ok = HostStream::new(splice_addr).bridge(p.from, p.to);
+            let ok = StreamBridge::new(splice_addr).bridge(p.from, p.to);
             let status = if ok { "ok" } else { "fail (source slot empty)" };
-            println!("  HostStream::bridge({} → {}): {}", p.from, p.to, status);
+            println!("  StreamBridge::bridge({} → {}): {}", p.from, p.to, status);
             log(&format!("bridge {} → {}: {}", p.from, p.to, status));
         }
 
@@ -130,90 +132,11 @@ pub(super) fn execute_node(
         }
 
         // ── Streaming pipeline: pipelined execution over DAG-defined stages ──
-        //
-        // Stage S is active on tick T when S ≤ T < rounds + S.
-        // Active stages within a tick are independent; the tick barrier ensures
-        // each stage only sees data committed by the previous stage in the prior tick.
-        //
-        //   tick 0:  [stage·0·r0]
-        //   tick 1:  [stage·0·r1]  [stage·1·r0]
-        //   tick 2:  [stage·0·r2]  [stage·1·r1]  [stage·2·r0]
-        //   ...
-        //
-        // Total ticks = rounds + depth − 1.
-        //
-        // Workers are persistent `wasm-loop` subprocesses: one per stage, spawned
-        // once before the tick loop and reused across all rounds.  Each worker
-        // sleeps (blocked on stdin read) between ticks; the host wakes it by
-        // writing a command line.  Active stages within a tick run concurrently
-        // via a scatter/gather pattern: all commands are sent first so workers
-        // execute in parallel, then responses are collected in order.
+        // Execution logic lives in pipeline.rs.
         NodeKind::StreamPipeline(p) => {
-            let rounds = p.rounds as usize;
-            let depth  = p.stages.len();
-            if depth == 0 {
-                return Err(anyhow!("[{}] StreamPipeline has no stages", node.id));
-            }
-
-            // Spawn one persistent worker per stage (wasmtime init paid once).
-            let mut workers: Vec<PipelineWorker> = p.stages.iter()
-                .map(|s| PipelineWorker::spawn(&s.func, shm_path, wasm_path, &node.id))
-                .collect::<Result<Vec<_>>>()?;
-
-            let slot_chain: Vec<String> = p.stages.iter()
-                .map(|s| s.arg1.map_or_else(|| format!("{}(r)", s.arg0), |a| format!("{}→{}", s.arg0, a)))
-                .collect();
-            println!("  StreamPipeline: {} rounds, {} stages | {} ({} persistent workers)",
-                rounds, depth, slot_chain.join(" › "), depth);
-            log(&format!("pipeline {} rounds {} stages", rounds, depth));
-
-            let total_ticks = rounds + depth - 1;
-            for tick in 0..total_ticks {
-                // Collect active (stage_idx, resolved_arg1) pairs for this tick.
-                let active: Vec<(usize, u32)> = p.stages.iter().enumerate()
-                    .filter_map(|(s_idx, stage)| {
-                        let tick_round = tick as isize - s_idx as isize;
-                        if tick_round >= 0 && (tick_round as usize) < rounds {
-                            Some((s_idx, stage.arg1.unwrap_or(tick_round as u32)))
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                // Scatter: write all commands first — workers wake and run concurrently.
-                for &(s_idx, a1) in &active {
-                    workers[s_idx].send(p.stages[s_idx].arg0, a1)
-                        .map_err(|e| anyhow!("[{}] stage {} tick {} send: {}", node.id, s_idx, tick, e))?;
-                }
-                // Gather: collect responses in order (workers may already be done).
-                for &(s_idx, _) in &active {
-                    workers[s_idx].recv()
-                        .map_err(|e| anyhow!("[{}] stage {} tick {}: {}", node.id, s_idx, tick, e))?;
-                }
-
-                println!("    tick {} complete", tick);
-                log_debug(&format!("tick {} complete", tick));
-            }
-
-            // Close stdin on all workers (EOF → they exit) and wait for them.
-            for w in workers {
-                w.finish()?;
-            }
-
-            // Dump the accumulated per-round summaries from the last stage's output slot.
-            if let Some(summary_slot) = p.stages.last().and_then(|s| s.arg1) {
-                let exe = std::env::current_exe()
-                    .map_err(|e| anyhow!("cannot find current exe: {}", e))?;
-                let status = std::process::Command::new(exe)
-                    .args(["wasm-call", shm_path, wasm_path, "dump_stream_records", "fatptr",
-                           &summary_slot.to_string()])
-                    .status()
-                    .map_err(|e| anyhow!("[{}] dump_stream_records spawn: {}", node.id, e))?;
-                if !status.success() {
-                    return Err(anyhow!("[{}] dump_stream_records failed", node.id));
-                }
-            }
+            log(&format!("stream pipeline {} rounds {} stages", p.rounds, p.stages.len()));
+            execute_stream_pipeline(p, &node.id, shm_path, wasm_path)?;
+            log("stream pipeline done");
         }
 
         // ── Output: flush reserved output slot to a file ─────────────────────
@@ -225,7 +148,7 @@ pub(super) fn execute_node(
             } else {
                 p.path.as_str()
             };
-            let outputer = Outputer::new(splice_addr);
+            let outputer = SlotFlusher::new(splice_addr);
             let count = outputer.save_slot(Path::new(path), slot)
                 .map_err(|e| anyhow!("[{}] output save failed: {}", node.id, e))?;
             println!("  Output slot {} → \"{}\" ({} records)", slot, path, count);
@@ -237,11 +160,13 @@ pub(super) fn execute_node(
             let splice_addr = store.data().splice_addr;
             for &s in &p.stream {
                 reclaimer::free_stream_slot(splice_addr, s);
+                reclaimer::reset_slot_cursor(splice_addr, SlotKind::Stream, s);
                 println!("  FreeSlots: stream slot {} freed", s);
                 log(&format!("freed stream slot {}", s));
             }
             for &s in &p.io {
                 reclaimer::free_io_slot(splice_addr, s);
+                reclaimer::reset_slot_cursor(splice_addr, SlotKind::Io, s);
                 println!("  FreeSlots: I/O slot {} freed", s);
                 log(&format!("freed I/O slot {}", s));
             }
@@ -249,20 +174,20 @@ pub(super) fn execute_node(
 
         // ── FileDispatch: load file → slice → parallel workers ───────────────
         NodeKind::FileDispatch(p) => {
-            use crate::runtime::input_output::inputer::load_file;
-            let loaded = load_file(Path::new(&p.path))
-                .map_err(|e| anyhow!("[{}] load_file '{}': {}", node.id, p.path, e))?;
+            use crate::runtime::input_output::slot_loader::mmap_file;
+            let loaded = mmap_file(Path::new(&p.path))
+                .map_err(|e| anyhow!("[{}] mmap_file '{}': {}", node.id, p.path, e))?;
             let slicer = Slicer::new(&loaded);
             let slices = match &p.policy {
-                SlicePolicySpec::Equal        => slicer.slice(&EqualSlice,       p.workers),
-                SlicePolicySpec::LineBoundary => slicer.slice(&LineBoundarySlice, p.workers),
-                SlicePolicySpec::FixedSize { max_bytes } =>
+                FileDispatchPolicy::Equal        => slicer.slice(&EqualSlice,       p.workers),
+                FileDispatchPolicy::LineBoundary => slicer.slice(&LineBoundarySlice, p.workers),
+                FileDispatchPolicy::FixedSize { max_bytes } =>
                     slicer.slice(&FixedSizeSlice { max_bytes: *max_bytes }, p.workers),
             };
             let policy_name = match &p.policy {
-                SlicePolicySpec::Equal        => "Equal",
-                SlicePolicySpec::LineBoundary => "LineBoundary",
-                SlicePolicySpec::FixedSize{..} => "FixedSize",
+                FileDispatchPolicy::Equal        => "Equal",
+                FileDispatchPolicy::LineBoundary => "LineBoundary",
+                FileDispatchPolicy::FixedSize{..} => "FixedSize",
             };
             println!(
                 "  FileDispatch: '{}' ({} bytes) → {} slices, {} workers, policy={}",
@@ -315,17 +240,17 @@ pub(super) fn execute_node(
         // ── Host routing: ShuffleConnection N→M ──────────────────────────────
         NodeKind::Shuffle(p) => {
             let policy_name = match &p.policy {
-                PolicySpec::Modulo => {
+                ShufflePolicy::Modulo => {
                     ShuffleConnection::new(&p.upstream, &p.downstream, ModuloPartition)
                         .bridge(splice_addr);
                     "Modulo"
                 }
-                PolicySpec::RoundRobin => {
+                ShufflePolicy::RoundRobin => {
                     ShuffleConnection::new(&p.upstream, &p.downstream, RoundRobinPartition::new())
                         .bridge(splice_addr);
                     "RoundRobin"
                 }
-                PolicySpec::FixedMap { map, default_slot } => {
+                ShufflePolicy::FixedMap { map, default_slot } => {
                     let hmap: HashMap<usize, usize> =
                         map.iter().map(|&[k, v]| (k, v)).collect();
                     ShuffleConnection::new(
@@ -335,7 +260,7 @@ pub(super) fn execute_node(
                     ).bridge(splice_addr);
                     "FixedMap"
                 }
-                PolicySpec::Broadcast => {
+                ShufflePolicy::Broadcast => {
                     BroadcastConnection::new(&p.upstream, &p.downstream)
                         .bridge(splice_addr);
                     "Broadcast"
@@ -356,15 +281,24 @@ pub(super) fn execute_node(
             use common::INPUT_IO_SLOT;
             let slot = p.slot.unwrap_or(INPUT_IO_SLOT);
             if p.binary {
-                // Load every path as a single binary record each run.
-                // Guests consume them one-at-a-time via read_next_io_record.
                 let paths: &[String] = if !p.paths.is_empty() { &p.paths } else { std::slice::from_ref(&p.path) };
-                let inputer = Inputer::new(splice_addr);
-                for path in paths {
+                let inputer = SlotLoader::new(splice_addr);
+                if p.cycle && paths.len() > 1 {
+                    // cycle: true — load exactly one path per run, rotating through the list.
+                    let path = &paths[run_index % paths.len()];
                     inputer.load_as_single_record(Path::new(path), slot)
                         .map_err(|e| anyhow!("[{}] binary input load failed: {}", node.id, e))?;
-                    println!("  Input ← \"{}\" slot {} [binary]", path, slot);
-                    log(&format!("binary input loaded '{}' → slot {}", path, slot));
+                    println!("  Input ← \"{}\" slot {} [binary, cycle {}/{}]", path, slot, run_index % paths.len(), paths.len());
+                    log(&format!("binary input (cycle) loaded '{}' → slot {}", path, slot));
+                } else {
+                    // cycle: false (default) — load every path as one binary record per run.
+                    // Guests consume them one-at-a-time via read_next_io_record.
+                    for path in paths {
+                        inputer.load_as_single_record(Path::new(path), slot)
+                            .map_err(|e| anyhow!("[{}] binary input load failed: {}", node.id, e))?;
+                        println!("  Input ← \"{}\" slot {} [binary]", path, slot);
+                        log(&format!("binary input loaded '{}' → slot {}", path, slot));
+                    }
                 }
             } else if p.prefetch {
                 let path = if !p.paths.is_empty() {
@@ -374,7 +308,7 @@ pub(super) fn execute_node(
                 };
                 // Fire off the load in a background thread; the executor will
                 // join this handle before the first node that lists us as a dep.
-                let handle = Inputer::prefetch(splice_addr, PathBuf::from(path), slot);
+                let handle = SlotLoader::prefetch(splice_addr, PathBuf::from(path), slot);
                 prefetch_handles.insert(node.id.clone(), handle);
                 println!("  Input ← \"{}\" slot {} [prefetch started]", path, slot);
                 log(&format!("input prefetch started: '{}' → slot {}", path, slot));
@@ -384,7 +318,7 @@ pub(super) fn execute_node(
                 } else {
                     p.path.as_str()
                 };
-                let count = Inputer::new(splice_addr)
+                let count = SlotLoader::new(splice_addr)
                     .load(Path::new(path), slot)
                     .map_err(|e| anyhow!("[{}] input load failed: {}", node.id, e))?;
                 println!("  Input ← \"{}\" slot {} ({} records)", path, slot, count);
@@ -393,7 +327,7 @@ pub(super) fn execute_node(
         }
 
         // ── PyFunc: spawn Python runner subprocess ────────────────────────────
-        // NOTE: PyFunc is classified as a subprocess node (is_subprocess_node),
+        // NOTE: PyFunc is classified as a one-shot node (is_oneshot_node),
         // so in normal wave execution it is spawned in parallel via
         // spawn_python_subprocess and never reaches execute_node.  This branch
         // is retained as a sequential fallback (spawn + wait) for direct calls.
@@ -408,29 +342,34 @@ pub(super) fn execute_node(
             log(&format!("node {} done", node.id));
         }
 
-        // ── PyPipeline: persistent Python worker for sequential stages ────────
+        // ── WasmGrouping: sequential WASM stages, one persistent worker each ─
         //
-        // One `runner.py --loop` process is spawned for the full pipeline.
-        // Each stage sends "func arg [arg2]\n" to its stdin and waits for
-        // "ok\n".  The process sleeps between calls (blocked on stdin read),
-        // so no CPU is consumed between stages.  Closing stdin exits the worker.
+        // One `wasm-loop` subprocess per stage, all called in strict order.
+        // No round-based overlap — this is a grouping, not a pipeline.
+        // Execution logic lives in grouping.rs.
+        NodeKind::WasmGrouping(p) => {
+            log(&format!("wasm grouping {} stages", p.stages.len()));
+            execute_wasm_grouping(p, &node.id, shm_path, wasm_path)?;
+            log("wasm grouping done");
+        }
+
+        // ── PyGrouping: sequential Python stages, one shared persistent worker
+        //
+        // One `runner.py --loop` process for all stages, called in order.
+        // No round-based overlap — this is a grouping, not a pipeline.
+        // Execution logic lives in grouping.rs.
+        NodeKind::PyGrouping(p) => {
+            log(&format!("py grouping {} stages", p.stages.len()));
+            execute_py_grouping(p, &node.id, shm_path, python_script, python_wasm)?;
+            log("py grouping done");
+        }
+
+        // ── PyPipeline: true pipelined Python execution across rounds ─────────
+        // Execution logic lives in pipeline.rs.
         NodeKind::PyPipeline(p) => {
-            if p.stages.is_empty() {
-                return Err(anyhow!("[{}] PyPipeline has no stages", node.id));
-            }
-            let mut worker = PyPipelineWorker::spawn(shm_path, python_script, python_wasm, &node.id)?;
-            println!("  PyPipeline: {} stages, 1 persistent worker", p.stages.len());
-            log(&format!("pypipeline {} stages", p.stages.len()));
-
-            for (i, stage) in p.stages.iter().enumerate() {
-                worker.call(&stage.func, stage.arg, stage.arg2)
-                    .map_err(|e| anyhow!("[{}] stage {} ({}): {}", node.id, i, stage.func, e))?;
-                log_debug(&format!("stage {} ({}) done", i, stage.func));
-            }
-
-            worker.finish()?;
-            println!("  PyPipeline done");
-            log("pypipeline done");
+            log(&format!("py pipeline {} rounds {} stages", p.rounds, p.stages.len()));
+            execute_py_pipeline(p, &node.id, shm_path, python_script, python_wasm)?;
+            log("py pipeline done");
         }
     }
 

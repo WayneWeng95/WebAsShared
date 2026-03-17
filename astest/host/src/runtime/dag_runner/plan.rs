@@ -120,8 +120,8 @@ pub(super) fn node_routed_upstream_slots(kind: &NodeKind) -> Vec<usize> {
 /// Only slots with *exclusive* page ownership are listed here — i.e. no
 /// routing operation has spliced those pages into another slot's chain.
 ///
-/// - I/O Output slots: written by the Inputer, read by the guest, drained
-///   by the Outputer.  No routing ever touches the I/O area.
+/// - I/O Output slots: written by the SlotLoader, read by the guest, drained
+///   by the SlotFlusher.  No routing ever touches the I/O area.
 /// - StreamPipeline `source_slot`: written by an upstream node and read
 ///   only by this pipeline; ownership is unambiguous.
 ///
@@ -234,7 +234,7 @@ pub(super) fn build_waves(nodes: &[DagNode], order: &[usize]) -> Vec<Vec<usize>>
 
 /// Returns true for node kinds executed as isolated subprocesses
 /// (WasmVoid/WasmU32/WasmFatPtr and PyFunc).
-pub(super) fn is_subprocess_node(kind: &NodeKind) -> bool {
+pub(super) fn is_oneshot_node(kind: &NodeKind) -> bool {
     matches!(kind,
         NodeKind::WasmVoid(_)
         | NodeKind::WasmU32(_)

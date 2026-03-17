@@ -210,14 +210,81 @@ pub fn free_stream_slot(splice_addr: usize, slot: usize) {
 /// Detach the page chain from I/O `slot` and return it to the free pool.
 /// Resets `io_heads[slot]` and `io_tails[slot]` to `0`.
 ///
-/// I/O slots are always exclusively owned (the Inputer writes, the guest
-/// reads, the Outputer drains — no routing splices into them), so freeing
+/// I/O slots are always exclusively owned (the SlotLoader writes, the guest
+/// reads, the SlotFlusher drains — no routing splices into them), so freeing
 /// their pages is always safe.
 pub fn free_io_slot(splice_addr: usize, slot: usize) {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
     let head = sb.io_heads[slot].swap(0, Ordering::AcqRel);
     sb.io_tails[slot].store(0, Ordering::Release);
     free_page_chain(splice_addr, head);
+}
+
+// ─── Slot cursor reset ────────────────────────────────────────────────────────
+
+/// Reset the SHM atomic read-cursor for a stream or I/O slot to zero.
+///
+/// Cursor-based readers (`read_next_stream_record` / `read_next_io_record` in
+/// the Rust guest, `read_next_io_record` in the Python shm module) advance a
+/// per-slot named atomic each time a record is consumed:
+///
+/// | Slot kind | Atomic name        |
+/// |-----------|--------------------|
+/// | Stream    | `stream_cursor_N`  |
+/// | I/O       | `io_cursor_N`      |
+///
+/// These atomics live in the SHM atomic arena and survive `free_stream_slot` /
+/// `free_io_slot` — only the page chain is freed, not the arena.  In `reset`
+/// mode, a slot freed between runs is repopulated with fresh data starting at
+/// record index 0.  Without resetting the cursor the next run's stage would
+/// attempt to read at the old index and immediately return `None` (no-op),
+/// skipping the newly loaded data entirely.
+///
+/// Call this alongside `free_stream_slot` / `free_io_slot` wherever a slot
+/// will be reused across runs.  If the cursor atomic has never been registered
+/// (the slot was never read with a cursor), the function is a no-op.
+pub fn reset_slot_cursor(splice_addr: usize, kind: SlotKind, slot: usize) {
+    use std::sync::atomic::AtomicU32;
+    use common::{ATOMIC_ARENA_OFFSET, REGISTRY_OFFSET, RegistryEntry};
+
+    let name_str = match kind {
+        SlotKind::Stream => format!("stream_cursor_{}", slot),
+        SlotKind::Io     => format!("io_cursor_{}", slot),
+    };
+
+    // Build the padded 52-byte name key (same layout as RegistryEntry.name).
+    let mut name_key = [0u8; 52];
+    let src = name_str.as_bytes();
+    name_key[..src.len().min(52)].copy_from_slice(&src[..src.len().min(52)]);
+
+    let sb            = unsafe { &*(splice_addr as *const Superblock) };
+    let registry_base = (splice_addr + REGISTRY_OFFSET as usize) as *const RegistryEntry;
+    let atomic_base   = (splice_addr + ATOMIC_ARENA_OFFSET as usize) as *mut AtomicU32;
+
+    // Acquire the registry spinlock (same protocol as host_resolve_atomic in worker.rs).
+    while sb.registry_lock
+        .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        spin_loop();
+    }
+
+    let count = sb.next_atomic_idx.load(Ordering::Relaxed);
+    let mut found_index: Option<u32> = None;
+    for i in 0..count {
+        let entry = unsafe { &*registry_base.add(i as usize) };
+        if entry.name == name_key {
+            found_index = Some(entry.index);
+            break;
+        }
+    }
+
+    sb.registry_lock.store(0, Ordering::Release);
+
+    // Zero the atomic outside the lock — the AtomicU32 itself provides ordering.
+    if let Some(idx) = found_index {
+        unsafe { (*atomic_base.add(idx as usize)).store(0, Ordering::Release) };
+    }
 }
 
 // ─── Free-list trim ───────────────────────────────────────────────────────────

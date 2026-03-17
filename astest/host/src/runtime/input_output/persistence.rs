@@ -71,22 +71,22 @@ enum WatchItem {
 // Background writer
 // -----------------------------------------------------------------------------
 
-enum Msg { Write(Snapshot), Watch(WatchItem), Stop }
+enum PersistMsg { Write(Snapshot), Watch(WatchItem), Stop }
 
 pub struct PersistenceWriter {
-    tx:     mpsc::Sender<Msg>,
+    tx:     mpsc::Sender<PersistMsg>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
 impl PersistenceWriter {
     pub fn new() -> Self {
-        let (tx, rx) = mpsc::channel::<Msg>();
+        let (tx, rx) = mpsc::channel::<PersistMsg>();
         let handle = thread::spawn(move || {
             while let Ok(msg) = rx.recv() {
                 match msg {
-                    Msg::Write(s)  => write_snapshot(s),
-                    Msg::Watch(w)  => write_watch(w),
-                    Msg::Stop      => break,
+                    PersistMsg::Write(s)  => write_snapshot(s),
+                    PersistMsg::Watch(w)  => write_watch(w),
+                    PersistMsg::Stop      => break,
                 }
             }
         });
@@ -97,7 +97,7 @@ impl PersistenceWriter {
     /// for background file I/O.  Returns immediately without blocking.
     pub fn snapshot(&self, splice_addr: usize, opts: &PersistenceOptions) {
         let s = take_snapshot(splice_addr, opts);
-        let _ = self.tx.send(Msg::Write(s));
+        let _ = self.tx.send(PersistMsg::Write(s));
     }
 
     /// Copy only the records of a single stream `slot_id` and write them to
@@ -105,7 +105,7 @@ impl PersistenceWriter {
     pub fn watch_stream(&self, splice_addr: usize, slot_id: usize, output: impl Into<PathBuf>) {
         let sb      = unsafe { &*(splice_addr as *const Superblock) };
         let records = read_stream_records(splice_addr, sb, slot_id);
-        let _ = self.tx.send(Msg::Watch(WatchItem::Stream {
+        let _ = self.tx.send(PersistMsg::Watch(WatchItem::Stream {
             slot_id,
             records,
             output: output.into(),
@@ -133,7 +133,7 @@ impl PersistenceWriter {
             }
             let total_len = entry.payload_len.load(Ordering::Acquire) as usize;
             let payload   = read_shared_payload(splice_addr, payload_offset, total_len);
-            let _ = self.tx.send(Msg::Watch(WatchItem::Shared {
+            let _ = self.tx.send(PersistMsg::Watch(WatchItem::Shared {
                 name:   name.to_string(),
                 payload,
                 output: output.into(),
@@ -146,7 +146,7 @@ impl PersistenceWriter {
     /// Signal the background thread to stop and block until it finishes all
     /// queued writes.
     pub fn join(&mut self) {
-        let _ = self.tx.send(Msg::Stop);
+        let _ = self.tx.send(PersistMsg::Stop);
         if let Some(h) = self.handle.take() { let _ = h.join(); }
     }
 }

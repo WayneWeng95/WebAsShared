@@ -115,8 +115,10 @@
 
 mod types;
 mod plan;
-mod subprocess;
-mod executor;
+mod workers;
+mod grouping;
+mod pipeline;
+mod dispatch;
 
 pub use types::*;
 
@@ -125,16 +127,16 @@ use serde_json;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use wasmtime::*;
-use crate::runtime::input_output::inputer::PrefetchHandle;
+use crate::runtime::input_output::slot_loader::PrefetchHandle;
 use crate::runtime::input_output::logger::HostLogger;
 use crate::runtime::mem_operation::reclaimer::{self, SlotKind};
 use crate::runtime::worker::{create_wasmtime_engine, setup_vma_environment, WorkerState};
-use crate::runtime::input_output::state_writer::PersistenceWriter;
+use crate::runtime::input_output::persistence::PersistenceWriter;
 use crate::shm::format_shared_memory;
 use common::WASM_PATH;
-use plan::{build_slot_refcounts, build_waves, is_subprocess_node, node_owned_slots, node_routed_upstream_slots, parse_level, topo_sort, validate_dag};
-use subprocess::{spawn_python_subprocess, spawn_wasm_subprocess};
-use executor::execute_node;
+use plan::{build_slot_refcounts, build_waves, is_oneshot_node, node_owned_slots, node_routed_upstream_slots, parse_level, topo_sort, validate_dag};
+use workers::{spawn_python_subprocess, spawn_wasm_subprocess};
+use dispatch::execute_node;
 
 // ─── Public entry points ──────────────────────────────────────────────────────
 
@@ -270,7 +272,7 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
 
             // 2. Partition wave: subprocess nodes (WASM + PyFunc) vs host (routing + StreamPipeline).
             let (sub_idxs, host_idxs): (Vec<usize>, Vec<usize>) = wave.iter()
-                .partition(|&&idx| is_subprocess_node(&dag.nodes[idx].kind));
+                .partition(|&&idx| is_oneshot_node(&dag.nodes[idx].kind));
 
             if wave.len() > 1 {
                 println!("[DAG] Wave: {} nodes in parallel ({} subprocess + {} host)",

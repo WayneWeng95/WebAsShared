@@ -1,4 +1,4 @@
-pub mod inputer;
+pub mod slot_loader;
+pub mod slot_flusher;
 pub mod logger;
-pub mod outputer;
-pub mod state_writer;
+pub mod persistence;

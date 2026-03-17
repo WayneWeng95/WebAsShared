@@ -7,11 +7,11 @@
 use std::sync::atomic::Ordering;
 use common::*;
 
-pub struct HostStream {
+pub struct StreamBridge {
     pub(crate) base: usize, // = splice_addr
 }
 
-impl HostStream {
+impl StreamBridge {
     pub fn new(splice_addr: usize) -> Self {
         Self { base: splice_addr }
     }

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 /// A snapshot of a single conflicting write node, deserialized by the host-side organizer.
 #[derive(Debug, Clone)]
-pub struct HostNode {
+pub struct ConflictNode {
     pub offset: u32,
     pub writer_id: u32,
     pub data_len: u32,
@@ -22,14 +22,14 @@ pub enum ConsumptionResult {
 /// Defines how the Manager resolves concurrent writes to the same key.
 pub trait ConsumptionPolicy {
     /// Evaluates the set of conflicting nodes and returns the single winner.
-    fn process(&self, nodes: &[HostNode]) -> ConsumptionResult;
+    fn process(&self, nodes: &[ConflictNode]) -> ConsumptionResult;
 }
 
 /// Conflict policy: selects the node written by the writer with the highest ID.
 pub struct MaxIdWinsPolicy;
 impl ConsumptionPolicy for MaxIdWinsPolicy {
     /// Returns the node whose `writer_id` is the maximum among all candidates.
-    fn process(&self, nodes: &[HostNode]) -> ConsumptionResult {
+    fn process(&self, nodes: &[ConflictNode]) -> ConsumptionResult {
         if let Some(node) = nodes.iter().max_by_key(|n| n.writer_id) {
             let content = String::from_utf8_lossy(&node.payload).to_string();
             ConsumptionResult::Winner(node.writer_id, content)
@@ -43,7 +43,7 @@ impl ConsumptionPolicy for MaxIdWinsPolicy {
 pub struct MinIdWinsPolicy;
 impl ConsumptionPolicy for MinIdWinsPolicy {
     /// Returns the node whose `writer_id` is the minimum among all candidates.
-    fn process(&self, nodes: &[HostNode]) -> ConsumptionResult {
+    fn process(&self, nodes: &[ConflictNode]) -> ConsumptionResult {
         if let Some(node) = nodes.iter().min_by_key(|n| n.writer_id) {
             let content = String::from_utf8_lossy(&node.payload).to_string();
             ConsumptionResult::Winner(node.writer_id, content)
@@ -57,7 +57,7 @@ impl ConsumptionPolicy for MinIdWinsPolicy {
 pub struct MajorityWinsPolicy;
 impl ConsumptionPolicy for MajorityWinsPolicy {
     /// Counts payload occurrences and returns the first node with the most frequent payload.
-    fn process(&self, nodes: &[HostNode]) -> ConsumptionResult {
+    fn process(&self, nodes: &[ConflictNode]) -> ConsumptionResult {
         let mut counts: HashMap<&Vec<u8>, usize> = HashMap::new();
         for node in nodes {
             *counts.entry(&node.payload).or_insert(0) += 1;
@@ -78,7 +78,7 @@ impl ConsumptionPolicy for MajorityWinsPolicy {
 pub struct LastWriteWinsPolicy;
 impl ConsumptionPolicy for LastWriteWinsPolicy {
     /// Returns `nodes[0]`, which is the last-inserted (most recent) write.
-    fn process(&self, nodes: &[HostNode]) -> ConsumptionResult {
+    fn process(&self, nodes: &[ConflictNode]) -> ConsumptionResult {
         if let Some(latest_node) = nodes.first() {
             let content = String::from_utf8_lossy(&latest_node.payload).to_string();
             println!("[Manager] LWW Picked Winner ID: {}, Payload: '{}'", latest_node.writer_id, content);
@@ -93,7 +93,7 @@ impl ConsumptionPolicy for LastWriteWinsPolicy {
 pub struct LargestPayloadWinsPolicy;
 impl ConsumptionPolicy for LargestPayloadWinsPolicy {
     /// Returns the node with the maximum `data_len`, using `writer_id` as a tiebreaker.
-    fn process(&self, nodes: &[HostNode]) -> ConsumptionResult {
+    fn process(&self, nodes: &[ConflictNode]) -> ConsumptionResult {
         if let Some(node) = nodes.iter().max_by_key(|n| (n.data_len, n.writer_id)) {
             let content = String::from_utf8_lossy(&node.payload).to_string();
             ConsumptionResult::Winner(node.writer_id, content)

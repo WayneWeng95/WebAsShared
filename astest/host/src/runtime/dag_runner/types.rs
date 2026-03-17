@@ -61,11 +61,11 @@ pub struct DagNode {
 #[derive(Debug, Deserialize)]
 pub enum NodeKind {
     /// Call `func(arg) -> ()` — fire-and-forget WASM invocation.
-    WasmVoid(WasmCall),
+    WasmVoid(WasmCallParams),
     /// Call `func(arg) -> u32` — result is logged.
-    WasmU32(WasmCall),
+    WasmU32(WasmCallParams),
     /// Call `func(arg) -> u64` — fat-pointer result decoded and printed.
-    WasmFatPtr(WasmCall),
+    WasmFatPtr(WasmCallParams),
     /// `HostStream::bridge(from, to)` — zero-copy 1→1 chain redirect.
     Bridge(BridgeParams),
     /// `AggregateConnection::new(upstream, downstream).bridge()` — N→1 merge.
@@ -95,22 +95,33 @@ pub enum NodeKind {
     /// Spawn the Python runner script with `WORKLOAD_FUNC` / `WORKLOAD_ARG`
     /// env vars.  Uses the host's native `python3` (or a pre-built
     /// `python.wasm` via `wasmtime run`) specified in the DAG `python_script`.
-    PyFunc(PyFuncCall),
-    /// Sequential Python pipeline: one persistent `runner.py --loop` process
+    PyFunc(PyFuncParams),
+        /// Sequential WASM grouping: one persistent `wasm-loop` subprocess per stage,
+    /// all stages called in order with no pipelining across rounds.
+    /// Saves the per-call wasmtime JIT cost compared to individual `WasmVoid` nodes
+    /// while keeping execution strictly sequential within a single DAG node.
+    WasmGrouping(WasmGroupingParams),
+    /// Sequential Python grouping: one persistent `runner.py --loop` process
     /// handles all stages in order, reused for the full node execution.
-    /// Equivalent to `StreamPipeline` but for Python workloads — saves the
-    /// per-stage Python startup cost compared to individual `PyFunc` nodes.
+    /// Saves the per-stage Python startup cost compared to individual `PyFunc` nodes.
+    /// Renamed from `PyPipeline` — use `PyPipeline` for true pipelined execution
+    /// across multiple rounds.
+    PyGrouping(PyGroupingParams),
+    /// True pipelined Python execution: one persistent `runner.py --loop` process
+    /// per stage, executing rounds in an overlapping wave schedule so adjacent
+    /// rounds run concurrently across stages.
+    /// Equivalent to `StreamPipeline` but for Python workloads.
     PyPipeline(PyPipelineParams),
 }
 
 #[derive(Debug, Deserialize)]
-pub struct WasmCall {
+pub struct WasmCallParams {
     pub func: String,
     pub arg: u32,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct PyFuncCall {
+pub struct PyFuncParams {
     pub func: String,
     #[serde(default)]
     pub arg: u32,
@@ -135,12 +146,12 @@ pub struct AggregateParams {
 pub struct ShuffleParams {
     pub upstream: Vec<usize>,
     pub downstream: Vec<usize>,
-    pub policy: PolicySpec,
+    pub policy: ShufflePolicy,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-pub enum PolicySpec {
+pub enum ShufflePolicy {
     Modulo,
     RoundRobin,
     FixedMap {
@@ -173,7 +184,7 @@ pub struct WatchParams {
 /// current round number in its place — this is the convention for source
 /// stages that need to know which batch to produce.
 #[derive(Debug, Deserialize)]
-pub struct PipelineStage {
+pub struct StreamPipelineStage {
     /// Exported WASM function name.
     pub func: String,
     /// First argument (typically the input slot).
@@ -205,7 +216,7 @@ pub struct StreamPipelineParams {
     /// Number of rounds to execute.
     pub rounds: u32,
     /// Ordered list of pipeline stages.  Must contain at least one entry.
-    pub stages: Vec<PipelineStage>,
+    pub stages: Vec<StreamPipelineStage>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -226,7 +237,7 @@ pub struct PersistParams {
 /// Slicing policy selector for `FileDispatch` nodes.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-pub enum SlicePolicySpec {
+pub enum FileDispatchPolicy {
     /// Split into at most `workers` equal byte ranges.
     Equal,
     /// Split on newlines; never cuts a line.
@@ -245,7 +256,7 @@ pub struct FileDispatchParams {
     /// Number of parallel workers.
     pub workers: usize,
     /// How to divide the file into slices.
-    pub policy: SlicePolicySpec,
+    pub policy: FileDispatchPolicy,
 }
 
 /// Dispatch a list of inline string payloads as `OwnedSlice`s to `workers`
@@ -303,10 +314,18 @@ pub struct InputParams {
     /// Ignored when `paths` is non-empty.
     #[serde(default)]
     pub path: String,
-    /// When `binary` is false (default): on run N the path used is
-    /// `paths[N % paths.len()]` — one file per run.
-    /// When `binary` is true: ALL paths are loaded on every run, each as one
-    /// record, enabling cursor-based per-record consumption by the guest.
+    /// List of file paths.  Behaviour depends on `binary` and `cycle`:
+    ///
+    /// - `binary: false` (default): one path per run, cycling via
+    ///   `paths[run % paths.len()]` (same as the single-`path` field).
+    /// - `binary: true, cycle: false` (default): ALL paths loaded every run as
+    ///   individual binary records; guests consume them with `read_next_io_record`.
+    ///   Use this when a pipeline or grouping worker needs all records pre-loaded
+    ///   and advances a cursor across rounds/nodes (e.g. `py_img_pipeline_demo`).
+    /// - `binary: true, cycle: true`: ONE path per run, cycling via
+    ///   `paths[run % paths.len()]`, loaded as a single binary record.
+    ///   Use this when a single grouping node should process a different file each
+    ///   run (e.g. `img_grouping_demo`).
     #[serde(default)]
     pub paths: Vec<String>,
     /// Target I/O slot.  Defaults to `INPUT_IO_SLOT` when omitted.
@@ -319,15 +338,51 @@ pub struct InputParams {
     #[serde(default)]
     pub prefetch: bool,
     /// If `true`, load each file as a single binary record instead of
-    /// line-by-line.  All paths in `paths` are loaded on every run, producing
-    /// one SHM record per file.  Guests consume them with `read_next_io_record`.
+    /// line-by-line.  Combine with `cycle` to control whether all paths or just
+    /// one path per run is loaded.  See `paths` for the full matrix.
     #[serde(default)]
     pub binary: bool,
+    /// Only meaningful when `binary: true` and `paths` has multiple entries.
+    /// When `false` (default) all paths are loaded every run.
+    /// When `true` one path is loaded per run, cycling via `paths[run % paths.len()]`.
+    #[serde(default)]
+    pub cycle: bool,
 }
 
-/// One stage in a `PyPipeline`.
+/// One stage in a `WasmGrouping`.
 #[derive(Debug, Deserialize)]
-pub struct PyPipelineStage {
+pub struct WasmGroupingStage {
+    /// Exported WASM function name.
+    pub func: String,
+    /// First argument (e.g. input slot).
+    pub arg0: u32,
+    /// Second argument (e.g. output slot).
+    pub arg1: u32,
+}
+
+/// Parameters for the `WasmGrouping` node.
+///
+/// One persistent `wasm-loop` subprocess is spawned per stage (paying the
+/// wasmtime JIT cost once per stage rather than once per call).  Stages are
+/// called sequentially — no pipelining across rounds.
+///
+/// Example:
+/// ```json
+/// { "stages": [
+///     { "func": "pipeline_source",    "arg0": 10, "arg1": 0  },
+///     { "func": "pipeline_transform", "arg0": 10, "arg1": 20 },
+///     { "func": "pipeline_sink",      "arg0": 20, "arg1": 0  }
+/// ]}
+/// ```
+#[derive(Debug, Deserialize)]
+pub struct WasmGroupingParams {
+    /// Ordered list of stages.  Must contain at least one entry.
+    pub stages: Vec<WasmGroupingStage>,
+}
+
+/// One stage in a `PyGrouping`.
+#[derive(Debug, Deserialize)]
+pub struct PyGroupingStage {
     /// Python workload function name (must exist in `workloads.py`).
     pub func: String,
     /// First argument passed to the function (default 0).
@@ -338,13 +393,13 @@ pub struct PyPipelineStage {
     pub arg2: Option<u32>,
 }
 
-/// Parameters for the `PyPipeline` node.
+/// Parameters for the `PyGrouping` node.
 ///
 /// A single persistent `runner.py --loop` process handles every stage call in
-/// order.  This avoids paying the Python (or `wasmtime run python.wasm`) startup
-/// cost once per stage — instead it is paid just once for the whole pipeline.
+/// order.  This avoids paying the Python startup cost more than once.
+/// Stages run strictly sequentially — no pipelining across rounds.
 ///
-/// Example (image processing pipeline):
+/// Example (image processing grouping):
 /// ```json
 /// { "stages": [
 ///     { "func": "img_load_ppm"   },
@@ -356,7 +411,48 @@ pub struct PyPipelineStage {
 /// ]}
 /// ```
 #[derive(Debug, Deserialize)]
+pub struct PyGroupingParams {
+    /// Ordered list of stages.  Must contain at least one entry.
+    pub stages: Vec<PyGroupingStage>,
+}
+
+/// One stage in a true `PyPipeline`.
+///
+/// When `arg2` is `None` the host injects the current round number in its place,
+/// following the same convention as `StreamPipelineStage` in `StreamPipeline`.
+#[derive(Debug, Deserialize)]
+pub struct PyStreamPipelineStage {
+    /// Python workload function name (must exist in `workloads.py`).
+    pub func: String,
+    /// First argument (typically the input slot, default 0).
+    #[serde(default)]
+    pub arg: u32,
+    /// Second argument.  `null` / `None` → inject the current round number.
+    #[serde(default)]
+    pub arg2: Option<u32>,
+}
+
+/// Parameters for the `PyPipeline` node.
+///
+/// Stages are executed in a pipelined wave schedule so adjacent rounds overlap.
+/// For N rounds and D stages the total ticks = N + D − 1.
+/// One persistent `runner.py --loop` process is spawned per stage; within each
+/// tick all active stage workers are scatter-sent first, then gathered — giving
+/// intra-tick concurrency across stages.
+///
+/// Example (4-stage Python pipeline):
+/// ```json
+/// { "rounds": 8, "stages": [
+///     { "func": "py_source",    "arg": 10, "arg2": null },
+///     { "func": "py_filter",    "arg": 10, "arg2": 20   },
+///     { "func": "py_transform", "arg": 20, "arg2": 30   },
+///     { "func": "py_sink",      "arg": 30, "arg2": 40   }
+/// ]}
+/// ```
+#[derive(Debug, Deserialize)]
 pub struct PyPipelineParams {
+    /// Number of rounds to execute.
+    pub rounds: u32,
     /// Ordered list of pipeline stages.  Must contain at least one entry.
-    pub stages: Vec<PyPipelineStage>,
+    pub stages: Vec<PyStreamPipelineStage>,
 }

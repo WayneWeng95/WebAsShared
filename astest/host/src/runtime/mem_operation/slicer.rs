@@ -1,4 +1,4 @@
-// Applies a `SlicePolicy` to a memory-mapped `LoadedFile` to produce a set of
+// Applies a `SlicePolicy` to a memory-mapped `MappedFile` to produce a set of
 // non-overlapping `FileSlice` views ready for parallel dispatch.
 //
 // The slicer is intentionally stateless beyond holding a reference to the
@@ -6,13 +6,13 @@
 // different worker counts without re-reading the file.
 //
 // Usage:
-//   let loaded = load_file(Path::new("/data/input.csv"))?;
+//   let loaded = mmap_file(Path::new("/data/input.csv"))?;
 //   let slicer = Slicer::new(&loaded);
 //   let slices = slicer.slice(&LineBoundarySlice, 8);
 //   FileDispatcher::new(8).run(slices, |assignment| { /* process */ });
 
 use crate::policy::SlicePolicy;
-use crate::runtime::input_output::inputer::LoadedFile;
+use crate::runtime::input_output::slot_loader::MappedFile;
 
 // -----------------------------------------------------------------------------
 // FileSlice — a single view into the loaded file
@@ -20,7 +20,7 @@ use crate::runtime::input_output::inputer::LoadedFile;
 
 /// A read-only view of one chunk of a memory-mapped file.
 ///
-/// The lifetime `'a` is tied to the `LoadedFile` that backs this slice, so
+/// The lifetime `'a` is tied to the `MappedFile` that backs this slice, so
 /// the mapping is guaranteed to remain valid for as long as any `FileSlice`
 /// derived from it is alive.
 #[derive(Clone, Copy)]
@@ -62,17 +62,17 @@ impl<'a> std::fmt::Debug for FileSlice<'a> {
 // Slicer
 // -----------------------------------------------------------------------------
 
-/// Divides a `LoadedFile` into `FileSlice` views using a `SlicePolicy`.
+/// Divides a `MappedFile` into `FileSlice` views using a `SlicePolicy`.
 ///
 /// The `Slicer` holds a shared reference to the file; the produced slices
 /// borrow from the same mapping, so no data is copied.
 pub struct Slicer<'a> {
-    loaded: &'a LoadedFile,
+    loaded: &'a MappedFile,
 }
 
 impl<'a> Slicer<'a> {
     /// Create a `Slicer` backed by `loaded`.
-    pub fn new(loaded: &'a LoadedFile) -> Self {
+    pub fn new(loaded: &'a MappedFile) -> Self {
         Self { loaded }
     }
 

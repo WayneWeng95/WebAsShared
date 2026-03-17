@@ -1,6 +1,6 @@
 // N→1 aggregate connection: merges N upstream page chains into one downstream slot.
 
-use super::shm_io::ShmIo;
+use super::chain_splicer::ChainSplicer;
 
 /// Merges every upstream stream into a single downstream slot.
 ///
@@ -18,6 +18,6 @@ impl AggregateConnection {
     }
 
     pub fn bridge(&self, splice_addr: usize) {
-        ShmIo::new(splice_addr).merge_into(&self.upstream_ids, self.downstream_id);
+        ChainSplicer::new(splice_addr).merge_into(&self.upstream_ids, self.downstream_id);
     }
 }

@@ -90,23 +90,17 @@ def _img_header(w, h, ch):
                   h & 0xFF, (h >> 8) & 0xFF, ch])
 
 
-def img_load_ppm(_arg):
-    lines = shm.read_all_inputs_from(PIPE_IO_IN)
-    text  = ' '.join(
-        line.decode('ascii', errors='replace').strip()
-        for _orig, line in lines
-        if not line.lstrip().startswith(b'#')
-    )
-    tok = text.split()
-    if not tok:
-        return
+def _img_parse_ppm_text(text):
+    """Parse a PPM text (P3/P5 ASCII) into (w, h, ch, pixels_bytearray) or None."""
+    tok = [t for t in text.split() if not t.startswith('#')]
+    if len(tok) < 4:
+        return None
     magic  = tok[0]
-    w      = int(tok[1]) if len(tok) > 1 else 0
-    h      = int(tok[2]) if len(tok) > 2 else 0
-    maxval = int(tok[3]) if len(tok) > 3 else 255
+    w      = int(tok[1])
+    h      = int(tok[2])
+    maxval = int(tok[3])
     if w == 0 or h == 0:
-        return
-
+        return None
     ch       = 3 if magic == 'P3' else 1
     expected = w * h * ch
     pixels   = bytearray()
@@ -115,15 +109,55 @@ def img_load_ppm(_arg):
         pixels.append(v if maxval in (0, 255) else (v * 255 + maxval // 2) // maxval)
     while len(pixels) < expected:
         pixels.append(0)
+    return w, h, ch, pixels
 
-    shm.append_stream_data(PIPE_LOAD, _img_header(w, h, ch) + bytes(pixels))
+
+def img_load_ppm(in_slot=0, out_slot=None):
+    """Load a PPM image from an I/O slot and write the decoded pixel blob to a stream slot.
+
+    Grouping (out_slot is None): reads all text-line records from PIPE_IO_IN,
+    joins them, parses the PPM, and writes the decoded blob to PIPE_LOAD.
+
+    Pipeline (out_slot provided): reads the next binary PPM record from I/O
+    slot `in_slot` using a per-process cursor (advances one image per round),
+    parses it, and writes the decoded blob to stream slot `out_slot`.
+    """
+    if out_slot is None:
+        lines = shm.read_all_inputs_from(PIPE_IO_IN)
+        text  = ' '.join(
+            line.decode('ascii', errors='replace').strip()
+            for _orig, line in lines
+            if not line.lstrip().startswith(b'#')
+        )
+        parsed = _img_parse_ppm_text(text)
+        if parsed is None:
+            return
+        w, h, ch, pixels = parsed
+        shm.append_stream_data(PIPE_LOAD, _img_header(w, h, ch) + bytes(pixels))
+    else:
+        rec = shm.read_next_io_record(in_slot)
+        if rec is None:
+            return
+        text   = rec[1].decode('ascii', errors='replace')
+        parsed = _img_parse_ppm_text(text)
+        if parsed is None:
+            return
+        w, h, ch, pixels = parsed
+        shm.append_stream_data(out_slot, _img_header(w, h, ch) + bytes(pixels))
 
 
-def img_rotate(_arg):
-    recs = shm.read_all_stream_records(PIPE_LOAD)
+def img_rotate(in_slot=0, out_slot=None):
+    """Rotate image 90° clockwise.
+
+    Grouping (out_slot is None): reads from PIPE_LOAD, writes to PIPE_ROT.
+    Pipeline (out_slot provided): reads from stream `in_slot`, writes to stream `out_slot`.
+    """
+    _in  = PIPE_LOAD if out_slot is None else in_slot
+    _out = PIPE_ROT  if out_slot is None else out_slot
+    recs = shm.read_all_stream_records(_in)
     if not recs:
         return
-    decoded = _img_decode(recs[0][1])
+    decoded = _img_decode(recs[-1][1])
     if not decoded:
         return
     w, h, ch, pixels = decoded
@@ -134,14 +168,21 @@ def img_rotate(_arg):
             src = ((h - 1 - c) * w + r) * ch
             dst = (r * out_w + c) * ch
             buf[dst:dst + ch] = pixels[src:src + ch]
-    shm.append_stream_data(PIPE_ROT, _img_header(out_w, out_h, ch) + bytes(buf))
+    shm.append_stream_data(_out, _img_header(out_w, out_h, ch) + bytes(buf))
 
 
-def img_grayscale(_arg):
-    recs = shm.read_all_stream_records(PIPE_ROT)
+def img_grayscale(in_slot=0, out_slot=None):
+    """Convert image to grayscale.
+
+    Grouping (out_slot is None): reads from PIPE_ROT, writes to PIPE_GRAY.
+    Pipeline (out_slot provided): reads from stream `in_slot`, writes to stream `out_slot`.
+    """
+    _in  = PIPE_ROT  if out_slot is None else in_slot
+    _out = PIPE_GRAY if out_slot is None else out_slot
+    recs = shm.read_all_stream_records(_in)
     if not recs:
         return
-    decoded = _img_decode(recs[0][1])
+    decoded = _img_decode(recs[-1][1])
     if not decoded:
         return
     w, h, ch, pixels = decoded
@@ -150,14 +191,21 @@ def img_grayscale(_arg):
         b = i * ch
         gray[i] = (pixels[b] * 77 + pixels[b+1] * 150 + pixels[b+2] * 29) >> 8 \
                    if ch >= 3 else pixels[b]
-    shm.append_stream_data(PIPE_GRAY, _img_header(w, h, 1) + bytes(gray))
+    shm.append_stream_data(_out, _img_header(w, h, 1) + bytes(gray))
 
 
-def img_equalize(_arg):
-    recs = shm.read_all_stream_records(PIPE_GRAY)
+def img_equalize(in_slot=0, out_slot=None):
+    """Histogram-equalize a grayscale image.
+
+    Grouping (out_slot is None): reads from PIPE_GRAY, writes to PIPE_EQ.
+    Pipeline (out_slot provided): reads from stream `in_slot`, writes to stream `out_slot`.
+    """
+    _in  = PIPE_GRAY if out_slot is None else in_slot
+    _out = PIPE_EQ   if out_slot is None else out_slot
+    recs = shm.read_all_stream_records(_in)
     if not recs:
         return
-    decoded = _img_decode(recs[0][1])
+    decoded = _img_decode(recs[-1][1])
     if not decoded:
         return
     w, h, _ch, pixels = decoded
@@ -174,14 +222,21 @@ def img_equalize(_arg):
     denom   = max(total - cdf_min, 1)
     lut     = [(cdf[i] - cdf_min) * 255 // denom for i in range(256)]
     result  = bytes([lut[p] for p in pixels[:total]])
-    shm.append_stream_data(PIPE_EQ, recs[0][1][:5] + result)
+    shm.append_stream_data(_out, recs[-1][1][:5] + result)
 
 
-def img_blur(_arg):
-    recs = shm.read_all_stream_records(PIPE_EQ)
+def img_blur(in_slot=0, out_slot=None):
+    """Apply a 3×3 box blur.
+
+    Grouping (out_slot is None): reads from PIPE_EQ, writes to PIPE_BLUR.
+    Pipeline (out_slot provided): reads from stream `in_slot`, writes to stream `out_slot`.
+    """
+    _in  = PIPE_EQ   if out_slot is None else in_slot
+    _out = PIPE_BLUR if out_slot is None else out_slot
+    recs = shm.read_all_stream_records(_in)
     if not recs:
         return
-    decoded = _img_decode(recs[0][1])
+    decoded = _img_decode(recs[-1][1])
     if not decoded:
         return
     w, h, _ch, pixels = decoded
@@ -194,19 +249,28 @@ def img_blur(_arg):
                     s   += pixels[nr * w + nc]
                     cnt += 1
             buf[r * w + c] = s // cnt
-    shm.append_stream_data(PIPE_BLUR, recs[0][1][:5] + bytes(buf))
+    shm.append_stream_data(_out, recs[-1][1][:5] + bytes(buf))
 
 
-def img_export_ppm(_arg):
-    recs = shm.read_all_stream_records(PIPE_BLUR)
+def img_export_ppm(in_slot=0, out_slot=None):
+    """Encode a pixel blob as a PGM file and write it to an I/O slot.
+
+    Grouping (out_slot is None): reads from PIPE_BLUR, writes to OUTPUT_IO_SLOT (1).
+    Pipeline (out_slot provided): reads from stream `in_slot`, writes to I/O slot `out_slot`.
+    """
+    _in = PIPE_BLUR if out_slot is None else in_slot
+    recs = shm.read_all_stream_records(_in)
     if not recs:
         return
-    decoded = _img_decode(recs[0][1])
+    decoded = _img_decode(recs[-1][1])
     if not decoded:
         return
     w, h, _ch, pixels = decoded
-    header = ('P5\n%d %d\n255\n' % (w, h)).encode()
-    shm.write_output(header + bytes(pixels[:w * h]))
+    pgm = ('P5\n%d %d\n255\n' % (w, h)).encode() + bytes(pixels[:w * h])
+    if out_slot is None:
+        shm.write_output(pgm)
+    else:
+        shm.write_io(out_slot, pgm)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

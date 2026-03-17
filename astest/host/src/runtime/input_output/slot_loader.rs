@@ -1,21 +1,21 @@
 // File loader and SHM input writer.
 //
-// # LoadedFile / load_file
+// # MappedFile / mmap_file
 //
-// `load_file` memory-maps a file with `MAP_PRIVATE | PROT_READ`, giving a
+// `mmap_file` memory-maps a file with `MAP_PRIVATE | PROT_READ`, giving a
 // zero-copy, read-only view.  The OS lazily faults in only the pages that are
 // actually read, so large files are cheap to open.  The mapping is released on
 // drop via `munmap`.  Because the region is read-only it can be shared across
 // threads without synchronization (`Send + Sync`).
 //
 // Used by:
-//   - `Inputer::load`  — feeds file lines into an SHM I/O slot.
+//   - `SlotLoader::load`  — feeds file lines into an SHM I/O slot.
 //   - `Slicer`         — partitions the file into worker slices.
 //   - `FileDispatch`   — dispatches slices to parallel workers.
 //
-// # Inputer
+// # SlotLoader
 //
-// Takes a `LoadedFile` view and writes it line-by-line into the SHM I/O
+// Takes a `MappedFile` view and writes it line-by-line into the SHM I/O
 // page-chain of a chosen slot, making the records readable by the WASM guest
 // via `ShmApi::read_all_inputs_from(slot)`.
 //
@@ -25,17 +25,17 @@
 //
 // # Prefetch
 //
-// `Inputer::prefetch` spawns a background thread that loads a file into a
+// `SlotLoader::prefetch` spawns a background thread that loads a file into a
 // slot while the DAG executor continues with independent nodes.  The caller
 // receives a `PrefetchHandle`; calling `.join()` before the consuming node
 // runs ensures the data is ready without blocking any sooner than necessary.
 //
 // Usage:
 //   // Synchronous:
-//   let n = Inputer::new(splice_addr).load(Path::new("/data/rows.csv"), 0)?;
+//   let n = SlotLoader::new(splice_addr).load(Path::new("/data/rows.csv"), 0)?;
 //
 //   // Prefetch:
-//   let h = Inputer::prefetch(splice_addr, PathBuf::from("/data/rows.csv"), 42);
+//   let h = SlotLoader::prefetch(splice_addr, PathBuf::from("/data/rows.csv"), 42);
 //   // ... run independent nodes ...
 //   let n = h.join()?;
 
@@ -53,20 +53,20 @@ use common::{Page, Superblock};
 
 use crate::runtime::mem_operation::reclaimer;
 
-// ─── LoadedFile ───────────────────────────────────────────────────────────────
+// ─── MappedFile ───────────────────────────────────────────────────────────────
 
 /// A read-only memory-mapped view of a file on disk.
 ///
 /// Released automatically on drop via `munmap`.  Because the region is
 /// `MAP_PRIVATE | PROT_READ`, multiple threads may read it concurrently
 /// without synchronization.
-pub struct LoadedFile {
+pub struct MappedFile {
     ptr: NonNull<u8>,
     len: usize,
     _file: File,
 }
 
-impl LoadedFile {
+impl MappedFile {
     /// Total byte length of the mapped file.
     #[inline] pub fn len(&self) -> usize { self.len }
 
@@ -93,7 +93,7 @@ impl LoadedFile {
     #[inline] pub fn as_ptr(&self) -> *const u8 { self.ptr.as_ptr() }
 }
 
-impl Drop for LoadedFile {
+impl Drop for MappedFile {
     fn drop(&mut self) {
         if self.len > 0 {
             unsafe { let _ = munmap(self.ptr.as_ptr() as *mut _, self.len); }
@@ -102,16 +102,16 @@ impl Drop for LoadedFile {
 }
 
 // SAFETY: region is MAP_PRIVATE | PROT_READ — read-only, safe to share.
-unsafe impl Send for LoadedFile {}
-unsafe impl Sync for LoadedFile {}
+unsafe impl Send for MappedFile {}
+unsafe impl Sync for MappedFile {}
 
-// ─── load_file ────────────────────────────────────────────────────────────────
+// ─── mmap_file ────────────────────────────────────────────────────────────────
 
 /// Open `path` and memory-map its contents for zero-copy access.
 ///
 /// Uses `MAP_PRIVATE | PROT_READ`: the backing file is never modified.
 /// Returns an error if the file is empty or `mmap(2)` fails.
-pub fn load_file(path: &Path) -> Result<LoadedFile> {
+pub fn mmap_file(path: &Path) -> Result<MappedFile> {
     let file = File::open(path)
         .map_err(|e| anyhow!("Cannot open '{}': {}", path.display(), e))?;
 
@@ -135,21 +135,21 @@ pub fn load_file(path: &Path) -> Result<LoadedFile> {
         .ok_or_else(|| anyhow!("mmap returned null for '{}'", path.display()))?;
 
     println!("[Loader] Mapped '{}' ({} bytes @ {:p})", path.display(), len, ptr.as_ptr());
-    Ok(LoadedFile { ptr, len, _file: file })
+    Ok(MappedFile { ptr, len, _file: file })
 }
 
-// ─── Inputer ──────────────────────────────────────────────────────────────────
+// ─── SlotLoader ──────────────────────────────────────────────────────────────────
 
-pub struct Inputer {
+pub struct SlotLoader {
     splice_addr: usize,
 }
 
 // SAFETY: all mutations go through atomics; concurrent writes to different
 // slots are safe — the caller must not write to the same slot from two threads.
-unsafe impl Send for Inputer {}
-unsafe impl Sync for Inputer {}
+unsafe impl Send for SlotLoader {}
+unsafe impl Sync for SlotLoader {}
 
-impl Inputer {
+impl SlotLoader {
     pub fn new(splice_addr: usize) -> Self {
         Self { splice_addr }
     }
@@ -157,8 +157,8 @@ impl Inputer {
     /// Memory-map `path` and write each non-empty line as one length-prefixed
     /// record into `slot`.  Returns the number of records written.
     pub fn load(&self, path: &Path, slot: u32) -> Result<usize> {
-        let loaded = load_file(path)
-            .map_err(|e| anyhow!("Inputer: {}", e))?;
+        let loaded = mmap_file(path)
+            .map_err(|e| anyhow!("SlotLoader: {}", e))?;
 
         let mut count = 0usize;
         for line in loaded.as_bytes().split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
@@ -166,7 +166,7 @@ impl Inputer {
             count += 1;
         }
         println!(
-            "[Inputer] '{}' ({} bytes, {} records) → slot {}",
+            "[SlotLoader] '{}' ({} bytes, {} records) → slot {}",
             path.display(), loaded.len(), count, slot,
         );
         Ok(count)
@@ -175,12 +175,12 @@ impl Inputer {
     /// Memory-map `path` and write the entire file as a single record into
     /// `slot`.  Use for binary payloads where line-splitting is inappropriate.
     pub fn load_as_single_record(&self, path: &Path, slot: u32) -> Result<()> {
-        let loaded = load_file(path)
-            .map_err(|e| anyhow!("Inputer: {}", e))?;
+        let loaded = mmap_file(path)
+            .map_err(|e| anyhow!("SlotLoader: {}", e))?;
         let len = loaded.len();
         self.append_record(slot, loaded.as_bytes())?;
         println!(
-            "[Inputer] '{}' ({} bytes) → slot {} (1 record)",
+            "[SlotLoader] '{}' ({} bytes) → slot {} (1 record)",
             path.display(), len, slot,
         );
         Ok(())
@@ -191,7 +191,7 @@ impl Inputer {
     /// Returns a `PrefetchHandle`; call `.join()` before the consuming node
     /// executes to ensure the data is ready.
     pub fn prefetch(splice_addr: usize, path: PathBuf, slot: u32) -> PrefetchHandle {
-        let handle = thread::spawn(move || Inputer::new(splice_addr).load(&path, slot));
+        let handle = thread::spawn(move || SlotLoader::new(splice_addr).load(&path, slot));
         PrefetchHandle { slot, handle }
     }
 
@@ -207,7 +207,7 @@ impl Inputer {
 
     fn alloc_page(&self) -> Result<u32> {
         reclaimer::alloc_page(self.splice_addr)
-            .map_err(|e| anyhow!("Inputer: {}", e))
+            .map_err(|e| anyhow!("SlotLoader: {}", e))
     }
 
     fn append_record(&self, slot: u32, payload: &[u8]) -> Result<()> {
@@ -254,7 +254,7 @@ impl Inputer {
 
 // ─── PrefetchHandle ───────────────────────────────────────────────────────────
 
-/// Handle to a background prefetch started by `Inputer::prefetch`.
+/// Handle to a background prefetch started by `SlotLoader::prefetch`.
 /// Call `join()` before the consuming node executes.
 pub struct PrefetchHandle {
     pub slot: u32,

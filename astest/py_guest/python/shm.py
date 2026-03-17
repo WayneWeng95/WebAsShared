@@ -211,3 +211,38 @@ def write_output(data: bytes) -> None:
 
 def write_output_str(s: str) -> None:
     write_output(s.encode("utf-8"))
+
+
+def write_io(io_slot: int, data: bytes) -> None:
+    """Append `data` to an explicit I/O slot (pipeline-mode counterpart of write_output)."""
+    _init()
+    _append(
+        _SB_IO_HEADS + io_slot * 4,
+        _SB_IO_TAILS + io_slot * 4,
+        io_slot, data,
+    )
+
+
+# ── Per-slot read cursors (module-level, in-process state) ────────────────────
+# Used by read_next_io_record so a persistent stage worker can consume one
+# record per round without re-reading previously processed records.
+# Only valid inside PyPipeline workers where the process stays alive across rounds.
+
+_io_cursors: dict = {}   # io_slot -> next record index
+
+
+def read_next_io_record(io_slot: int):
+    """Return the next unread (origin, payload) tuple from `io_slot`, or None.
+
+    Maintains a per-slot cursor in module-level state.  Works correctly inside
+    a PyPipeline stage worker because the process is kept alive across rounds,
+    so the cursor advances with each call.
+    """
+    _init()
+    head = _ru32(_SB_IO_HEADS + io_slot * 4)
+    records = _read_chain(head)
+    idx = _io_cursors.get(io_slot, 0)
+    if idx < len(records):
+        _io_cursors[io_slot] = idx + 1
+        return records[idx]
+    return None

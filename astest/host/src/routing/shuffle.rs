@@ -10,7 +10,7 @@
 // N→M broadcast:   use BroadcastConnection (broadcast.rs).
 
 use std::thread;
-use super::shm_io::ShmIo;
+use super::chain_splicer::ChainSplicer;
 use crate::policy::ShufflePolicy;
 
 // -----------------------------------------------------------------------------
@@ -53,7 +53,7 @@ impl ShuffleConnection {
             }
         }
 
-        let io = ShmIo::new(splice_addr);
+        let io = ChainSplicer::new(splice_addr);
         thread::scope(|s| {
             for (slot, group) in groups.iter().enumerate() {
                 if group.is_empty() { continue; }
