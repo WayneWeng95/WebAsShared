@@ -1,0 +1,54 @@
+{
+  "_comment": "RDMA Python Image Pipeline — Node 0 (loader / sender).  Run on machine 0.",
+  "_comment2": "Mirrors rdma_img_pipeline_node0.json but uses PyPipeline with img_load_ppm_binary.",
+  "_comment3": "The Python guest uses read_next_io_record (cursor-based) to consume one PPM per round.",
+  "shm_path": "/dev/shm/rdma_py_img_node0",
+  "python_script": "../py_guest/python/runner.py",
+  "python_wasm": "/opt/myapp/python-3.12.0.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 0,
+    "total": 2,
+    "ips": ["192.168.1.10", "192.168.1.11"],
+    "transfer": true
+  },
+  "nodes": [
+
+    {
+      "_comment": "─── Pre-load all 3 binary PPMs into I/O slot 10 (one record per image) ──────",
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": {
+        "paths": [
+          "../data/img_gradient.ppm",
+          "../data/img_checkerboard.ppm",
+          "../data/img_rings.ppm"
+        ],
+        "slot": 10,
+        "binary": true
+      }}
+    },
+
+    {
+      "_comment": "─── 3-round PyPipeline: decode one PPM per round → stream slot 20 ──────────",
+      "_comment2": "img_load_ppm_binary reads the next record from I/O slot 10 each round,",
+      "_comment3": "writes decoded pixels to stream slot 20, then RDMA-sends slot 20 to node 1.",
+      "_comment4": "free_after=true clears slot 20 after each send so the next round starts fresh.",
+      "id": "pipeline",
+      "deps": ["load"],
+      "kind": { "PyPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_load_ppm_binary", "arg": 10, "arg2": 20 }
+        ],
+        "rdma_send": {
+          "peer": 1,
+          "slot": 20,
+          "slot_kind": "Stream",
+          "free_after": true
+        }
+      }}
+    }
+
+  ]
+}

@@ -122,7 +122,7 @@ impl RdmaRemote {
 
         self.qp.post_rdma_write(&self.mr, n as u32,
                                  self.remote_addr, self.remote_rkey)?;
-        self.qp.poll_one_blocking(&self.ctx)?;
+        self.qp.poll_one_blocking()?;
         println!("[RdmaRemote] RDMA WRITE complete ({} bytes → remote)", n);
 
         exchange::send_done(&mut self.ctrl)?;

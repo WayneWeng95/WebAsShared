@@ -12,9 +12,12 @@ Public API
 ----------
   read_all_stream_records(slot)     -> list[(origin, data)]
   read_next_stream_record(slot)     -> (origin, data) | None
+  reset_stream_cursor(slot)         -> None   # reset cursor for rdma_recv slots
   count_stream_records(slot)        -> int
   read_all_inputs()                 -> list[(origin, data)]
   read_all_inputs_from(io_slot)     -> list[(origin, data)]
+  read_next_io_record(io_slot)      -> (origin, data) | None
+  reset_io_cursor(io_slot)          -> None   # reset cursor for rdma_recv slots
   count_io_records(io_slot)         -> int
   append_stream_data(slot, data)    -> None
   write_output(data)                -> None
@@ -340,6 +343,11 @@ def read_next_io_record(io_slot: int):
     Maintains a per-slot cursor in module-level state.  Works correctly inside
     a PyPipeline stage worker because the process is kept alive across rounds,
     so the cursor advances with each call.
+
+    NOTE: do NOT use this for slots that are refreshed via `rdma_recv` in a
+    PyPipeline.  The host frees and repopulates those slots each round, so the
+    cursor becomes stale.  Use `read_all_inputs_from(slot)` instead, or call
+    `reset_io_cursor(slot)` at the start of each round before reading.
     """
     _init()
     head = _ru32(_SB_IO_HEADS + io_slot * 4)
@@ -357,6 +365,11 @@ def read_next_stream_record(slot: int):
     Mirrors read_next_io_record for stream slots.  Maintains a per-slot cursor
     in module-level state so persistent PyPipeline stage workers advance through
     the chain one record per round without re-reading already-processed records.
+
+    NOTE: do NOT use this for slots that are refreshed via `rdma_recv` in a
+    PyPipeline.  The host frees and repopulates those slots each round, so the
+    cursor becomes stale.  Use `read_all_stream_records(slot)` instead, or call
+    `reset_stream_cursor(slot)` at the start of each round before reading.
     """
     _init()
     head = _ru32(_SB_WRITER_HEADS + slot * 4)
@@ -366,3 +379,28 @@ def read_next_stream_record(slot: int):
         _stream_cursors[slot] = idx + 1
         return records[idx]
     return None
+
+
+def reset_io_cursor(io_slot: int) -> None:
+    """Reset the in-process read cursor for `io_slot` back to the beginning.
+
+    Call this at the start of each round when reading a slot that is refreshed
+    by the host on every pipeline round (e.g. a slot populated via `rdma_recv`
+    in a PyPipeline).  Without a reset, `read_next_io_record` would skip all
+    records because the cursor still points past the end of the previous round's
+    (now-freed and replaced) chain.
+
+    Not needed when using `read_all_inputs_from`, which always re-reads from
+    the current chain head with no cursor state.
+    """
+    _io_cursors.pop(io_slot, None)
+
+
+def reset_stream_cursor(slot: int) -> None:
+    """Reset the in-process read cursor for stream `slot` back to the beginning.
+
+    Mirrors `reset_io_cursor` for stream slots.  Call this at the start of each
+    round in a PyPipeline stage worker when the input slot is replenished by the
+    host via `rdma_recv` (free + replace pattern) rather than accumulated.
+    """
+    _stream_cursors.pop(slot, None)

@@ -117,3 +117,38 @@ pub fn wait_done(stream: &mut TcpStream) -> Result<()> {
     stream.read_exact(&mut b)?;
     Ok(())
 }
+
+/// Send a u32 (little-endian) over the control channel.
+pub fn send_u32(stream: &mut TcpStream, val: u32) -> Result<()> {
+    stream.write_all(&val.to_le_bytes())?;
+    Ok(stream.flush()?)
+}
+
+/// Receive a u32 (little-endian) from the control channel.
+pub fn recv_u32(stream: &mut TcpStream) -> Result<u32> {
+    let mut b = [0u8; 4];
+    stream.read_exact(&mut b)?;
+    Ok(u32::from_le_bytes(b))
+}
+
+/// Server side: listen on `tcp_port`, accept one connection, return the stream.
+///
+/// Used for the reverse-direction control channel where no QP metadata
+/// exchange is needed — just a plain TCP socket for serialised u32 messages.
+pub fn server_ctrl_only(tcp_port: u16) -> Result<TcpStream> {
+    let listener = TcpListener::bind(("0.0.0.0", tcp_port))
+        .map_err(|e| anyhow!("bind :{}: {}", tcp_port, e))?;
+    println!("[exchange] ctrl-only server listening on :{}", tcp_port);
+    let (stream, peer) = listener.accept()
+        .map_err(|e| anyhow!("accept: {}", e))?;
+    println!("[exchange] ctrl-only client connected from {}", peer);
+    Ok(stream)
+}
+
+/// Client side: connect to `host:tcp_port`, return the stream.
+pub fn client_ctrl_only(host: &str, tcp_port: u16) -> Result<TcpStream> {
+    let stream = TcpStream::connect((host, tcp_port))
+        .map_err(|e| anyhow!("connect {}:{}: {}", host, tcp_port, e))?;
+    println!("[exchange] ctrl-only connected to {}:{}", host, tcp_port);
+    Ok(stream)
+}

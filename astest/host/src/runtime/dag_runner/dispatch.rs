@@ -16,10 +16,50 @@ use crate::runtime::mem_operation::slicer::Slicer;
 use crate::runtime::worker::WorkerState;
 use crate::runtime::input_output::persistence::{PersistenceOptions, PersistenceWriter};
 use crate::runtime::remote::{execute_remote_recv, execute_remote_send};
+use common::{atomic_shm_offset, rdma_scratch_shm_offset, REGISTRY_OFFSET, RegistryEntry};
 use super::types::*;
 use super::workers::{spawn_wasm_subprocess, spawn_python_subprocess};
 use super::grouping::{execute_wasm_grouping, execute_py_grouping};
 use super::pipeline::{execute_stream_pipeline, execute_py_pipeline};
+
+// ─── Atomic arena helpers ─────────────────────────────────────────────────────
+
+/// Look up `name` in the SHM registry and return its `AtomicU64` index.
+/// Fails if the name has not yet been registered by the guest.
+fn resolve_atomic_index(splice_addr: usize, name: &str) -> Result<usize> {
+    use common::Superblock;
+    use std::sync::atomic::Ordering;
+
+    let mut name_key = [0u8; 52];
+    let src = name.as_bytes();
+    name_key[..src.len().min(52)].copy_from_slice(&src[..src.len().min(52)]);
+
+    let sb            = unsafe { &*(splice_addr as *const Superblock) };
+    let registry_base = (splice_addr + REGISTRY_OFFSET as usize) as *const RegistryEntry;
+    let count         = sb.next_atomic_idx.load(Ordering::Acquire) as usize;
+
+    for i in 0..count {
+        let entry = unsafe { &*registry_base.add(i) };
+        if entry.name == name_key {
+            return Ok(entry.index as usize);
+        }
+    }
+    Err(anyhow!("atomic '{}' not found in registry (has the guest registered it?)", name))
+}
+
+/// Read the current value of a named AtomicU64 from the local SHM atomic arena.
+fn read_local_atomic(splice_addr: usize, idx: usize) -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let ptr = (splice_addr + atomic_shm_offset(idx) as usize) as *const AtomicU64;
+    unsafe { (*ptr).load(Ordering::Acquire) }
+}
+
+/// Write a value into a named AtomicU64 in the local SHM atomic arena.
+fn write_local_atomic(splice_addr: usize, idx: usize, val: u64) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let ptr = (splice_addr + atomic_shm_offset(idx) as usize) as *mut AtomicU64;
+    unsafe { (*ptr).store(val, Ordering::Release) };
+}
 
 // ─── Node executor ────────────────────────────────────────────────────────────
 
@@ -36,7 +76,7 @@ pub(super) fn execute_node(
     python_script: &str,
     python_wasm: Option<&str>,
     wasm_path: &str,
-    mesh: Option<&mut connect::MeshNode>,
+    mesh: Option<&connect::MeshNode>,
 ) -> Result<()> {
     let splice_addr = store.data().splice_addr;
     let base_ptr = memory.data_ptr(&*store);
@@ -137,7 +177,7 @@ pub(super) fn execute_node(
         // Execution logic lives in pipeline.rs.
         NodeKind::StreamPipeline(p) => {
             log(&format!("stream pipeline {} rounds {} stages", p.rounds, p.stages.len()));
-            execute_stream_pipeline(p, &node.id, shm_path, wasm_path)?;
+            execute_stream_pipeline(p, &node.id, shm_path, wasm_path, splice_addr, mesh)?;
             log("stream pipeline done");
         }
 
@@ -370,7 +410,7 @@ pub(super) fn execute_node(
         // Execution logic lives in pipeline.rs.
         NodeKind::PyPipeline(p) => {
             log(&format!("py pipeline {} rounds {} stages", p.rounds, p.stages.len()));
-            execute_py_pipeline(p, &node.id, shm_path, python_script, python_wasm)?;
+            execute_py_pipeline(p, &node.id, shm_path, python_script, python_wasm, splice_addr, mesh)?;
             log("py pipeline done");
         }
 
@@ -380,7 +420,8 @@ pub(super) fn execute_node(
                 "[{}] RemoteSend requires dag.rdma to be configured", node.id
             ))?;
             log(&format!("remote send slot {} ({:?}) → peer {}", p.slot, p.slot_kind, p.peer));
-            execute_remote_send(store.data().splice_addr, p.slot, p.slot_kind, p.peer, mesh)?;
+            let ch = mesh.send_channel(p.peer);
+            execute_remote_send(store.data().splice_addr, p.slot, p.slot_kind, &ch, p.protocol)?;
             log(&format!("remote send slot {} done", p.slot));
         }
 
@@ -390,8 +431,78 @@ pub(super) fn execute_node(
                 "[{}] RemoteRecv requires dag.rdma to be configured", node.id
             ))?;
             log(&format!("remote recv slot {} ({:?}) ← peer {}", p.slot, p.slot_kind, p.peer));
-            execute_remote_recv(store.data().splice_addr, p.slot, p.slot_kind, p.peer, mesh)?;
+            let ch = mesh.recv_channel(p.peer);
+            execute_remote_recv(store.data().splice_addr, p.slot, p.slot_kind, &ch, p.protocol)?;
             log(&format!("remote recv slot {} done", p.slot));
+        }
+
+        // ── RemoteAtomicFetchAdd: RDMA FAA on a named atomic on a peer ────────
+        //
+        // Owner-pinned (Option A): targets the authoritative copy that lives on
+        // `peer`'s SHM.  The returned old value is written into the same named
+        // slot in the LOCAL atomic arena so the guest can read it after this node.
+        NodeKind::RemoteAtomicFetchAdd(p) => {
+            let mesh = mesh.ok_or_else(|| anyhow!(
+                "[{}] RemoteAtomicFetchAdd requires dag.rdma to be configured", node.id
+            ))?;
+            let splice_addr  = store.data().splice_addr;
+            let idx          = resolve_atomic_index(splice_addr, &p.name)?;
+            let remote_off   = atomic_shm_offset(idx);
+            let result_off   = rdma_scratch_shm_offset(mesh.id, p.peer);
+            log(&format!(
+                "remote FAA '{}' (idx={}) on peer {} += {}",
+                p.name, idx, p.peer, p.add
+            ));
+            let old = mesh.rdma_fetch_add_shm(p.peer, remote_off, result_off, p.add)?;
+            write_local_atomic(splice_addr, idx, old);
+            log(&format!("remote FAA done: old={}", old));
+        }
+
+        // ── RemoteAtomicCmpSwap: RDMA CAS on a named atomic on a peer ─────────
+        //
+        // Owner-pinned (Option A): useful for distributed locks and
+        // leader-election patterns.  The old (pre-swap) value is stored
+        // locally so the guest can determine whether the swap succeeded.
+        NodeKind::RemoteAtomicCmpSwap(p) => {
+            let mesh = mesh.ok_or_else(|| anyhow!(
+                "[{}] RemoteAtomicCmpSwap requires dag.rdma to be configured", node.id
+            ))?;
+            let splice_addr  = store.data().splice_addr;
+            let idx          = resolve_atomic_index(splice_addr, &p.name)?;
+            let remote_off   = atomic_shm_offset(idx);
+            let result_off   = rdma_scratch_shm_offset(mesh.id, p.peer);
+            log(&format!(
+                "remote CAS '{}' (idx={}) on peer {}: {} → {}",
+                p.name, idx, p.peer, p.compare, p.swap
+            ));
+            let old = mesh.rdma_compare_swap_shm(p.peer, remote_off, result_off, p.compare, p.swap)?;
+            write_local_atomic(splice_addr, idx, old);
+            log(&format!(
+                "remote CAS done: old={}, swapped={}",
+                old, old == p.compare
+            ));
+        }
+
+        // ── RemoteAtomicPush: contribute local accumulator to remote peer ─────
+        //
+        // Replicated-local + reduce (Option B): each machine holds a partial
+        // counter locally and pushes it to the designated owner in one RDMA FAA.
+        // The owner accumulates all partial values without any extra round-trips.
+        NodeKind::RemoteAtomicPush(p) => {
+            let mesh = mesh.ok_or_else(|| anyhow!(
+                "[{}] RemoteAtomicPush requires dag.rdma to be configured", node.id
+            ))?;
+            let splice_addr = store.data().splice_addr;
+            let idx         = resolve_atomic_index(splice_addr, &p.name)?;
+            let local_val   = read_local_atomic(splice_addr, idx);
+            let remote_off  = atomic_shm_offset(idx);
+            let result_off  = rdma_scratch_shm_offset(mesh.id, p.peer);
+            log(&format!(
+                "remote push '{}' (idx={}) → peer {}: local={} (adding to owner)",
+                p.name, idx, p.peer, local_val
+            ));
+            mesh.rdma_fetch_add_shm(p.peer, remote_off, result_off, local_val)?;
+            log(&format!("remote push '{}' done", p.name));
         }
     }
 

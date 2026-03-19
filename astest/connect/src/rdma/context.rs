@@ -1,4 +1,5 @@
-// RDMA device context: wraps ibv_context, ibv_pd, and ibv_cq.
+// RDMA device context: wraps ibv_context and ibv_pd.
+// CQ is no longer shared here — each QueuePair creates and owns its own CQ.
 
 use std::ffi::CStr;
 use std::ptr::NonNull;
@@ -10,16 +11,16 @@ use crate::ffi::*;
 pub struct RdmaContext {
     pub ctx: NonNull<ibv_context>,
     pub pd:  NonNull<ibv_pd>,
-    pub cq:  NonNull<ibv_cq>,
 }
 
 unsafe impl Send for RdmaContext {}
 unsafe impl Sync for RdmaContext {}
 
 impl RdmaContext {
-    /// Open an RDMA device, allocate a PD, and create a CQ of `cq_size` slots.
+    /// Open an RDMA device and allocate a PD.
     /// `dev_name = None` picks the first available device.
-    pub fn new(dev_name: Option<&str>, cq_size: i32) -> Result<Self> {
+    /// `_cq_size` is accepted for backward compatibility but ignored.
+    pub fn new(dev_name: Option<&str>, _cq_size: i32) -> Result<Self> {
         let mut num_devices = 0i32;
         let dev_list = unsafe { ibv_get_device_list(&mut num_devices) };
         if dev_list.is_null() || num_devices == 0 {
@@ -50,15 +51,8 @@ impl RdmaContext {
         let pd = NonNull::new(pd_ptr)
             .ok_or_else(|| anyhow!("ibv_alloc_pd failed"))?;
 
-        let cq_ptr = unsafe {
-            ibv_create_cq(ctx.as_ptr(), cq_size,
-                          std::ptr::null_mut(), std::ptr::null_mut(), 0)
-        };
-        let cq = NonNull::new(cq_ptr)
-            .ok_or_else(|| anyhow!("ibv_create_cq failed"))?;
-
-        println!("[RDMA] context ready (pd={:p} cq={:p})", pd_ptr, cq_ptr);
-        Ok(RdmaContext { ctx, pd, cq })
+        println!("[RDMA] context ready (pd={:p})", pd_ptr);
+        Ok(RdmaContext { ctx, pd })
     }
 
     /// Query port attributes (LID, state, etc.).
@@ -87,7 +81,6 @@ impl RdmaContext {
 impl Drop for RdmaContext {
     fn drop(&mut self) {
         unsafe {
-            ibv_destroy_cq(self.cq.as_ptr());
             ibv_dealloc_pd(self.pd.as_ptr());
             ibv_close_device(self.ctx.as_ptr());
         }

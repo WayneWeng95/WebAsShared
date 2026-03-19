@@ -105,6 +105,7 @@ pub extern "C" fn wc_reduce(stream_slot: u32) {
     let total: u64 = totals.iter().map(|(_, n)| n).sum();
 
     ShmApi::write_output_str("=== word_count ===");
+    ShmApi::write_output_str(&alloc::format!("map_records_received={}", records.len()));
     ShmApi::write_output_str(&alloc::format!("unique_words={}", unique));
     ShmApi::write_output_str(&alloc::format!("total_occurrences={}", total));
     for (word, count) in &totals {

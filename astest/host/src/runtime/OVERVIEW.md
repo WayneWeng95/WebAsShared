@@ -75,33 +75,6 @@ Routing test roles: `stream_bridge_test`, `aggregate_test`, `shuffle_test`,
 
 ---
 
-## organizer.rs — moved to mem_operation/organizer.rs
-
-`BucketOrganizer` now lives in `crate::runtime::mem_operation::organizer`.
-See the mem_operation OVERVIEW.md for documentation.
-
-After all WASM writers finish, the `BucketOrganizer` scans the SHM hash-bucket map,
-resolves write conflicts using a pluggable `ConsumptionPolicy`, commits the winning
-payload to the Registry, and returns all losing pages to the free list.
-
-### Type
-
-| Type | Description |
-|---|---|
-| `BucketOrganizer<'a>` | Holds the SHM base pointer. Lifetime tied to the `Store` that owns the WASM memory. |
-
-### Methods
-
-| Method | Visibility | Description |
-|---|---|---|
-| `new(store, memory)` | `pub` | Anchor the organizer at the SHM base (`memory.data_ptr + TARGET_OFFSET`). |
-| `consume_all_buckets(policy)` | `pub unsafe` | Scan all `BUCKET_COUNT` hash buckets; for each non-empty bucket: atomically detach its conflict list, apply `policy` to select a winner, commit the winner's offset+length to the Registry, and GC all loser page chains. Must be called after all writers have finished. |
-| `process_detached_list(head_offset, bucket_idx, policy)` | `fn` (private) | Deserialize each node's multi-page payload, call `policy.process`, commit the winner, and free losers via `free_lob_chain`. |
-| `recycle_chain(list_head)` | `fn` (private) | Push every top-level conflict-list node back onto the free list (walks `next_node` links, not payload page chains). |
-| `push_to_free_list(page_offset)` | `fn` (private) | Delegate single-page free to `reclaimer::free_page_chain`. |
-
----
-
 ## manager.rs — Legacy integration test orchestrator
 
 A standalone test harness predating the DAG runner.  `run_manager` initialises SHM,

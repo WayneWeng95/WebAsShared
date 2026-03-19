@@ -137,7 +137,44 @@ use common::WASM_PATH;
 use plan::{build_slot_refcounts, build_waves, is_oneshot_node, node_owned_slots, node_routed_upstream_slots, parse_level, topo_sort, validate_dag};
 use workers::{spawn_python_subprocess, spawn_wasm_subprocess};
 use dispatch::execute_node;
-use crate::runtime::remote::{pre_alloc_staging, STAGE_BYTES_PER_PEER};
+use crate::runtime::remote::{execute_remote_recv, execute_remote_send, pre_alloc_staging, STAGE_BYTES_PER_PEER};
+use common::{atomic_shm_offset, rdma_scratch_shm_offset, REGISTRY_OFFSET, RegistryEntry};
+
+// ─── Atomic arena helpers (used in wave loop thread spawns) ──────────────────
+
+fn resolve_atomic_index_mod(splice_addr: usize, name: &str) -> Result<usize> {
+    use common::Superblock;
+    use std::sync::atomic::Ordering;
+
+    let mut name_key = [0u8; 52];
+    let src = name.as_bytes();
+    name_key[..src.len().min(52)].copy_from_slice(&src[..src.len().min(52)]);
+
+    let sb    = unsafe { &*(splice_addr as *const Superblock) };
+    let base  = (splice_addr + REGISTRY_OFFSET as usize) as *const RegistryEntry;
+    let count = sb.next_atomic_idx.load(Ordering::Acquire) as usize;
+    for i in 0..count {
+        let entry = unsafe { &*base.add(i) };
+        if entry.name == name_key {
+            return Ok(entry.index as usize);
+        }
+    }
+    Err(anyhow!("atomic '{}' not found in registry", name))
+}
+
+#[inline]
+fn read_shm_atomic(splice_addr: usize, idx: usize) -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let ptr = (splice_addr + atomic_shm_offset(idx) as usize) as *const AtomicU64;
+    unsafe { (*ptr).load(Ordering::Acquire) }
+}
+
+#[inline]
+fn write_shm_atomic(splice_addr: usize, idx: usize, val: u64) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let ptr = (splice_addr + atomic_shm_offset(idx) as usize) as *mut AtomicU64;
+    unsafe { (*ptr).store(val, Ordering::Release) };
+}
 
 // ─── Public entry points ──────────────────────────────────────────────────────
 
@@ -227,12 +264,6 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         // allocator advances identically and staging offsets stay in sync.
         if rdma.transfer {
             pre_alloc_staging(splice_addr, rdma.total)?;
-            println!(
-                "[DAG] RDMA staging reserved: {} peers × {} KiB = {} MiB",
-                rdma.total,
-                STAGE_BYTES_PER_PEER / 1024,
-                rdma.total * STAGE_BYTES_PER_PEER / (1024 * 1024),
-            );
         } else {
             println!("[DAG] RDMA transfer disabled — skipping staging pre-alloc");
         }
@@ -257,6 +288,36 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
     };
 
     let has_persistence = dag.nodes.iter().any(|n| matches!(n.kind, NodeKind::Persist(_) | NodeKind::Watch(_)));
+
+    // Build a map from each RemoteRecv node's id to (slot, slot_kind, consumer_count).
+    // RemoteRecv-produced slots must be freed after all downstream consumers finish,
+    // mirroring the Input slot reclamation pattern.
+    //
+    // Only IO slots are tracked here: stream slots produced by RemoteRecv are
+    // typically consumed by a StreamPipeline that already claims them via
+    // node_owned_slots / build_slot_refcounts.  Tracking stream slots here too
+    // would cause a double-free when both paths fire.
+    let remote_recv_dep_counts: HashMap<String, (usize, RemoteSlotKind, usize)> = {
+        let recv_slots: HashMap<&str, (usize, RemoteSlotKind)> = dag.nodes.iter()
+            .filter_map(|n| {
+                if let NodeKind::RemoteRecv(p) = &n.kind {
+                    if p.slot_kind == RemoteSlotKind::Io {
+                        return Some((n.id.as_str(), (p.slot, p.slot_kind)));
+                    }
+                }
+                None
+            })
+            .collect();
+        let mut counts: HashMap<String, (usize, RemoteSlotKind, usize)> = HashMap::new();
+        for node in &dag.nodes {
+            for dep_id in &node.deps {
+                if let Some(&(slot, kind)) = recv_slots.get(dep_id.as_str()) {
+                    counts.entry(dep_id.clone()).or_insert((slot, kind, 0)).2 += 1;
+                }
+            }
+        }
+        counts
+    };
 
     // Build a map from each Input node's id to (slot, number_of_direct_consumers).
     // Input I/O slots must be freed after all nodes that list the Input as a dep
@@ -298,8 +359,9 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         let mut persist_writer = if has_persistence { Some(PersistenceWriter::new()) } else { None };
         let mut prefetch_handles: HashMap<String, PrefetchHandle> = HashMap::new();
         let mut slot_refcounts = build_slot_refcounts(dag);
-        // Per-run countdown for Input slot reclamation (reset each iteration).
+        // Per-run countdown for Input and RemoteRecv slot reclamation (reset each iteration).
         let mut input_dep_remaining = input_dep_counts.clone();
+        let mut remote_recv_dep_remaining = remote_recv_dep_counts.clone();
 
         // Run each wave
         for wave in &waves {
@@ -342,9 +404,118 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            // 3b. Run host nodes on main thread (concurrent with subprocess children).
-            // StreamPipeline falls here and spawns its own sequential subprocesses per stage.
-            for &idx in &host_idxs {
+            // 3b. Partition host nodes: RDMA (RemoteSend/RemoteRecv) vs serial.
+            let (rdma_idxs, serial_idxs): (Vec<usize>, Vec<usize>) =
+                host_idxs.iter().cloned().partition(|&idx| {
+                    matches!(dag.nodes[idx].kind,
+                        NodeKind::RemoteSend(_)
+                        | NodeKind::RemoteRecv(_)
+                        | NodeKind::RemoteAtomicFetchAdd(_)
+                        | NodeKind::RemoteAtomicCmpSwap(_)
+                        | NodeKind::RemoteAtomicPush(_))
+                });
+
+            // 3c. Spawn RDMA nodes as OS threads so bidirectional transfers
+            //     (e.g. shuffle) can progress concurrently without deadlocking.
+            let splice_addr = store.data().splice_addr;
+            let rdma_threads: Vec<(String, std::thread::JoinHandle<Result<()>>)> =
+                rdma_idxs.iter()
+                    .map(|&idx| {
+                        let node = &dag.nodes[idx];
+                        println!("[DAG] ── Node: {} (rdma thread) ──", node.id);
+                        let id = node.id.clone();
+                        let handle: std::thread::JoinHandle<Result<()>> = match &node.kind {
+                            NodeKind::RemoteSend(p) => {
+                                let mesh = mesh.as_ref().ok_or_else(|| anyhow!(
+                                    "[{}] RemoteSend requires dag.rdma to be configured", id
+                                ))?;
+                                let ch       = mesh.send_channel(p.peer);
+                                let slot     = p.slot;
+                                let kind     = p.slot_kind;
+                                let protocol = p.protocol;
+                                std::thread::spawn(move || {
+                                    execute_remote_send(splice_addr, slot, kind, &ch, protocol)
+                                })
+                            }
+                            NodeKind::RemoteRecv(p) => {
+                                let mesh = mesh.as_ref().ok_or_else(|| anyhow!(
+                                    "[{}] RemoteRecv requires dag.rdma to be configured", id
+                                ))?;
+                                let ch       = mesh.recv_channel(p.peer);
+                                let slot     = p.slot;
+                                let kind     = p.slot_kind;
+                                let protocol = p.protocol;
+                                std::thread::spawn(move || {
+                                    execute_remote_recv(splice_addr, slot, kind, &ch, protocol)
+                                })
+                            }
+                            NodeKind::RemoteAtomicFetchAdd(p) => {
+                                let mesh = mesh.as_ref().ok_or_else(|| anyhow!(
+                                    "[{}] RemoteAtomicFetchAdd requires dag.rdma to be configured", id
+                                ))?;
+                                let idx        = resolve_atomic_index_mod(splice_addr, &p.name)?;
+                                let ch         = mesh.atomic_channel(p.peer);
+                                let remote_off = atomic_shm_offset(idx);
+                                let result_off = rdma_scratch_shm_offset(mesh.id, p.peer);
+                                let add_val    = p.add;
+                                let log_id     = id.clone();
+                                std::thread::spawn(move || {
+                                    let old = ch.rdma_fetch_add(remote_off, result_off, add_val)?;
+                                    write_shm_atomic(splice_addr, idx, old);
+                                    println!("[DAG] RemoteAtomicFetchAdd '{}': old={}", log_id, old);
+                                    Ok(())
+                                })
+                            }
+                            NodeKind::RemoteAtomicCmpSwap(p) => {
+                                let mesh = mesh.as_ref().ok_or_else(|| anyhow!(
+                                    "[{}] RemoteAtomicCmpSwap requires dag.rdma to be configured", id
+                                ))?;
+                                let idx        = resolve_atomic_index_mod(splice_addr, &p.name)?;
+                                let ch         = mesh.atomic_channel(p.peer);
+                                let remote_off = atomic_shm_offset(idx);
+                                let result_off = rdma_scratch_shm_offset(mesh.id, p.peer);
+                                let compare    = p.compare;
+                                let swap       = p.swap;
+                                let log_id     = id.clone();
+                                std::thread::spawn(move || {
+                                    let old = ch.rdma_compare_swap(remote_off, result_off, compare, swap)?;
+                                    write_shm_atomic(splice_addr, idx, old);
+                                    println!(
+                                        "[DAG] RemoteAtomicCmpSwap '{}': old={}, swapped={}",
+                                        log_id, old, old == compare
+                                    );
+                                    Ok(())
+                                })
+                            }
+                            NodeKind::RemoteAtomicPush(p) => {
+                                let mesh = mesh.as_ref().ok_or_else(|| anyhow!(
+                                    "[{}] RemoteAtomicPush requires dag.rdma to be configured", id
+                                ))?;
+                                let idx        = resolve_atomic_index_mod(splice_addr, &p.name)?;
+                                let local_val  = read_shm_atomic(splice_addr, idx);
+                                let ch         = mesh.atomic_channel(p.peer);
+                                let remote_off = atomic_shm_offset(idx);
+                                let result_off = rdma_scratch_shm_offset(mesh.id, p.peer);
+                                let log_id     = id.clone();
+                                std::thread::spawn(move || {
+                                    ch.rdma_fetch_add(remote_off, result_off, local_val)?;
+                                    println!(
+                                        "[DAG] RemoteAtomicPush '{}': pushed {}",
+                                        log_id, local_val
+                                    );
+                                    Ok(())
+                                })
+                            }
+                            _ => unreachable!(),
+                        };
+                        Ok((id, handle))
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+
+            // 3d. Run serial host nodes on main thread (concurrent with RDMA threads).
+            // StreamPipeline / PyPipeline fall here and may use the mesh for per-round
+            // rdma_recv / rdma_send — pass mesh.as_ref() so they can access it.
+            for &idx in &serial_idxs {
                 let node = &dag.nodes[idx];
                 println!("[DAG] ── Node: {} ──", node.id);
                 execute_node(node, &mut store, &instance, &memory,
@@ -352,10 +523,17 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                              logger.as_ref().map(|l| l as &HostLogger),
                              &mut prefetch_handles, (run_count - 1) as usize,
                              &dag.shm_path, py_script, py_wasm, wasm_path,
-                             mesh.as_mut().map(|m| m as &mut connect::MeshNode))?;
+                             mesh.as_ref())?;
             }
 
-            // 3c. Wait for all subprocess WASM children.
+            // 3e. Join RDMA threads before post-wave reclamation.
+            for (id, handle) in rdma_threads {
+                handle.join()
+                    .map_err(|_| anyhow!("[{}] RDMA thread panicked", id))??;
+                println!("  [{}] → ok", id);
+            }
+
+            // 3g. Wait for all subprocess WASM children.
             for (id, mut child) in children {
                 let status = child.wait()
                     .map_err(|e| anyhow!("[{}] failed to wait for WASM worker: {}", id, e))?;
@@ -402,9 +580,10 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 // StreamPipeline: free all intermediate output slots (stages[1..depth-1]).
                 // stages[0].arg0 is the pipeline input (freed via node_owned_slots refcount).
                 // stages[last].arg1 is the summary output (consumed by downstream nodes).
+                // Guard: a 1-stage pipeline has no intermediate slots to free.
                 if let NodeKind::StreamPipeline(p) = &node.kind {
                     let depth = p.stages.len();
-                    for s in p.stages[1..depth.saturating_sub(1)].iter() {
+                    for s in p.stages[1..depth.saturating_sub(1).max(1)].iter() {
                         if let Some(slot) = s.arg1 {
                             reclaimer::free_stream_slot(splice_addr, slot as usize);
                             println!("[DAG] Reclaimed StreamPipeline internal slot {}", slot);
@@ -435,6 +614,45 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                     input_dep_remaining.remove(&dep_id);
                     reclaimer::free_io_slot(splice_addr, slot as usize);
                     println!("[DAG] Reclaimed Input slot {} (all consumers done)", slot);
+                }
+
+                // Decrement the consumer counter for any RemoteRecv-node dependencies.
+                // When the last consumer finishes, free the produced slot (stream or IO).
+                let recv_to_free: Vec<(String, usize, RemoteSlotKind)> = node.deps.iter()
+                    .filter_map(|dep_id| {
+                        let entry = remote_recv_dep_remaining.get_mut(dep_id.as_str())?;
+                        entry.2 -= 1;
+                        if entry.2 == 0 { Some((dep_id.clone(), entry.0, entry.1)) } else { None }
+                    })
+                    .collect();
+                for (dep_id, slot, kind) in recv_to_free {
+                    remote_recv_dep_remaining.remove(&dep_id);
+                    match kind {
+                        RemoteSlotKind::Stream => {
+                            reclaimer::free_stream_slot(splice_addr, slot);
+                            println!("[DAG] Reclaimed RemoteRecv stream slot {} (all consumers done)", slot);
+                        }
+                        RemoteSlotKind::Io => {
+                            reclaimer::free_io_slot(splice_addr, slot);
+                            println!("[DAG] Reclaimed RemoteRecv I/O slot {} (all consumers done)", slot);
+                        }
+                    }
+                }
+
+                // RemoteRecv with no downstream consumers: free immediately after it runs.
+                if let NodeKind::RemoteRecv(p) = &node.kind {
+                    if !remote_recv_dep_counts.contains_key(node.id.as_str()) {
+                        match p.slot_kind {
+                            RemoteSlotKind::Stream => {
+                                reclaimer::free_stream_slot(splice_addr, p.slot);
+                                println!("[DAG] Reclaimed RemoteRecv stream slot {} (no consumers)", p.slot);
+                            }
+                            RemoteSlotKind::Io => {
+                                reclaimer::free_io_slot(splice_addr, p.slot);
+                                println!("[DAG] Reclaimed RemoteRecv I/O slot {} (no consumers)", p.slot);
+                            }
+                        }
+                    }
                 }
             }
 

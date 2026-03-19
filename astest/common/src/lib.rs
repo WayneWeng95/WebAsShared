@@ -59,15 +59,38 @@ pub const SUPERBLOCK_SIZE: u32 = {
 pub const REGISTRY_SIZE: u32 = 1 * MIB;
 pub const REGISTRY_OFFSET: u32 = SUPERBLOCK_SIZE;
 
-// Atomic Arena: 1MB
-pub const ATOMIC_ARENA_SIZE: u32 = 1 * MIB;
-pub const ATOMIC_ARENA_OFFSET: u32 = REGISTRY_OFFSET + REGISTRY_SIZE;
+// Maximum number of nodes in the RDMA full mesh.
+// connect/src/mesh.rs derives its internal MAX_NODES from this constant.
+pub const MAX_MESH_NODES: usize = 32;
+
+// RDMA Atomic Result Scratch: one 8-byte slot per (node_id, peer_id) pair.
+// Each pair's slot receives the "old value" returned by an RDMA FAA/CAS.
+// Sized to 2 pages (8 KiB).
+pub const RDMA_SCRATCH_SIZE: u32 = 2 * PAGE_SIZE;
+pub const RDMA_SCRATCH_OFFSET: u32 = REGISTRY_OFFSET + REGISTRY_SIZE;
+
+// Atomic Arena: 1MB of packed AtomicU64 entries (local AND global cross-machine atomics).
+pub const ATOMIC_ARENA_SIZE:   u32 = 1 * MIB;
+pub const ATOMIC_ARENA_OFFSET: u32 = RDMA_SCRATCH_OFFSET + RDMA_SCRATCH_SIZE;
 
 // Log Arena: 16MB
 pub const LOG_ARENA_SIZE: u32 = 16 * MIB;
 pub const LOG_ARENA_OFFSET: u32 = ATOMIC_ARENA_OFFSET + ATOMIC_ARENA_SIZE;
 
 pub const BUMP_ALLOCATOR_START: u32 = LOG_ARENA_OFFSET + LOG_ARENA_SIZE;
+
+/// SHM byte offset of the `AtomicU64` at `idx` in the atomic arena.
+#[inline]
+pub const fn atomic_shm_offset(idx: usize) -> u32 {
+    ATOMIC_ARENA_OFFSET + (idx as u32) * 8
+}
+
+/// SHM byte offset of the 8-byte RDMA result scratch slot for `(node_id, peer_id)`.
+/// This location receives the "old value" written by the NIC after an RDMA FAA/CAS.
+#[inline]
+pub const fn rdma_scratch_shm_offset(node_id: usize, peer_id: usize) -> u32 {
+    RDMA_SCRATCH_OFFSET + ((node_id * MAX_MESH_NODES + peer_id) as u32) * 8
+}
 
 // Dynamic Hash Map
 pub const BUCKET_COUNT: usize = (PAGE_SIZE / 4) as usize;

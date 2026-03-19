@@ -15,17 +15,28 @@ pub const MAX_SEND_SGE: usize = 16;
 
 pub struct QueuePair {
     pub qp: NonNull<ibv_qp>,
+    /// Dedicated completion queue for this QP — not shared with any other QP.
+    cq:     NonNull<ibv_cq>,
 }
 
 unsafe impl Send for QueuePair {}
 unsafe impl Sync for QueuePair {}
 
 impl QueuePair {
-    /// Allocate an RC QP in RESET state, sharing the CQ from `ctx`.
+    /// Allocate an RC QP in RESET state with its own dedicated CQ.
     pub fn create(ctx: &RdmaContext) -> Result<Self> {
+        // Each QP owns its CQ so concurrent transfers to different peers
+        // never steal each other's completions.
+        let cq_ptr = unsafe {
+            ibv_create_cq(ctx.ctx.as_ptr(), 16,
+                          std::ptr::null_mut(), std::ptr::null_mut(), 0)
+        };
+        let cq = NonNull::new(cq_ptr)
+            .ok_or_else(|| anyhow!("ibv_create_cq for QP failed"))?;
+
         let mut init_attr: ibv_qp_init_attr = unsafe { std::mem::zeroed() };
-        init_attr.send_cq    = ctx.cq.as_ptr();
-        init_attr.recv_cq    = ctx.cq.as_ptr();
+        init_attr.send_cq    = cq_ptr;
+        init_attr.recv_cq    = cq_ptr;
         init_attr.qp_type    = IBV_QPT_RC;
         init_attr.sq_sig_all = 0;
         init_attr.cap.max_send_wr  = 16;
@@ -38,7 +49,7 @@ impl QueuePair {
             .ok_or_else(|| anyhow!("ibv_create_qp failed"))?;
 
         println!("[RDMA] QP created: QPN={}", unsafe { (*qp_ptr).qp_num });
-        Ok(QueuePair { qp })
+        Ok(QueuePair { qp, cq })
     }
 
     pub fn qpn(&self) -> u32 { unsafe { (*self.qp.as_ptr()).qp_num } }
@@ -275,11 +286,11 @@ impl QueuePair {
         Ok(())
     }
 
-    /// Busy-poll the CQ until one completion arrives.
-    pub fn poll_one_blocking(&self, ctx: &RdmaContext) -> Result<u64> {
+    /// Busy-poll this QP's dedicated CQ until one completion arrives.
+    pub fn poll_one_blocking(&self) -> Result<u64> {
         let mut wc: ibv_wc = unsafe { std::mem::zeroed() };
         loop {
-            let n = unsafe { wrap_ibv_poll_cq(ctx.cq.as_ptr(), 1, &mut wc) };
+            let n = unsafe { wrap_ibv_poll_cq(self.cq.as_ptr(), 1, &mut wc) };
             if n < 0  { return Err(anyhow!("ibv_poll_cq error: {}", n)); }
             if n == 0 { std::hint::spin_loop(); continue; }
             if wc.status != IBV_WC_SUCCESS {
@@ -295,6 +306,10 @@ impl QueuePair {
 
 impl Drop for QueuePair {
     fn drop(&mut self) {
-        unsafe { ibv_destroy_qp(self.qp.as_ptr()); }
+        // QP must be destroyed before its CQ.
+        unsafe {
+            ibv_destroy_qp(self.qp.as_ptr());
+            ibv_destroy_cq(self.cq.as_ptr());
+        }
     }
 }

@@ -1,0 +1,64 @@
+{
+  "_comment": "RDMA Python Image Pipeline — Node 1 (processor / receiver).  Run on machine 1.",
+  "_comment2": "Mirrors rdma_img_pipeline_node1.json but uses PyPipeline.",
+  "_comment3": "The host frees stream slot 20 and resets its Python cursor before each rdma_recv",
+  "_comment4": "so img_rotate reads exactly one fresh image per round.",
+  "shm_path": "/dev/shm/rdma_py_img_node1",
+  "python_script": "../py_guest/python/runner.py",
+  "python_wasm": "/opt/myapp/python-3.12.0.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 1,
+    "total": 2,
+    "ips": ["192.168.1.10", "192.168.1.11"],
+    "transfer": true
+  },
+  "nodes": [
+
+    {
+      "_comment": "─── 3-round PyPipeline: recv image from node 0 → process → export ───────────",
+      "_comment2": "rdma_recv populates stream slot 20 before each round from node 0 (peer 0).",
+      "_comment3": "The Python image stages use _read_stream_latest(slot) (reads all, returns last)",
+      "_comment4": "so they are safe to call each round regardless of cursor state.",
+      "id": "pipeline",
+      "deps": [],
+      "kind": { "PyPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_rotate",     "arg": 20, "arg2": 30 },
+          { "func": "img_grayscale",  "arg": 30, "arg2": 40 },
+          { "func": "img_equalize",   "arg": 40, "arg2": 50 },
+          { "func": "img_blur",       "arg": 50, "arg2": 60 },
+          { "func": "img_export_ppm", "arg": 60, "arg2":  1 }
+        ],
+        "rdma_recv": {
+          "peer": 0,
+          "slot": 20,
+          "slot_kind": "Stream"
+        }
+      }}
+    },
+
+    {
+      "_comment": "─── Save 3 processed images from I/O slot 1 to disk ────────────────────────",
+      "id": "save",
+      "deps": ["pipeline"],
+      "kind": { "Output": {
+        "paths": [
+          "/tmp/rdma_py_img_pipeline_out/gradient_processed.pgm",
+          "/tmp/rdma_py_img_pipeline_out/checkerboard_processed.pgm",
+          "/tmp/rdma_py_img_pipeline_out/rings_processed.pgm"
+        ],
+        "slot": 1
+      }}
+    },
+
+    {
+      "_comment": "─── Free intermediate stream slots and I/O slots ────────────────────────────",
+      "id": "free",
+      "deps": ["save"],
+      "kind": { "FreeSlots": { "stream": [20, 30, 40, 50, 60], "io": [10, 1] } }
+    }
+
+  ]
+}

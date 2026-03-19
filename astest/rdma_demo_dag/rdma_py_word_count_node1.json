@@ -1,0 +1,100 @@
+{
+  "_comment": "RDMA Python Word Count — Node 1 (receiver + global reducer).  Run on machine 1.",
+  "_comment2": "Mirrors rdma_word_count_node1.json but uses PyFunc nodes.",
+  "_comment3": "wc_reduce writes results to both I/O slot 1 and slot 2 (fanout), matching",
+  "_comment4": "py_word_count_demo.json; both are saved to separate output files.",
+  "shm_path": "/dev/shm/rdma_py_wc_node1",
+  "python_script": "../py_guest/python/runner.py",
+  "python_wasm": "/opt/myapp/python-3.12.0.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 1,
+    "total": 2,
+    "ips": ["192.168.1.10", "192.168.1.11"],
+    "transfer": true
+  },
+  "nodes": [
+
+    {
+      "_comment": "─── Stage 1: load corpus into I/O slot 0 ───────────────────────────────────",
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+    },
+
+    {
+      "_comment": "─── Stage 2: distribute lines round-robin into stream slots 10–19 ───────────",
+      "id": "distribute",
+      "deps": ["load"],
+      "kind": { "PyFunc": { "func": "wc_distribute", "arg": 10, "arg2": 10 } }
+    },
+
+    {
+      "_comment": "─── Stage 3: 10 parallel map workers ────────────────────────────────────────",
+      "id": "map_0", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 10, "arg2": 110 } }
+    },
+    { "id": "map_1", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 11, "arg2": 111 } } },
+    { "id": "map_2", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 12, "arg2": 112 } } },
+    { "id": "map_3", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 13, "arg2": 113 } } },
+    { "id": "map_4", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 14, "arg2": 114 } } },
+    { "id": "map_5", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 15, "arg2": 115 } } },
+    { "id": "map_6", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 16, "arg2": 116 } } },
+    { "id": "map_7", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 17, "arg2": 117 } } },
+    { "id": "map_8", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 18, "arg2": 118 } } },
+    { "id": "map_9", "deps": ["distribute"], "kind": { "PyFunc": { "func": "wc_map", "arg": 19, "arg2": 119 } } },
+
+    {
+      "_comment": "─── Stage 4: local aggregate into stream slot 200 ───────────────────────────",
+      "id": "aggregate_local",
+      "deps": ["map_0","map_1","map_2","map_3","map_4","map_5","map_6","map_7","map_8","map_9"],
+      "kind": {
+        "Aggregate": {
+          "upstream": [110, 111, 112, 113, 114, 115, 116, 117, 118, 119],
+          "downstream": 200
+        }
+      }
+    },
+
+    {
+      "_comment": "─── Stage 5: receive node 0's aggregate into stream slot 201 ────────────────",
+      "_comment2": "Runs concurrently with aggregate_local — both only need distribute to finish.",
+      "id": "recv",
+      "deps": ["distribute"],
+      "kind": { "RemoteRecv": { "slot": 201, "slot_kind": "Stream", "peer": 0 } }
+    },
+
+    {
+      "_comment": "─── Stage 6: merge local (200) + remote (201) into slot 300 ─────────────────",
+      "id": "aggregate_global",
+      "deps": ["aggregate_local", "recv"],
+      "kind": {
+        "Aggregate": {
+          "upstream": [200, 201],
+          "downstream": 300
+        }
+      }
+    },
+
+    {
+      "_comment": "─── Stage 7: reduce — sum per-word counts, write to I/O slots 1 and 2 ───────",
+      "id": "reduce",
+      "deps": ["aggregate_global"],
+      "kind": { "PyFunc": { "func": "wc_reduce", "arg": 300 } }
+    },
+
+    {
+      "_comment": "─── Stage 8: save primary output (I/O slot 1) ───────────────────────────────",
+      "id": "save",
+      "deps": ["reduce"],
+      "kind": { "Output": { "path": "/tmp/rdma_py_word_count_result.txt", "slot": 1 } }
+    },
+
+    {
+      "_comment": "─── Stage 9: save secondary fanout copy (I/O slot 2) ────────────────────────",
+      "id": "save_copy",
+      "deps": ["reduce"],
+      "kind": { "Output": { "path": "/tmp/rdma_py_word_count_result_copy.txt", "slot": 2 } }
+    }
+
+  ]
+}

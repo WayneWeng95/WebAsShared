@@ -157,6 +157,36 @@ pub enum NodeKind {
     /// { "kind": { "RemoteRecv": { "slot": 30, "slot_kind": "Stream", "peer": 0 } } }
     /// ```
     RemoteRecv(RemoteRecvParams),
+    /// RDMA Fetch-and-Add on a named atomic on a specific remote peer (owner-pinned).
+    ///
+    /// Atomically adds `add` to the named atomic on `peer`'s SHM and stores the
+    /// old value into the same named atomic in the LOCAL SHM.  Safe for any number
+    /// of concurrent callers targeting the same owner.
+    ///
+    /// ```json
+    /// { "kind": { "RemoteAtomicFetchAdd": { "peer": 1, "name": "counter", "add": 1 } } }
+    /// ```
+    RemoteAtomicFetchAdd(RemoteAtomicFetchAddParams),
+    /// RDMA Compare-and-Swap on a named atomic on a specific remote peer (owner-pinned).
+    ///
+    /// If the named atomic on `peer`'s SHM equals `compare`, atomically replaces it
+    /// with `swap`.  Stores the old (pre-swap) value into the local SHM atomic.
+    ///
+    /// ```json
+    /// { "kind": { "RemoteAtomicCmpSwap": { "peer": 1, "name": "lock", "compare": 0, "swap": 1 } } }
+    /// ```
+    RemoteAtomicCmpSwap(RemoteAtomicCmpSwapParams),
+    /// Push the local value of a named atomic to a remote peer via RDMA FAA (reduce step).
+    ///
+    /// Reads the local value of `name` then adds it to `peer`'s copy of the same
+    /// atomic.  Used in the replicated-local + reduce pattern: each machine calls
+    /// `RemoteAtomicPush` to contribute its partial result to an accumulator node,
+    /// which ends up holding the global sum without any coordination overhead.
+    ///
+    /// ```json
+    /// { "kind": { "RemoteAtomicPush": { "peer": 0, "name": "word_count" } } }
+    /// ```
+    RemoteAtomicPush(RemoteAtomicPushParams),
 }
 
 #[derive(Debug, Deserialize)]
@@ -238,6 +268,55 @@ pub struct StreamPipelineStage {
     pub arg1: Option<u32>,
 }
 
+/// RDMA recv source configuration for a pipeline node.
+///
+/// Before each round of stage 0, a batch is received from `peer` into `slot`
+/// using the already-established mesh connection.  The connection is reused
+/// across all rounds — no reconnection happens between ticks.
+///
+/// The previous round's page chain in `slot` is freed automatically before
+/// each receive (except round 0) to avoid leaking SHM pages.
+#[derive(Debug, Deserialize)]
+pub struct RdmaPipelineRecv {
+    /// Mesh peer index to receive from.
+    pub peer: usize,
+    /// Local SHM slot index to populate before each round.
+    pub slot: usize,
+    /// Whether `slot` is in the Stream or I/O area.
+    pub slot_kind: RemoteSlotKind,
+    /// Handshake protocol — must match the paired `RemoteSend` on the peer.
+    #[serde(default)]
+    pub protocol: RemoteProtocol,
+}
+
+/// RDMA send sink configuration for a pipeline node.
+///
+/// After the last stage completes each round, `slot` is sent to `peer`
+/// using the already-established mesh connection.  The connection is reused
+/// across all rounds — no reconnection happens between ticks.
+#[derive(Debug, Deserialize)]
+pub struct RdmaPipelineSend {
+    /// Mesh peer index to send to.
+    pub peer: usize,
+    /// Local SHM slot index to read and send after each completed round.
+    pub slot: usize,
+    /// Whether `slot` is in the Stream or I/O area.
+    pub slot_kind: RemoteSlotKind,
+    /// Handshake protocol — must match the paired `RemoteRecv` on the peer.
+    #[serde(default)]
+    pub protocol: RemoteProtocol,
+    /// If `true`, free `slot` immediately after each send so the next round's
+    /// stage starts with an empty chain.  Required when a pipeline stage always
+    /// appends to the same fixed output slot (e.g. `img_load_ppm` writing to
+    /// slot 20 every round) — without this, the slot accumulates every round's
+    /// output and the RDMA write would include all previous rounds' data.
+    ///
+    /// Not needed when the stage uses the round number as its output slot
+    /// (i.e. `arg1 = null` in `StreamPipelineStage`).
+    #[serde(default)]
+    pub free_after: bool,
+}
+
 /// Parameters for the `StreamPipeline` node.
 ///
 /// Stages are executed in a pipelined wave schedule so adjacent rounds
@@ -256,12 +335,25 @@ pub struct StreamPipelineStage {
 ///     { "func": "pipeline_sink",      "arg0": 30, "arg1": 40 }
 /// ]}
 /// ```
+///
+/// To feed stage 0 from a remote peer instead of a locally-produced slot,
+/// add `"rdma_recv"`.  To send the last stage's output to a remote peer
+/// after each round, add `"rdma_send"`.  Both reuse the mesh connection
+/// established at DAG start — the RDMA bridge is kept alive for all rounds.
 #[derive(Debug, Deserialize)]
 pub struct StreamPipelineParams {
     /// Number of rounds to execute.
     pub rounds: u32,
     /// Ordered list of pipeline stages.  Must contain at least one entry.
     pub stages: Vec<StreamPipelineStage>,
+    /// Optional RDMA receive source: before each round, fetch a batch from a
+    /// remote peer into a local slot so stage 0 can consume it.
+    #[serde(default)]
+    pub rdma_recv: Option<RdmaPipelineRecv>,
+    /// Optional RDMA send sink: after the last stage completes each round,
+    /// send a local slot's contents to a remote peer.
+    #[serde(default)]
+    pub rdma_send: Option<RdmaPipelineSend>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -494,16 +586,44 @@ pub struct PyStreamPipelineStage {
 ///     { "func": "py_sink",      "arg": 30, "arg2": 40   }
 /// ]}
 /// ```
+///
+/// Like `StreamPipeline`, `"rdma_recv"` / `"rdma_send"` keep the RDMA bridge
+/// alive across all rounds and integrate recv/send into each pipeline tick.
 #[derive(Debug, Deserialize)]
 pub struct PyPipelineParams {
     /// Number of rounds to execute.
     pub rounds: u32,
     /// Ordered list of pipeline stages.  Must contain at least one entry.
     pub stages: Vec<PyStreamPipelineStage>,
+    /// Optional RDMA receive source: before each round, fetch a batch from a
+    /// remote peer into a local slot so stage 0 can consume it.
+    #[serde(default)]
+    pub rdma_recv: Option<RdmaPipelineRecv>,
+    /// Optional RDMA send sink: after the last stage completes each round,
+    /// send a local slot's contents to a remote peer.
+    #[serde(default)]
+    pub rdma_send: Option<RdmaPipelineSend>,
+}
+
+/// Selects the TCP/RDMA handshake protocol for a `RemoteSend` / `RemoteRecv` pair.
+///
+/// - `SenderInit` (default): sender announces `total_bytes` first, receiver
+///   replies with `dest_off`, sender writes and signals done.  Safe for any
+///   unidirectional transfer.
+/// - `ReceiverInit`: receiver announces `(dest_off, avail_cap)` first, sender
+///   writes then sends `total_bytes` as the done signal, receiver structures
+///   the page chain in-place.  Avoids deadlock in bidirectional (shuffle)
+///   scenarios because both sides send their announcement without waiting.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProtocol {
+    #[default]
+    SenderInit,
+    ReceiverInit,
 }
 
 /// Which SHM slot area a `RemoteSend` / `RemoteRecv` node operates on.
-#[derive(Debug, Clone, Copy, Deserialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub enum RemoteSlotKind {
     /// Stream slot area (`writer_heads` / `writer_tails`).
@@ -521,6 +641,10 @@ pub struct RemoteSendParams {
     pub slot_kind: RemoteSlotKind,
     /// Mesh peer index to send records to.
     pub peer: usize,
+    /// Handshake protocol.  Defaults to `SenderInit`; use `ReceiverInit`
+    /// for bidirectional (shuffle) transfers to avoid deadlock.
+    #[serde(default)]
+    pub protocol: RemoteProtocol,
 }
 
 /// Parameters for the `RemoteRecv` node.
@@ -532,4 +656,40 @@ pub struct RemoteRecvParams {
     pub slot_kind: RemoteSlotKind,
     /// Mesh peer index to receive records from.
     pub peer: usize,
+    /// Handshake protocol.  Must match the paired `RemoteSend` node.
+    #[serde(default)]
+    pub protocol: RemoteProtocol,
+}
+
+/// Parameters for `RemoteAtomicFetchAdd`.
+#[derive(Debug, Deserialize)]
+pub struct RemoteAtomicFetchAddParams {
+    /// Mesh peer whose SHM atomic is the target.
+    pub peer: usize,
+    /// Registered name of the `AtomicU64` in both peers' atomic arenas.
+    pub name: String,
+    /// Value to add to the remote atomic.
+    pub add:  u64,
+}
+
+/// Parameters for `RemoteAtomicCmpSwap`.
+#[derive(Debug, Deserialize)]
+pub struct RemoteAtomicCmpSwapParams {
+    /// Mesh peer whose SHM atomic is the target.
+    pub peer:    usize,
+    /// Registered name of the `AtomicU64` in both peers' atomic arenas.
+    pub name:    String,
+    /// Expected current value; the swap only fires when the remote equals this.
+    pub compare: u64,
+    /// Value to write if the compare succeeds.
+    pub swap:    u64,
+}
+
+/// Parameters for `RemoteAtomicPush`.
+#[derive(Debug, Deserialize)]
+pub struct RemoteAtomicPushParams {
+    /// Mesh peer to accumulate into (the "owner" / reduce target).
+    pub peer: usize,
+    /// Registered name of the `AtomicU64`.  Must exist in both SHMs.
+    pub name: String,
 }
