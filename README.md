@@ -122,6 +122,13 @@ When the DAG JSON includes an `rdma` block, the host establishes a full RC QP me
 3. An RDMA Fetch-and-Add on the peer's staging ready-counter (hardware atomic) signals completion; a TCP byte is sent as a fallback.
 4. Receiver spin-polls the counter (100 ms), then falls back to the TCP signal. Appends the raw bytes directly into the target slot.
 
+### RDMA pipelining in `StreamPipeline` / `PyPipeline`
+
+Send and receive are handled by background threads so stage computation is not blocked on network I/O:
+
+- **Pre-fetch recv**: at the end of tick `r`, a background thread starts `execute_remote_recv` for round `r+1`; it is joined at the start of tick `r+1`.
+- **Double-buffer send** (`free_after: true`): alternates between two staging slots each round (`rdma.slot + round % 2`). The last stage's argument is overridden at runtime to write into the current buffer. The previous round's send thread is joined before the next is spawned.
+
 ### RDMA consistency
 
 `RemoteSend` must list the slot producer as a DAG dependency. This guarantees the page chain is sealed (producer finished) before the RDMA DMA reads from it. The CQ poll inside the send path ensures DMA is complete before the node returns and the DAG runner reclaims those pages.
@@ -210,7 +217,13 @@ astest/
 ├── connect/src/
 │   ├── ffi.rs                  # Hand-written libibverbs FFI (rdma-core 50.0)
 │   ├── ibverbs_helpers.c       # C wrappers for static-inline ibv_ functions
-│   ├── mesh.rs                 # MeshNode: full-mesh RC QPs, write/atomic ops
+│   ├── mesh/
+│   │   ├── mod.rs              # Types (MeshNode, PeerLink, channel handles), accessors
+│   │   ├── connect.rs          # connect_all, connect_all_on_shm (TCP/QP bootstrap)
+│   │   ├── atomic.rs           # AtomicChannel FAA/CAS; MeshNode SHM atomics
+│   │   ├── data_path.rs        # write_to, broadcast, wait_from, slot, u32 framing
+│   │   ├── staging.rs          # rdma_write_sge, staging write/signal/wait, FAA-only
+│   │   └── OVERVIEW.md         # Port rules, channel types, per-file function tables
 │   ├── remote.rs               # RdmaRemote: two-node high-level API
 │   └── rdma/
 │       ├── context.rs          # RdmaContext (device, PD, CQ)
@@ -227,7 +240,13 @@ astest/
 │       │   ├── plan.rs         # validate_dag, topo_sort, build_waves
 │       │   ├── dispatch.rs     # execute_node, all NodeKind arms
 │       │   └── workers.rs      # spawn_wasm_subprocess, spawn_python_subprocess
-│       ├── remote/mod.rs       # execute_remote_send, execute_remote_recv, staging
+│       ├── remote/
+│       │   ├── mod.rs          # execute_remote_send, execute_remote_recv dispatcher
+│       │   ├── sender_initiated.rs   # SI protocol: send_si, recv_si
+│       │   ├── receiver_initiated.rs # RI protocol: send_ri, recv_ri
+│       │   ├── shm.rs          # collect_src_sges, alloc_and_link, link_to_slot
+│       │   ├── rdma.rs         # rdma_write_page_chain, rdma_write_flat
+│       │   └── OVERVIEW.md     # SI/RI protocol diagrams, per-file function tables
 │       ├── input_output/
 │       │   ├── slot_loader.rs  # File → I/O slot (with prefetch)
 │       │   ├── slot_flusher.rs # I/O slot → file
@@ -240,12 +259,16 @@ astest/
 │       ├── manager.rs          # Test orchestration
 │       └── organizer.rs        # Shared-state conflict resolution
 ├── guest/src/
-│   ├── api/                    # Page allocator, stream/IO/atomic/log APIs
+│   ├── api/
+│   │   ├── HELPER.md           # Complete Rust guest API reference for workloads
+│   │   └── ...                 # Page allocator, stream/IO/atomic/log APIs
 │   └── workloads/              # word_count, img_pipeline, routing_tests
 ├── py_guest/python/
 │   ├── runner.py               # One-shot and --loop entry point
-│   └── shm.py                  # WASI-compatible SHM reader (seek+read)
-└── demo_dag/                   # Example DAG JSON specifications
+│   ├── shm.py                  # WASI-compatible SHM reader (seek+read)
+│   └── HELPER.md               # Complete Python guest API reference for workloads
+├── demo_dag/                   # Single-node example DAG JSON specifications
+└── rdma_demo_dag/              # Multi-node RDMA DAG JSON pairs (node0 + node1)
 ```
 
 ## Key Design Decisions
@@ -270,15 +293,30 @@ astest/
 
   Architecture
 
-  Host (Rust)                           Guest (WASM / Python)
-  ───────────────────────────────────   ──────────────────────────────────────
-  • Parses JSON DAG spec                 • Each node = isolated wasmtime instance
-  • Creates/manages shared memory        • Fixed address 0x80000000 → SHM file
-  • Topological sort + wave execution    • Implements algorithms (word count,
-  • Zero-copy routing between stages       image processing, etc.)
-  • File I/O, allocation, logging        • Calls back host for SHM growth
-  • RDMA full-mesh (MeshNode)            • Python via runner.py --loop (persistent)
-  • RemoteSend / RemoteRecv via RDMA
+  Host (Rust)                              Guest (WASM / Python)
+  ──────────────────────────────────────   ──────────────────────────────────────
+  • Parses JSON DAG spec                    • Each node = isolated wasmtime instance
+  • Creates/manages shared memory           • Fixed address 0x80000000 → SHM file
+  • Topological sort + wave execution       • Implements algorithms (word count,
+  • Zero-copy routing between stages          image processing, etc.)
+  • File I/O, allocation, logging           • Calls back host for SHM growth
+  • RDMA full-mesh (MeshNode, mesh/)        • Python via runner.py --loop (persistent)
+  • RemoteSend / RemoteRecv via RDMA        • API documented in api/HELPER.md
+  • Background send/recv threads            • Python API in py_guest/python/HELPER.md
+    (pipeline RDMA overlap)
+
+  Module Structure
+
+  host/runtime/
+  ├── dag_runner/   — DAG parsing, validation, topo-sort, wave execution, node dispatch
+  ├── remote/       — RDMA send/recv protocols (SI + RI paths), SHM helpers, background
+  │                   threading for pipeline overlap (pre-fetch recv, double-buffer send)
+  ├── input_output/ — file I/O slots, persistence, host log arena
+  └── mem_operation/— page allocator, free-list, stream tick executor
+
+  connect/src/
+  └── mesh/         — full-mesh RC QP topology, atomic ops, data path, staging writes
+                      (split across mod, connect, atomic, data_path, staging)
 
   Shared Memory Layout (at 0x80000000 in every WASM instance)
 
@@ -307,11 +345,25 @@ astest/
   │ RemoteRecv     │ Wait on RDMA FAA signal, append to slot      │
   └────────────────┴──────────────────────────────────────────────┘
 
+  RDMA Pipeline Overlap (StreamPipeline / PyPipeline)
+
+  tick r:   [stage 0] → [stage 1] → ... → [stage N]
+                                                │
+                          ┌─────────────────────┘
+                          │  background send thread (round r)
+                          │  background recv thread (prefetch round r+1)
+                          └─────────────────────┐
+  tick r+1: join recv ──► [stage 0] → [stage 1] → ... → [stage N]
+                                                │
+                                    double-buffer: slot alternates
+                                    rdma.slot + (round % 2)
+
   Example Pipelines
 
   - Word Count:      Load corpus → distribute → 10× parallel map → aggregate → reduce
   - Image Pipeline:  Load PPMs → PyPipeline (rotate, gray, equalize, blur) → save
   - Multi-machine:   Node 0 produces → RemoteSend → Node 1 RemoteRecv → process
+  - RDMA demos:      rdma_demo_dag/ — 4 pairs (wasm/py × word-count/img-pipeline)
 
   Tech Stack
 
@@ -325,4 +377,6 @@ astest/
   at the same virtual address, so local routing is just atomic pointer manipulation — no
   data copying at all. RDMA extends this across machines: the SHM itself is the RDMA MR,
   so a RemoteSend DMA-writes page data straight into the peer's SHM at the same offset.
+  Pipeline nodes overlap network I/O with compute using background threads, keeping CPU
+  utilisation high across all ticks.
 ```

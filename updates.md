@@ -181,3 +181,98 @@ staging_offset(sender_id):
 ### DAG validation
 
 `validate_dag` now rejects: `RemoteSend`/`RemoteRecv` without `rdma.transfer: true`; `RemoteSend` with no dependencies (required to guarantee the slot producer finishes before the RDMA DMA reads from its pages).
+
+---
+
+## 13. RDMA pipelined send/recv — background threading in `StreamPipeline` / `PyPipeline`
+
+**Files:** `host/src/runtime/dag_runner/pipeline.rs`
+
+RDMA send and receive operations are now handled by background threads so stage processing is not blocked on network I/O.
+
+### Pre-fetch recv
+
+At the end of tick `r`, the recv thread for round `r+1` is spawned immediately: slot reset → `execute_remote_recv`. It is joined at the start of tick `r+1`, overlapping network wait with the stage computation of the current tick.
+
+### Double-buffer send (`free_after: true`)
+
+When the send config has `free_after: true`, the executor alternates between two staging slots each round:
+
+```
+buf_slot = rdma.slot + (round % 2)
+```
+
+The last stage's `arg1`/`arg2` is overridden at runtime to point to the current buffer slot so the WASM guest writes into the right staging area. The previous round's send thread is joined before spawning the next (TCP channel serialisation). At the end of the tick loop, any remaining `pending_send` is joined.
+
+### Synchronous path
+
+When `free_after: false`, send remains synchronous (no double-buffering needed).
+
+Both `execute_stream_pipeline` and `execute_py_pipeline` use the same logic.
+
+---
+
+## 14. `remote/mod.rs` split into module directory
+
+**Files:** `host/src/runtime/remote/` (new directory structure)
+
+The single `remote/mod.rs` was split into five focused files:
+
+| File | Contents |
+|------|----------|
+| `mod.rs` | Thin dispatcher: `execute_remote_send`, `execute_remote_recv`, `PAGE_DATA` constant |
+| `sender_initiated.rs` | SI path: `send_si` (walk SGEs → RDMA write page-chain), `recv_si` (alloc pages → link slot) |
+| `receiver_initiated.rs` | RI path: `send_ri` (recv dest_off → RDMA write flat), `recv_ri` (announce cap → recv bytes → build chain) |
+| `shm.rs` | `collect_src_sges` (walk page chain → SGE list), `alloc_and_link`, `link_to_slot` |
+| `rdma.rs` | `rdma_write_page_chain` (SI scatter across page boundaries), `rdma_write_flat` (RI chunked SGE write) |
+
+An `OVERVIEW.md` documents both transfer protocols (SI/RI) with ASCII message-sequence diagrams and per-file function tables.
+
+---
+
+## 15. `connect/src/mesh.rs` split into module directory
+
+**Files:** `connect/src/mesh/` (new directory structure)
+
+The monolithic `mesh.rs` was split into five focused files:
+
+| File | Contents |
+|------|----------|
+| `mod.rs` | Type definitions (`PeerLink`, `MeshNode`, `SendChannel`, `RecvChannel`, `AtomicChannel`), channel accessors, constants, `rand_psn` |
+| `connect.rs` | `connect_all`, `connect_all_on_shm` — full-mesh TCP/QP bootstrap |
+| `atomic.rs` | `AtomicChannel` (FAA, CAS), `MeshNode` SHM-targeted atomics, slot-level atomics |
+| `data_path.rs` | `write_to`, `broadcast`, `wait_from`, `wait_all_writes`, `slot`, `slot_str`, `signal_peer`, `send_u32_to`, `recv_u32_from` |
+| `staging.rs` | `rdma_write_sge`, `rdma_write_staging`, `rdma_signal_staging`, `wait_staging`, `rdma_faa_only`, `rdma_write_to_page_chain` |
+
+Private fields on `PeerLink` and `MeshNode` use `pub(in crate::mesh)` so all child modules can access them without widening the crate-level API.
+
+An `OVERVIEW.md` documents port-assignment rules, channel handle types, and per-file function tables.
+
+---
+
+## 16. RDMA demo DAGs moved to `rdma_demo_dag/`
+
+**Files:** `rdma_demo_dag/` (new directory)
+
+All RDMA-specific DAG JSON files moved out of `demo_dag/` into a dedicated `rdma_demo_dag/` directory:
+
+| File | Purpose |
+|------|---------|
+| `rdma_word_count_node0/1.json` | WASM word count across two nodes |
+| `rdma_py_word_count_node0/1.json` | Python word count across two nodes |
+| `rdma_img_pipeline_node0/1.json` | WASM image pipeline across two nodes |
+| `rdma_py_img_pipeline_node0/1.json` | Python image pipeline across two nodes |
+
+`test_rdma_single_machine.sh` updated to reference `rdma_demo_dag/` instead of `demo_dag/`.
+
+---
+
+## 17. Guest API reference — `HELPER.md`
+
+**Files:** `guest/src/api/HELPER.md`, `py_guest/python/HELPER.md`
+
+Two API reference files document every public function available to workloads:
+
+**Rust guest** (`guest/src/api/HELPER.md`): Input, Output, Stream slots (alloc/write/link/read), I/O slots (alloc/write/link/read), named atomics (get/set/CAS/FAA), shared state (read/write/clear), fan-out helpers, and utility functions.
+
+**Python guest** (`py_guest/python/HELPER.md`): `read_input`, `write_output`, stream slot functions (`alloc_stream_slot`, `write_stream_slot`, `link_stream_slot`, `read_stream_slot`), I/O slot functions, cursor management (`read_cursor`/`write_cursor`), fan-out helpers (`count_records`/`fan_out_records`), and SHM constants. Notes WASI compatibility constraints and the key difference that Python cursors live in an in-process dict rather than SHM atomics.
