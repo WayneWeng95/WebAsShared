@@ -63,6 +63,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                             Path::new(&config.paths.executor_work_dir),
                             &payload.dag_json,
                             &payload.job_id,
+                            false, // capture output, don't print live
                         )?;
 
                         let pid = handle.pid();

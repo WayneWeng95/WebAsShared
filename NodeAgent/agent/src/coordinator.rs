@@ -192,6 +192,7 @@ fn handle_submit(
             Path::new(&config.paths.executor_work_dir),
             my_dag,
             &job_id,
+            false, // capture output in multi-node mode
         )?;
 
         // Wait for local executor to complete.

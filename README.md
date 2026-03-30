@@ -27,16 +27,113 @@ Input file
          Output file
 ```
 
+## Project Structure
+
+```
+WebAsShared/
+├── node-agent                      # NodeAgent binary (entry point)
+├── Executor/                       # Execution engine (host + WASM/Python guests)
+│   ├── Cargo.toml                  # Workspace (host, guest, common, connect)
+│   ├── host/src/                   # Orchestrator: DAG runner, WASM executor, routing, I/O, RDMA
+│   ├── guest/src/                  # WASM workloads (word count, FINRA, ML training, TF-IDF, etc.)
+│   ├── common/src/                 # Shared memory layout definitions (superblock, page, registry)
+│   ├── connect/src/                # RDMA full-mesh: libibverbs FFI, MeshNode, atomic ops
+│   ├── py_guest/python/            # Python workloads (runner.py, shm.py, workload modules)
+│   └── data/                       # Test datasets (corpus, trades, MNIST, images)
+├── NodeAgent/                      # Multi-machine deployment agent
+│   ├── agent/src/                  # Coordinator/worker daemon, executor interface, metrics
+│   ├── cluster_dags/               # ClusterDag definitions (word_count, finra, ml_training)
+│   ├── agent_coordinator.toml      # Sample coordinator config
+│   └── agent_worker.toml           # Sample worker config
+└── DAGs/                           # All DAG JSON specifications
+    ├── demo_dag/                   # Single-node demos (word count, image pipeline)
+    ├── workload_dag/               # Single-node workloads (FINRA, ML training, TF-IDF)
+    ├── rdma_demo_dag/              # Multi-node RDMA demo pairs (node0 + node1)
+    └── rdma_workload_dag/          # Multi-node RDMA workload pairs (node0 + node1)
+```
+
+## Quick Start
+
+### Building
+
+```bash
+# Build the Executor
+cd Executor
+cargo +nightly build --release
+cargo +nightly build --release -p guest --target wasm32-unknown-unknown
+
+# Build the NodeAgent
+cd ../NodeAgent
+cargo build --release
+cp target/release/node-agent ..
+```
+
+### Running (Single-Node via NodeAgent)
+
+All commands run from the `WebAsShared/` root directory:
+
+```bash
+cd /path/to/WebAsShared
+
+# Rust workloads
+./node-agent run DAGs/workload_dag/word_count_demo.json
+./node-agent run DAGs/workload_dag/finra_demo.json
+./node-agent run DAGs/workload_dag/ml_training_demo.json
+./node-agent run DAGs/workload_dag/tfidf_demo.json
+
+# Python workloads
+./node-agent run DAGs/workload_dag/py_word_count_demo.json
+./node-agent run DAGs/workload_dag/py_finra_demo.json
+./node-agent run DAGs/workload_dag/py_ml_training_demo.json
+./node-agent run DAGs/workload_dag/py_tfidf_demo.json
+
+# Image pipeline demos
+./node-agent run DAGs/demo_dag/img_pipeline_demo.json
+./node-agent run DAGs/demo_dag/py_img_pipeline_demo.json
+```
+
+Results are written to `/tmp/` (e.g., `/tmp/finra_result.txt`, `/tmp/ml_training_result.txt`).
+
+### Running (Multi-Node via NodeAgent)
+
+```bash
+# On coordinator machine (node 0):
+./node-agent start --config NodeAgent/agent_coordinator.toml
+
+# On worker machine (node 1):
+./node-agent start --config NodeAgent/agent_worker.toml
+
+# Submit a distributed job (from any machine with coordinator access):
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/finra.json
+```
+
 ## Architecture
 
-### Workspace Members
+### Workspace Members (Executor)
 
 | Crate | Role |
 |-------|------|
 | `host` | Orchestrator: DAG runner, WASM executor, routing, I/O, RDMA |
-| `guest` | WASM workloads (word count, image pipeline, routing tests) |
+| `guest` | WASM workloads (word count, image pipeline, FINRA, ML training, TF-IDF) |
 | `common` | Shared memory layout definitions (superblock, page, registry) |
 | `connect` | RDMA full-mesh: libibverbs FFI, `MeshNode`, atomic ops, SHM-as-MR |
+
+### NodeAgent
+
+The NodeAgent is a higher-level daemon that orchestrates multi-machine DAG execution:
+
+| Module | Role |
+|--------|------|
+| `main.rs` | CLI: `run` (single-node), `start` (daemon), `submit` (job), `status` (query) |
+| `coordinator.rs` | Accept workers, distribute per-node DAGs, aggregate results |
+| `worker.rs` | Connect to coordinator, receive jobs, launch Executor subprocess |
+| `executor.rs` | Spawn/monitor `host dag` subprocesses with live or captured output |
+| `cluster_dag.rs` | Split a ClusterDag into per-node DAGs with RDMA config injection |
+| `metrics.rs` | CPU, RSS, SHM bump offset sampling; JSON-lines log output |
+| `protocol.rs` | Length-prefixed JSON over TCP control plane |
+| `config.rs` | Agent config (role, cluster IPs, paths, timeouts) |
+
+In single-node mode (`run`), the NodeAgent spawns the Executor directly with live terminal output. In multi-node mode (`start`/`submit`), a coordinator distributes per-node DAGs to workers who each spawn their own Executor.
 
 ### Shared Memory Layout
 
@@ -69,8 +166,6 @@ The host creates a SHM file and maps it at a fixed offset (`0x80000000`) in each
             └────────────────────────────────┘
 ```
 
-Each stream slot is a singly-linked list of 4 KiB pages. Routing (aggregate, shuffle, broadcast) is performed by atomically relinking page-chain heads and tails — no data is copied.
-
 ### Routing Primitives
 
 | Primitive | Description |
@@ -90,30 +185,23 @@ Each stream slot is a singly-linked list of 4 KiB pages. Routing (aggregate, shu
 | `PyPipeline` | Multi-stage Python pipeline with one persistent process per node |
 | `Input` | Load a file into an I/O slot (optional background prefetch) |
 | `Output` | Write an I/O slot to a file |
-| `Bridge` | Host-side 1→1 stream wire |
-| `Aggregate` | Host-side N→1 stream merge |
-| `Shuffle` | Host-side N→M partitioned routing |
-| `Broadcast` | Host-side N→M fanout |
-| `Watch` | Lightweight snapshot of one stream slot or shared-state entry |
-| `Persist` | Snapshot selected SHM state to disk |
-| `FreeSlots` | Release stream/I/O slots back to the allocator |
+| `Bridge` / `Aggregate` / `Shuffle` / `Broadcast` | Host-side zero-copy routing |
 | `RemoteSend` | RDMA-WRITE a slot to a peer node's SHM staging area |
 | `RemoteRecv` | Receive a slot written by a peer via RDMA into local SHM |
 
+### Workloads
+
+| Workload | Description | Rust | Python |
+|----------|-------------|------|--------|
+| Word Count | Distribute → parallel map → aggregate → reduce | Yes | Yes |
+| TF-IDF | Per-shard TF/DF → merge → IDF scoring → top-50 | Yes | Yes |
+| FINRA Audit | FetchPrivate ∥ FetchPublic → 8 audit rules → merge results | Yes | Yes |
+| ML Training | Partition → PCA ×2 → redistribute → train ×8 stumps → validate | Yes | Yes |
+| Image Pipeline | Load PPM → rotate → grayscale → equalize → blur → export PGM | Yes | Yes |
+
 ## Multi-machine Execution (RDMA)
 
-When the DAG JSON includes an `rdma` block, the host establishes a full RC QP mesh across all nodes and registers the SHM as an RDMA Memory Region. `RemoteSend` / `RemoteRecv` node pairs transfer slot data between machines with no TCP memcopy:
-
-```json
-{
-  "shm_path": "/dev/shm/dag",
-  "rdma": { "node_id": 0, "total": 2, "ips": ["10.0.0.1", "10.0.0.2"], "transfer": true },
-  "nodes": [
-    { "id": "produce", "deps": [],          "kind": { "WasmVoid": { "func": "produce", "arg": 0 } } },
-    { "id": "send",    "deps": ["produce"], "kind": { "RemoteSend": { "slot": 0, "slot_kind": "Stream", "peer": 1 } } }
-  ]
-}
-```
+When the DAG JSON includes an `rdma` block, the host establishes a full RC QP mesh across all nodes and registers the SHM as an RDMA Memory Region. `RemoteSend` / `RemoteRecv` node pairs transfer slot data between machines with no TCP memcopy.
 
 ### Transfer protocol
 
@@ -122,155 +210,19 @@ When the DAG JSON includes an `rdma` block, the host establishes a full RC QP me
 3. An RDMA Fetch-and-Add on the peer's staging ready-counter (hardware atomic) signals completion; a TCP byte is sent as a fallback.
 4. Receiver spin-polls the counter (100 ms), then falls back to the TCP signal. Appends the raw bytes directly into the target slot.
 
-### RDMA pipelining in `StreamPipeline` / `PyPipeline`
+### ClusterDag (NodeAgent)
 
-Send and receive are handled by background threads so stage computation is not blocked on network I/O:
+For multi-node deployment, the NodeAgent introduces the **ClusterDag** format — a single JSON file that describes the entire distributed workflow. The coordinator splits it into per-node DAGs, injects RDMA config from the live cluster membership, and distributes them:
 
-- **Pre-fetch recv**: at the end of tick `r`, a background thread starts `execute_remote_recv` for round `r+1`; it is joined at the start of tick `r+1`.
-- **Double-buffer send** (`free_after: true`): alternates between two staging slots each round (`rdma.slot + round % 2`). The last stage's argument is overridden at runtime to write into the current buffer. The previous round's send thread is joined before the next is spawned.
-
-### RDMA consistency
-
-`RemoteSend` must list the slot producer as a DAG dependency. This guarantees the page chain is sealed (producer finished) before the RDMA DMA reads from it. The CQ poll inside the send path ensures DMA is complete before the node returns and the DAG runner reclaims those pages.
-
-### `rdma.transfer` flag
-
-Set `"transfer": false` to connect the mesh for RDMA atomics (`fetch_and_add`, `compare_and_swap`) only, without pre-allocating the staging area or enabling `RemoteSend`/`RemoteRecv`.
-
-## Example DAGs
-
-### Rust Word Count (`../DAGs/demo_dag/word_count_demo.json`)
-
-```
-load (corpus.txt → slot 0)
-  → wc_distribute (slot 0 → slots 10–19, round-robin)
-  → wc_map × 10   (slots 10–19 → slots 110–119, parallel wave)
-  → Aggregate     (slots 110–119 → slot 200, host zero-copy)
-  → wc_reduce     (slot 200 → I/O slot)
-  → save          (I/O slot → result.txt)
-```
-
-### Python Image Pipeline (`../DAGs/demo_dag/py_img_pipeline_demo.json`)
-
-```
-load (3 PPM images → slot 10)
-  → PyPipeline: img_load_ppm → img_rotate → img_grayscale
-              → img_equalize → img_blur → img_export_ppm
-  → save (→ 3 PGM output files)
-  → FreeSlots
-```
-
-## Building
-
-```bash
-# Build all crates
-cargo build --release
-
-# Build only the host
-cargo build --release -p host
-
-# Build only the WASM guest (requires wasm32-wasip1 target)
-cargo build --release -p guest --target wasm32-wasip1
-```
-
-## Running
-
-```bash
-# Run a DAG pipeline
-cargo run --release -p host -- dag ../DAGs/demo_dag/word_count_demo.json
-
-# Run a single WASM function call (used internally by the DAG runner)
-cargo run --release -p host -- wasm-call <wasm_path> <func> <arg> <shm_path>
-
-# Persistent WASM worker loop (used internally by StreamPipeline)
-cargo run --release -p host -- wasm-loop <shm_path> <wasm_path> <func>
-
-# Built-in routing / stress tests
-cargo run --release -p host -- shuffle_test
-cargo run --release -p host -- aggregate_test
-cargo run --release -p host -- stream_bridge_test
-```
-
-## Python Guest
-
-Python workloads run `python-3.12.0.wasm` under `wasmtime` with WASI. The `PyPipeline` node kind keeps one `runner.py --loop` process alive for the lifetime of the node, eliminating per-stage spawn overhead:
-
-| | `PyFunc` (per node) | `PyPipeline` (N stages) |
-|--|--|--|
-| Process spawns per run | N | 1 |
-| Python startup cost | paid N× | paid once |
-
-WASI has no `mmap(2)`, so SHM reads use seek+read. Pre-AOT-compile Python WASM to reduce JIT overhead:
-
-```bash
-wasmtime compile python-3.12.0.wasm -o python-3.12.0.cwasm
-```
-
-Then reference the `.cwasm` path in the DAG JSON.
-
-## Project Structure
-
-```
-Executor/
-├── Cargo.toml                  # Workspace (host, guest, common, connect)
-├── common/src/lib.rs           # Superblock, Page, RegistryEntry definitions
-├── connect/src/
-│   ├── ffi.rs                  # Hand-written libibverbs FFI (rdma-core 50.0)
-│   ├── ibverbs_helpers.c       # C wrappers for static-inline ibv_ functions
-│   ├── mesh/
-│   │   ├── mod.rs              # Types (MeshNode, PeerLink, channel handles), accessors
-│   │   ├── connect.rs          # connect_all, connect_all_on_shm (TCP/QP bootstrap)
-│   │   ├── atomic.rs           # AtomicChannel FAA/CAS; MeshNode SHM atomics
-│   │   ├── data_path.rs        # write_to, broadcast, wait_from, slot, u32 framing
-│   │   ├── staging.rs          # rdma_write_sge, staging write/signal/wait, FAA-only
-│   │   └── OVERVIEW.md         # Port rules, channel types, per-file function tables
-│   ├── remote.rs               # RdmaRemote: two-node high-level API
-│   └── rdma/
-│       ├── context.rs          # RdmaContext (device, PD, CQ)
-│       ├── memory_region.rs    # MemoryRegion (alloc or register-external)
-│       ├── queue_pair.rs       # QueuePair (state machine, WRITE, FAA, CAS)
-│       └── exchange.rs         # TCP QpInfo exchange, send_done/wait_done
-├── host/src/
-│   ├── main.rs                 # CLI entry point & subcommand dispatch
-│   ├── shm.rs                  # SHM creation, mmap, format
-│   └── runtime/
-│       ├── dag_runner/
-│       │   ├── mod.rs          # run_dag_file, run_dag_json, run_dag
-│       │   ├── types.rs        # All JSON schema structs and enums
-│       │   ├── plan.rs         # validate_dag, topo_sort, build_waves
-│       │   ├── dispatch.rs     # execute_node, all NodeKind arms
-│       │   └── workers.rs      # spawn_wasm_subprocess, spawn_python_subprocess
-│       ├── remote/
-│       │   ├── mod.rs          # execute_remote_send, execute_remote_recv dispatcher
-│       │   ├── sender_initiated.rs   # SI protocol: send_si, recv_si
-│       │   ├── receiver_initiated.rs # RI protocol: send_ri, recv_ri
-│       │   ├── shm.rs          # collect_src_sges, alloc_and_link, link_to_slot
-│       │   ├── rdma.rs         # rdma_write_page_chain, rdma_write_flat
-│       │   └── OVERVIEW.md     # SI/RI protocol diagrams, per-file function tables
-│       ├── input_output/
-│       │   ├── slot_loader.rs  # File → I/O slot (with prefetch)
-│       │   ├── slot_flusher.rs # I/O slot → file
-│       │   ├── persistence.rs  # PersistenceWriter, record readers
-│       │   └── logger.rs       # HostLogger (SHM log arena)
-│       ├── mem_operation/
-│       │   ├── reclaimer.rs    # Page allocator, free-list, madvise trim
-│       │   └── slicer.rs       # StreamPipeline tick executor
-│       ├── worker.rs           # wasmtime loader, VMA setup, wasm-loop
-│       ├── manager.rs          # Test orchestration
-│       └── organizer.rs        # Shared-state conflict resolution
-├── guest/src/
-│   ├── api/
-│   │   ├── HELPER.md           # Complete Rust guest API reference for workloads
-│   │   └── ...                 # Page allocator, stream/IO/atomic/log APIs
-│   └── workloads/              # word_count, img_pipeline, routing_tests
-├── py_guest/python/
-│   ├── runner.py               # One-shot and --loop entry point
-│   ├── shm.py                  # WASI-compatible SHM reader (seek+read)
-│   └── HELPER.md               # Complete Python guest API reference for workloads
-├── ../DAGs/demo_dag/           # Single-node example DAG JSON specifications
-├── ../DAGs/workload_dag/       # Single-node workload DAG specifications
-├── ../DAGs/rdma_demo_dag/      # Multi-node RDMA demo DAG pairs (node0 + node1)
-└── ../DAGs/rdma_workload_dag/  # Multi-node RDMA workload DAG pairs (node0 + node1)
+```json
+{
+  "shm_path_prefix": "/dev/shm/rdma_finra",
+  "transfer": true,
+  "node_dags": {
+    "0": [ ... node 0 DAG nodes ... ],
+    "1": [ ... node 1 DAG nodes ... ]
+  }
+}
 ```
 
 ## Key Design Decisions
@@ -280,105 +232,5 @@ Executor/
 - **Lock-free allocation**: page free-list uses a sharded Treiber stack; registry uses CAS-based bucket chaining.
 - **Isolated WASM execution**: each WASM node runs in its own `wasmtime` instance with a fresh linear memory, but shares the same SHM backing file.
 - **Persistent pipeline workers**: `StreamPipeline` and `PyPipeline` keep one worker process alive per stage across all ticks, paying the JIT/startup cost only once per run.
-- **Fat-pointer returns**: WASM→host data transfer uses 64-bit fat pointers (`ptr << 32 | len`) to pass slice locations without copying.
-- **RDMA signalling**: transfer completion uses RDMA Fetch-and-Add (hardware atomic, no remote CPU involvement) as the primary signal, with a TCP byte as a fallback for slow or non-atomic HCAs.
-
----
-
-```
-  WebAsShared — WASM-Based Zero-Copy Stream Processing Engine
-
-  Core Idea: A DAG pipeline executor where each stage runs inside an isolated WebAssembly
-  module, but all stages share the same physical memory (via mmap). Data routing between
-  stages is just atomic pointer splicing — no copying. Across machines, slot data is
-  transferred via RDMA directly into the peer's SHM — still no CPU copy of the payload.
-
-  Architecture
-
-  Host (Rust)                              Guest (WASM / Python)
-  ──────────────────────────────────────   ──────────────────────────────────────
-  • Parses JSON DAG spec                    • Each node = isolated wasmtime instance
-  • Creates/manages shared memory           • Fixed address 0x80000000 → SHM file
-  • Topological sort + wave execution       • Implements algorithms (word count,
-  • Zero-copy routing between stages          image processing, etc.)
-  • File I/O, allocation, logging           • Calls back host for SHM growth
-  • RDMA full-mesh (MeshNode, mesh/)        • Python via runner.py --loop (persistent)
-  • RemoteSend / RemoteRecv via RDMA        • API documented in api/HELPER.md
-  • Background send/recv threads            • Python API in py_guest/python/HELPER.md
-    (pipeline RDMA overlap)
-
-  Module Structure
-
-  host/runtime/
-  ├── dag_runner/   — DAG parsing, validation, topo-sort, wave execution, node dispatch
-  ├── remote/       — RDMA send/recv protocols (SI + RI paths), SHM helpers, background
-  │                   threading for pipeline overlap (pre-fetch recv, double-buffer send)
-  ├── input_output/ — file I/O slots, persistence, host log arena
-  └── mem_operation/— page allocator, free-list, stream tick executor
-
-  connect/src/
-  └── mesh/         — full-mesh RC QP topology, atomic ops, data path, staging writes
-                      (split across mod, connect, atomic, data_path, staging)
-
-  Shared Memory Layout (at 0x80000000 in every WASM instance)
-
-  - Superblock      — stream/IO slot heads/tails, bump ptr, free-list shards
-  - Registry Arena  — name → atomic index mapping
-  - Atomic Arena    — CAS values for named shared variables
-  - Log Arena       — guest + host diagnostic output
-  - Staging Area    — N × 1 MiB per peer direction (RDMA landing zone)
-  - Stream Pages    — 4 KiB linked-list pages, bump-allocated + Treiber stack
-
-  Local Routing Operations (all zero-copy, lock-free)
-
-  ┌────────────────┬──────────────────────────────────────────────┐
-  │   Operation    │                 Description                  │
-  ├────────────────┼──────────────────────────────────────────────┤
-  │ Bridge         │ 1→1 passthrough (pointer remap)              │
-  ├────────────────┼──────────────────────────────────────────────┤
-  │ Aggregate      │ N→1 merge (atomic chain splice)              │
-  ├────────────────┼──────────────────────────────────────────────┤
-  │ Shuffle        │ N→M partitioned (round-robin, modulo, fixed) │
-  ├────────────────┼──────────────────────────────────────────────┤
-  │ Broadcast      │ 1→M fan-out                                  │
-  ├────────────────┼──────────────────────────────────────────────┤
-  │ RemoteSend     │ RDMA scatter-gather → peer SHM (no CPU copy) │
-  ├────────────────┼──────────────────────────────────────────────┤
-  │ RemoteRecv     │ Wait on RDMA FAA signal, append to slot      │
-  └────────────────┴──────────────────────────────────────────────┘
-
-  RDMA Pipeline Overlap (StreamPipeline / PyPipeline)
-
-  tick r:   [stage 0] → [stage 1] → ... → [stage N]
-                                                │
-                          ┌─────────────────────┘
-                          │  background send thread (round r)
-                          │  background recv thread (prefetch round r+1)
-                          └─────────────────────┐
-  tick r+1: join recv ──► [stage 0] → [stage 1] → ... → [stage N]
-                                                │
-                                    double-buffer: slot alternates
-                                    rdma.slot + (round % 2)
-
-  Example Pipelines
-
-  - Word Count:      Load corpus → distribute → 10× parallel map → aggregate → reduce
-  - Image Pipeline:  Load PPMs → PyPipeline (rotate, gray, equalize, blur) → save
-  - Multi-machine:   Node 0 produces → RemoteSend → Node 1 RemoteRecv → process
-  - RDMA demos:      DAGs/rdma_demo_dag/ — 4 pairs (wasm/py × word-count/img-pipeline)
-
-  Tech Stack
-
-  - Rust workspace with 4 crates: host, guest, common, connect
-  - wasmtime for WASM execution
-  - Python support via python.wasm + WASI (persistent --loop subprocess per pipeline)
-  - Lock-free allocation with sharded Treiber stacks
-  - RDMA via hand-crafted libibverbs FFI (rdma-core 50.0, RoCE / InfiniBand)
-
-  The key innovation is that all WASM instances share the same physical backing file mapped
-  at the same virtual address, so local routing is just atomic pointer manipulation — no
-  data copying at all. RDMA extends this across machines: the SHM itself is the RDMA MR,
-  so a RemoteSend DMA-writes page data straight into the peer's SHM at the same offset.
-  Pipeline nodes overlap network I/O with compute using background threads, keeping CPU
-  utilisation high across all ticks.
-```
+- **NodeAgent as entry point**: the NodeAgent binary is the single interface for both single-node and multi-node execution, spawning the Executor as a subprocess.
+- **Coordinator-worker model**: static membership, TCP control plane (separate from RDMA data plane), no consensus needed for research-scale clusters (2–32 nodes).

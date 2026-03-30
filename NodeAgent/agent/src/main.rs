@@ -84,6 +84,7 @@ fn cmd_run(args: &[String]) -> Result<()> {
         &work_dir,
         &dag_json,
         &job_id,
+        true, // live output to terminal
     )?;
 
     println!("[run] executor started (pid={})", handle.pid());
@@ -120,16 +121,6 @@ fn cmd_run(args: &[String]) -> Result<()> {
                     result.exit_code,
                     elapsed.as_secs_f64()
                 );
-            }
-
-            // Print executor output.
-            if !result.stdout_tail.is_empty() {
-                println!("\n--- executor output ---");
-                println!("{}", result.stdout_tail);
-            }
-            if !result.stderr_tail.is_empty() {
-                eprintln!("\n--- executor errors ---");
-                eprintln!("{}", result.stderr_tail);
             }
 
             if !result.success {

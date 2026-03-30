@@ -276,3 +276,92 @@ Two API reference files document every public function available to workloads:
 **Rust guest** (`guest/src/api/HELPER.md`): Input, Output, Stream slots (alloc/write/link/read), I/O slots (alloc/write/link/read), named atomics (get/set/CAS/FAA), shared state (read/write/clear), fan-out helpers, and utility functions.
 
 **Python guest** (`py_guest/python/HELPER.md`): `read_input`, `write_output`, stream slot functions (`alloc_stream_slot`, `write_stream_slot`, `link_stream_slot`, `read_stream_slot`), I/O slot functions, cursor management (`read_cursor`/`write_cursor`), fan-out helpers (`count_records`/`fan_out_records`), and SHM constants. Notes WASI compatibility constraints and the key difference that Python cursors live in an in-process dict rather than SHM atomics.
+
+---
+
+## 18. RMMAP workloads — FINRA, ML Training, TF-IDF
+
+**Files:** `Executor/guest/src/workloads/{finra.rs, ml_training.rs, tfidf.rs}`, `Executor/py_guest/python/{finra_workload.py, ml_workload.py, ai_workload.py}`, `DAGs/workload_dag/`, `DAGs/rdma_workload_dag/`
+
+Implemented three representative workloads from the RMMAP paper (EuroSys'24, Section 5.1) in both Rust (no_std WASM) and Python (WASI):
+
+**FINRA Audit** — Financial trade validation pipeline modeled after the FINRA serverless workflow. 4 stages: FetchPrivate || FetchPublic → 8 parallel audit rules (price outlier, large order, wash trade, spoofing, concentration, after-hours, penny stock, round lot) → MergeResults. Uses 50K synthetic trades. Writes only 2 summary records per rule to avoid non-atomic SHM allocator corruption from concurrent Python processes.
+
+**ML Training** — Image classification pipeline modeled after the MNIST PCA + LightGBM workflow. 4 stages: Partition → PCA ×2 (power-iteration, 8 components) → Redistribute → Train ×8 decision stumps → Validate ensemble. Pure-Python/no_std implementation (no numpy/sklearn). Rust PCA uses f32 (WASM-native sqrt), avoids f64::ln (needs libm).
+
+**TF-IDF** — Distributed feature extraction. 8 map workers compute per-shard TF/DF counts, reducer merges and computes TF-IDF scores (Rust uses floor_log2 integer approximation for IDF, Python uses math.log), outputs top-50 terms.
+
+Each workload has single-node and RDMA DAG variants for both Rust and Python (8 DAG JSONs per workload × 3 workloads = 24 new DAG files).
+
+---
+
+## 19. `astest/` renamed to `Executor/`
+
+**Files:** All files under `astest/` moved to `Executor/`.
+
+The execution engine directory was renamed from `astest/` to `Executor/` to better reflect its role in the multi-machine architecture. All internal path references updated (test scripts, README).
+
+---
+
+## 20. DAG folders moved to `DAGs/`
+
+**Files:** `DAGs/demo_dag/`, `DAGs/workload_dag/`, `DAGs/rdma_demo_dag/`, `DAGs/rdma_workload_dag/`
+
+All four DAG JSON directories moved from `Executor/` to a top-level `DAGs/` folder alongside `Executor/` and `NodeAgent/`. All relative paths within DAG JSONs updated to resolve from the `WebAsShared/` project root (e.g., `../data/trades.csv` → `Executor/data/trades.csv`). Explicit `wasm_path` fields added to every DAG JSON since the compiled default (`../target/...`) no longer resolves from root.
+
+---
+
+## 21. NodeAgent — multi-machine deployment agent
+
+**Files:** `NodeAgent/` (new workspace)
+
+A Rust daemon that orchestrates distributed DAG execution across multiple machines. Runs alongside the Executor (which it spawns as a subprocess).
+
+### Single-node mode (`run`)
+
+```bash
+./node-agent run DAGs/workload_dag/finra_demo.json
+```
+
+Spawns the Executor with live terminal output (stdout/stderr inherited), collects metrics (CPU, RSS, SHM bump offset) to `/tmp/node_agent_metrics.jsonl`, reports elapsed time on completion. No config file needed.
+
+### Multi-node mode (`start` / `submit`)
+
+Coordinator-worker model over TCP control plane (separate from the RDMA data plane):
+
+1. **Coordinator** (node 0) listens for worker connections and job submissions.
+2. **Workers** connect to the coordinator and wait for job assignments.
+3. On `submit`, the coordinator parses a **ClusterDag** — a single JSON that describes the entire distributed workflow — splits it into per-node DAGs, injects RDMA config (node_id, total, ips) from the live cluster membership, and distributes them.
+4. All workers launch their Executor simultaneously (critical for the RDMA mesh 200ms TCP bootstrap window).
+5. Workers report `JobStarted`, periodic `Metrics`, and `JobCompleted`/`JobFailed` back to the coordinator.
+
+### ClusterDag format
+
+Combines what were previously separate `node0.json` / `node1.json` files into a single definition:
+
+```json
+{
+  "shm_path_prefix": "/dev/shm/rdma_finra",
+  "transfer": true,
+  "node_dags": {
+    "0": [ ... node 0 DAG nodes ... ],
+    "1": [ ... node 1 DAG nodes ... ]
+  }
+}
+```
+
+Sample ClusterDags provided for word_count, finra, and ml_training in `NodeAgent/cluster_dags/`.
+
+### Architecture
+
+| Module | Purpose |
+|--------|---------|
+| `protocol.rs` | Length-prefixed JSON over TCP (4-byte BE length + JSON payload) |
+| `config.rs` | `AgentConfig` from `agent.toml` (role, cluster IPs, paths, timeouts) |
+| `cluster_dag.rs` | `ClusterDag` parsing and per-node splitting with RDMA injection |
+| `executor.rs` | Spawn `host dag` subprocess, monitor via `try_wait()`, live or captured output |
+| `metrics.rs` | CPU from `/proc/stat`, RSS from `/proc/self/status`, SHM bump offset from Superblock |
+| `worker.rs` | Connect to coordinator with retry, receive jobs, launch executor, report status |
+| `coordinator.rs` | Accept workers, distribute jobs, collect results, handle submit/status queries |
+
+Design decisions: static membership (config file, no service discovery), TCP control plane (RDMA mesh is per-job inside the Executor), coordinator model (not P2P — matches existing asymmetric RDMA DAGs), separate process (Executor is single-run, NodeAgent is long-running).

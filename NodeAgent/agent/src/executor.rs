@@ -30,64 +30,77 @@ impl ExecutorHandle {
     ///
     /// Writes `dag_json` to a temp file, then runs:
     ///   `<executor_bin> dag <tmp_file>`
+    ///
+    /// When `live_output` is true, stdout/stderr are forwarded to the terminal
+    /// in real time (for single-node `run` mode).  When false, they are captured
+    /// in memory and only the tail is available after completion (for multi-node
+    /// worker mode where output would interleave).
     pub fn spawn(
         executor_bin: &Path,
         work_dir: &Path,
         dag_json: &str,
         job_id: &str,
+        live_output: bool,
     ) -> Result<Self> {
         // Write DAG JSON to a temp file in /tmp.
         let tmp_path = format!("/tmp/node_agent_dag_{}.json", job_id);
         std::fs::write(&tmp_path, dag_json)
             .with_context(|| format!("write temp DAG file: {}", tmp_path))?;
 
+        let (stdout_cfg, stderr_cfg) = if live_output {
+            (Stdio::inherit(), Stdio::inherit())
+        } else {
+            (Stdio::piped(), Stdio::piped())
+        };
+
         let mut child = Command::new(executor_bin)
             .arg("dag")
             .arg(&tmp_path)
             .current_dir(work_dir)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stdout(stdout_cfg)
+            .stderr(stderr_cfg)
             .spawn()
             .with_context(|| format!(
                 "spawn executor: {} dag {}",
                 executor_bin.display(), tmp_path
             ))?;
 
-        // Spawn threads to capture stdout/stderr without blocking.
+        // Capture stdout/stderr in background threads (only when not live).
         let stdout_lines = Arc::new(Mutex::new(Vec::new()));
         let stderr_lines = Arc::new(Mutex::new(Vec::new()));
 
-        if let Some(stdout) = child.stdout.take() {
-            let lines = Arc::clone(&stdout_lines);
-            std::thread::spawn(move || {
-                let reader = BufReader::new(stdout);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        let mut buf = lines.lock().unwrap();
-                        // Keep only last 100 lines to bound memory.
-                        if buf.len() >= 100 {
-                            buf.remove(0);
+        if !live_output {
+            if let Some(stdout) = child.stdout.take() {
+                let lines = Arc::clone(&stdout_lines);
+                std::thread::spawn(move || {
+                    let reader = BufReader::new(stdout);
+                    for line in reader.lines() {
+                        if let Ok(line) = line {
+                            let mut buf = lines.lock().unwrap();
+                            if buf.len() >= 100 {
+                                buf.remove(0);
+                            }
+                            buf.push(line);
                         }
-                        buf.push(line);
                     }
-                }
-            });
-        }
+                });
+            }
 
-        if let Some(stderr) = child.stderr.take() {
-            let lines = Arc::clone(&stderr_lines);
-            std::thread::spawn(move || {
-                let reader = BufReader::new(stderr);
-                for line in reader.lines() {
-                    if let Ok(line) = line {
-                        let mut buf = lines.lock().unwrap();
-                        if buf.len() >= 100 {
-                            buf.remove(0);
+            if let Some(stderr) = child.stderr.take() {
+                let lines = Arc::clone(&stderr_lines);
+                std::thread::spawn(move || {
+                    let reader = BufReader::new(stderr);
+                    for line in reader.lines() {
+                        if let Ok(line) = line {
+                            let mut buf = lines.lock().unwrap();
+                            if buf.len() >= 100 {
+                                buf.remove(0);
+                            }
+                            buf.push(line);
                         }
-                        buf.push(line);
                     }
-                }
-            });
+                });
+            }
         }
 
         Ok(Self {
