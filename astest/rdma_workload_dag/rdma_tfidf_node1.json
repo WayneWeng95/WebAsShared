@@ -1,0 +1,88 @@
+{
+  "_comment": "RDMA AI demo (Rust/WASM): TF-IDF — Node 1 (receiver + global reducer).  Run on machine 1.",
+  "_comment2": "Node 1 computes its own local TF/DF aggregate concurrently with receiving",
+  "_comment3": "node 0's aggregate, merges both, then outputs global top-50 TF-IDF scores.",
+  "shm_path": "/dev/shm/rdma_tfidf_node1",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 1,
+    "total": 2,
+    "ips": ["192.168.1.10", "192.168.1.11"],
+    "transfer": true
+  },
+  "nodes": [
+
+    {
+      "_comment": "─── Stage 1: load corpus into I/O slot 0 ───────────────────────────────────",
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+    },
+
+    {
+      "_comment": "─── Stage 2: distribute lines round-robin into stream slots 10–17 ───────────",
+      "id": "distribute",
+      "deps": ["load"],
+      "kind": { "WasmVoid": { "func": "wc_distribute", "arg": 8 } }
+    },
+
+    {
+      "_comment": "─── Stage 3: 8 parallel TF-IDF map workers ──────────────────────────────────",
+      "id": "map_0", "deps": ["distribute"], "kind": { "WasmVoid": { "func": "tfidf_map", "arg": 10 } }
+    },
+    { "id": "map_1", "deps": ["distribute"], "kind": { "WasmVoid": { "func": "tfidf_map", "arg": 11 } } },
+    { "id": "map_2", "deps": ["distribute"], "kind": { "WasmVoid": { "func": "tfidf_map", "arg": 12 } } },
+    { "id": "map_3", "deps": ["distribute"], "kind": { "WasmVoid": { "func": "tfidf_map", "arg": 13 } } },
+    { "id": "map_4", "deps": ["distribute"], "kind": { "WasmVoid": { "func": "tfidf_map", "arg": 14 } } },
+    { "id": "map_5", "deps": ["distribute"], "kind": { "WasmVoid": { "func": "tfidf_map", "arg": 15 } } },
+    { "id": "map_6", "deps": ["distribute"], "kind": { "WasmVoid": { "func": "tfidf_map", "arg": 16 } } },
+    { "id": "map_7", "deps": ["distribute"], "kind": { "WasmVoid": { "func": "tfidf_map", "arg": 17 } } },
+
+    {
+      "_comment": "─── Stage 4: local aggregate of TF/DF records into stream slot 200 ──────────",
+      "id": "aggregate_local",
+      "deps": ["map_0","map_1","map_2","map_3","map_4","map_5","map_6","map_7"],
+      "kind": {
+        "Aggregate": {
+          "upstream": [110, 111, 112, 113, 114, 115, 116, 117],
+          "downstream": 200
+        }
+      }
+    },
+
+    {
+      "_comment": "─── Stage 5: receive node 0's TF/DF aggregate into stream slot 201 ──────────",
+      "_comment2": "Runs concurrently with aggregate_local (no shared deps after distribute).",
+      "id": "recv",
+      "deps": ["distribute"],
+      "kind": { "RemoteRecv": { "slot": 201, "slot_kind": "Stream", "peer": 0 } }
+    },
+
+    {
+      "_comment": "─── Stage 6: merge local (200) + remote (201) TF/DF records into slot 300 ───",
+      "id": "aggregate_global",
+      "deps": ["aggregate_local", "recv"],
+      "kind": {
+        "Aggregate": {
+          "upstream": [200, 201],
+          "downstream": 300
+        }
+      }
+    },
+
+    {
+      "_comment": "─── Stage 7: compute global TF-IDF scores, write top-50 to OUTPUT_IO_SLOT ───",
+      "id": "reduce",
+      "deps": ["aggregate_global"],
+      "kind": { "WasmVoid": { "func": "tfidf_reduce", "arg": 300 } }
+    },
+
+    {
+      "_comment": "─── Stage 8: flush OUTPUT_IO_SLOT to disk ───────────────────────────────────",
+      "id": "save",
+      "deps": ["reduce"],
+      "kind": { "Output": { "path": "/tmp/rdma_tfidf_result.txt" } }
+    }
+
+  ]
+}

@@ -1,0 +1,63 @@
+{
+  "_comment": "RDMA AI demo: TF-IDF — Node 0 (sender).  Run on machine 0.",
+  "_comment2": "Node 0 computes a local TF-IDF aggregate over its half of the corpus",
+  "_comment3": "and sends the raw TF/DF records to node 1 for global scoring.",
+  "shm_path": "/dev/shm/rdma_py_tfidf_node0",
+  "python_script": "../py_guest/python/runner.py",
+  "python_wasm": "/opt/myapp/python-3.12.0.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 0,
+    "total": 2,
+    "ips": ["192.168.1.10", "192.168.1.11"],
+    "transfer": true
+  },
+  "nodes": [
+
+    {
+      "_comment": "─── Stage 1: load corpus into I/O slot 0 ───────────────────────────────────",
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+    },
+
+    {
+      "_comment": "─── Stage 2: distribute lines round-robin into stream slots 10–17 ───────────",
+      "id": "distribute",
+      "deps": ["load"],
+      "kind": { "PyFunc": { "func": "wc_distribute", "arg": 8, "arg2": 10 } }
+    },
+
+    {
+      "_comment": "─── Stage 3: 8 parallel TF-IDF map workers ──────────────────────────────────",
+      "id": "map_0", "deps": ["distribute"], "kind": { "PyFunc": { "func": "tfidf_map", "arg": 10, "arg2": 110 } }
+    },
+    { "id": "map_1", "deps": ["distribute"], "kind": { "PyFunc": { "func": "tfidf_map", "arg": 11, "arg2": 111 } } },
+    { "id": "map_2", "deps": ["distribute"], "kind": { "PyFunc": { "func": "tfidf_map", "arg": 12, "arg2": 112 } } },
+    { "id": "map_3", "deps": ["distribute"], "kind": { "PyFunc": { "func": "tfidf_map", "arg": 13, "arg2": 113 } } },
+    { "id": "map_4", "deps": ["distribute"], "kind": { "PyFunc": { "func": "tfidf_map", "arg": 14, "arg2": 114 } } },
+    { "id": "map_5", "deps": ["distribute"], "kind": { "PyFunc": { "func": "tfidf_map", "arg": 15, "arg2": 115 } } },
+    { "id": "map_6", "deps": ["distribute"], "kind": { "PyFunc": { "func": "tfidf_map", "arg": 16, "arg2": 116 } } },
+    { "id": "map_7", "deps": ["distribute"], "kind": { "PyFunc": { "func": "tfidf_map", "arg": 17, "arg2": 117 } } },
+
+    {
+      "_comment": "─── Stage 4: local aggregate of TF/DF records into stream slot 200 ──────────",
+      "id": "aggregate",
+      "deps": ["map_0","map_1","map_2","map_3","map_4","map_5","map_6","map_7"],
+      "kind": {
+        "Aggregate": {
+          "upstream": [110, 111, 112, 113, 114, 115, 116, 117],
+          "downstream": 200
+        }
+      }
+    },
+
+    {
+      "_comment": "─── Stage 5: send local TF/DF aggregate (slot 200) to node 1 via RDMA ──────",
+      "id": "send",
+      "deps": ["aggregate"],
+      "kind": { "RemoteSend": { "slot": 200, "slot_kind": "Stream", "peer": 1 } }
+    }
+
+  ]
+}

@@ -49,12 +49,6 @@
       "id": "save",
       "deps": ["reduce"],
       "kind": { "Output": { "path": "/tmp/py_word_count_result.txt", "slot": 1 } }
-    },
-
-    {
-      "id": "save_copy",
-      "deps": ["reduce"],
-      "kind": { "Output": { "path": "/tmp/py_word_count_result_copy.txt", "slot": 2 } }
     }
 
   ]

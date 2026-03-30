@@ -33,7 +33,7 @@ def wc_map(in_slot, out_slot):
 
 def wc_reduce(in_slot):
     """Merge all map records from stream slot `in_slot` and write the summary
-    to I/O slots 1 (primary) and 2 (fanout copy) via write_fanout."""
+    to I/O slot 1 via write_output."""
     # Count records before reading payloads (no allocation).
     n_records = shm.count_stream_records(in_slot)
 
@@ -49,15 +49,13 @@ def wc_reduce(in_slot):
         if word:
             totals[word] = totals.get(word, 0) + count
 
-    # Write result lines to slots 1 (primary output) and 2 (fanout copy)
-    # via write_fanout so both outputs are populated in a single pass.
-    _fanout_slots = [1, 2]
-    shm.write_fanout(_fanout_slots, b'=== word_count ===')
-    shm.write_fanout(_fanout_slots, ('map_records_received=' + str(n_records)).encode())
-    shm.write_fanout(_fanout_slots, ('unique_words=' + str(len(totals))).encode())
-    shm.write_fanout(_fanout_slots, ('total_occurrences=' + str(sum(totals.values()))).encode())
+    # Write result lines to I/O slot 1 via write_output.
+    shm.write_output(b'=== word_count ===')
+    shm.write_output(('map_records_received=' + str(n_records)).encode())
+    shm.write_output(('unique_words=' + str(len(totals))).encode())
+    shm.write_output(('total_occurrences=' + str(sum(totals.values()))).encode())
     for word, count in sorted(totals.items()):
-        shm.write_fanout(_fanout_slots, (word + ': ' + str(count)).encode())
+        shm.write_output((word + ': ' + str(count)).encode())
 
 
 # ── 4-stage streaming pipeline demo ──────────────────────────────────────────

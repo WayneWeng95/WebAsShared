@@ -20,13 +20,20 @@ import sys
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _script_dir)
 
-import word_count    # noqa: E402
-import image_process  # noqa: E402
+import word_count      # noqa: E402
+import image_process    # noqa: E402
+import ai_workload      # noqa: E402
+import finra_workload   # noqa: E402
+import ml_workload      # noqa: E402
 
 
 def _lookup(name):
-    """Find a workload function by name, searching word_count then image_process."""
-    return getattr(word_count, name, None) or getattr(image_process, name, None)
+    """Find a workload function by name across all workload modules."""
+    return (getattr(word_count, name, None)
+            or getattr(image_process, name, None)
+            or getattr(ai_workload, name, None)
+            or getattr(finra_workload, name, None)
+            or getattr(ml_workload, name, None))
 
 
 if len(sys.argv) > 1 and sys.argv[1] == "--loop":
