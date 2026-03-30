@@ -68,8 +68,11 @@ pub(super) fn spawn_python_subprocess(
             }
         });
         let mut cmd = std::process::Command::new(&wasmtime_bin);
-        cmd.arg("run")
-            .arg("--env").arg(format!("SHM_PATH={}", shm_path))
+        cmd.arg("run");
+        if wasm_path.ends_with(".cwasm") {
+            cmd.arg("--allow-precompiled");
+        }
+        cmd.arg("--env").arg(format!("SHM_PATH={}", shm_path))
             .arg("--env").arg(format!("WORKLOAD_FUNC={}", call.func))
             .arg("--env").arg(format!("WORKLOAD_ARG={}", call.arg));
         if let Some(a2) = call.arg2 {
@@ -82,7 +85,8 @@ pub(super) fn spawn_python_subprocess(
         cmd.arg(wasm_path)
             .arg("--")
             .arg(python_script);
-        println!("  PyFunc {}({}) via python.wasm", call.func, call.arg);
+        let mode = if wasm_path.ends_with(".cwasm") { "python.cwasm (AOT)" } else { "python.wasm" };
+        println!("  PyFunc {}({}) via {}", call.func, call.arg, mode);
         cmd.spawn()
             .map_err(|e| anyhow!("[{}] failed to spawn wasmtime: {}", node.id, e))
     } else {
@@ -216,8 +220,11 @@ impl PyLoopWorker {
                 }
             });
             let mut cmd = std::process::Command::new(&wasmtime_bin);
-            cmd.arg("run")
-                .arg("--env").arg(format!("SHM_PATH={}", shm_path))
+            cmd.arg("run");
+            if wasm_path.ends_with(".cwasm") {
+                cmd.arg("--allow-precompiled");
+            }
+            cmd.arg("--env").arg(format!("SHM_PATH={}", shm_path))
                 .arg("--dir").arg(shm_dir.as_ref());
             if script_dir != shm_dir {
                 cmd.arg("--dir").arg(script_dir.as_ref());

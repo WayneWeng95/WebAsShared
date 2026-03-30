@@ -14,26 +14,48 @@ Two modes:
     Used by PyPipeline to reuse one Python process across all pipeline stages.
 """
 
+import importlib
 import os
 import sys
 
 _script_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _script_dir)
 
-import word_count      # noqa: E402
-import image_process    # noqa: E402
-import ai_workload      # noqa: E402
-import finra_workload   # noqa: E402
-import ml_workload      # noqa: E402
+# Module name → function prefixes it contains.
+_MODULE_MAP = {
+    "word_count":     ("wc_",),
+    "ai_workload":    ("tfidf_",),
+    "finra_workload": ("finra_",),
+    "ml_workload":    ("ml_",),
+    "image_process":  ("img_",),
+}
+
+_loaded_modules = {}
+
+
+def _get_module(func_name):
+    """Import only the module that owns *func_name* (lazy)."""
+    for mod_name, prefixes in _MODULE_MAP.items():
+        if any(func_name.startswith(p) for p in prefixes):
+            if mod_name not in _loaded_modules:
+                _loaded_modules[mod_name] = importlib.import_module(mod_name)
+            return _loaded_modules[mod_name]
+    return None
 
 
 def _lookup(name):
-    """Find a workload function by name across all workload modules."""
-    return (getattr(word_count, name, None)
-            or getattr(image_process, name, None)
-            or getattr(ai_workload, name, None)
-            or getattr(finra_workload, name, None)
-            or getattr(ml_workload, name, None))
+    """Find a workload function by name, importing only the needed module."""
+    mod = _get_module(name)
+    if mod is not None:
+        return getattr(mod, name, None)
+    # Fallback: search all modules (handles unexpected prefixes).
+    for mod_name in _MODULE_MAP:
+        if mod_name not in _loaded_modules:
+            _loaded_modules[mod_name] = importlib.import_module(mod_name)
+        fn = getattr(_loaded_modules[mod_name], name, None)
+        if fn is not None:
+            return fn
+    return None
 
 
 if len(sys.argv) > 1 and sys.argv[1] == "--loop":

@@ -51,8 +51,18 @@ fn cmd_run(args: &[String]) -> Result<()> {
     let metrics_log = parse_string_flag(args, "--metrics-log")
         .unwrap_or_else(|_| "/tmp/node_agent_metrics.jsonl".to_string());
     let python_mode = has_flag(args, "--python");
+    let aot_mode = has_flag(args, "--aot");
     let python_script = parse_string_flag(args, "--python-script").ok();
-    let python_wasm = parse_string_flag(args, "--python-wasm").ok();
+    let mut python_wasm = parse_string_flag(args, "--python-wasm").ok();
+
+    // AOT: pre-compile python.wasm → .cwasm if needed.
+    if python_mode && aot_mode {
+        let wasm_path = python_wasm
+            .as_deref()
+            .unwrap_or(dag_transform::DEFAULT_PYTHON_WASM);
+        let cwasm_path = aot_compile(wasm_path)?;
+        python_wasm = Some(cwasm_path);
+    }
 
     let raw_dag_json = std::fs::read_to_string(&dag_path)
         .with_context(|| format!("read DAG file: {}", dag_path))?;
@@ -66,7 +76,7 @@ fn cmd_run(args: &[String]) -> Result<()> {
     )?;
 
     if python_mode {
-        println!("Mode: Python");
+        println!("Mode: Python{}", if aot_mode { " (AOT)" } else { "" });
     }
 
     // Extract shm_path for metrics.
@@ -297,6 +307,56 @@ fn has_flag(args: &[String], flag: &str) -> bool {
     args.iter().any(|a| a == flag)
 }
 
+// ── AOT compilation ────────────────────────────────────────────────────────
+
+/// Pre-compile a .wasm file to .cwasm (Wasmtime AOT) if not already cached.
+/// Returns the path to the .cwasm file.
+fn aot_compile(wasm_path: &str) -> Result<String> {
+    let cwasm_path = wasm_path
+        .strip_suffix(".wasm")
+        .map(|base| format!("{}.cwasm", base))
+        .unwrap_or_else(|| format!("{}.cwasm", wasm_path));
+
+    if Path::new(&cwasm_path).exists() {
+        println!("[aot] using cached {}", cwasm_path);
+        return Ok(cwasm_path);
+    }
+
+    if !Path::new(wasm_path).exists() {
+        bail!("python WASM not found: {}", wasm_path);
+    }
+
+    // Find wasmtime binary.
+    let wasmtime = std::env::var("WASMTIME").unwrap_or_else(|_| {
+        let home_candidate = std::env::var("HOME")
+            .map(|h| format!("{}/.wasmtime/bin/wasmtime", h))
+            .unwrap_or_default();
+        if !home_candidate.is_empty() && Path::new(&home_candidate).exists() {
+            home_candidate
+        } else {
+            "wasmtime".to_string()
+        }
+    });
+
+    println!("[aot] compiling {} → {} ...", wasm_path, cwasm_path);
+    let start = std::time::Instant::now();
+
+    let status = std::process::Command::new(&wasmtime)
+        .arg("compile")
+        .arg(wasm_path)
+        .arg("-o")
+        .arg(&cwasm_path)
+        .status()
+        .with_context(|| format!("run `{} compile`", wasmtime))?;
+
+    if !status.success() {
+        bail!("`wasmtime compile` failed (exit={})", status);
+    }
+
+    println!("[aot] compiled in {:.1}s", start.elapsed().as_secs_f64());
+    Ok(cwasm_path)
+}
+
 fn print_usage() {
     eprintln!("NodeAgent v0.1.0 — Distributed DAG execution agent");
     eprintln!();
@@ -308,6 +368,7 @@ fn print_usage() {
     eprintln!();
     eprintln!("Run flags:");
     eprintln!("  --python                Execute with Python guest (default: Rust/WASM)");
+    eprintln!("  --aot                   AOT-compile python.wasm to .cwasm (skips JIT at runtime)");
     eprintln!("  --python-script <path>  Python runner script (default: Executor/py_guest/python/runner.py)");
     eprintln!("  --python-wasm <path>    Python WASM runtime (default: /opt/myapp/python-3.12.0.wasm)");
     eprintln!("  --executor <path>       Executor binary (default: Executor/target/release/host)");
@@ -316,6 +377,7 @@ fn print_usage() {
     eprintln!("Examples:");
     eprintln!("  node-agent run DAGs/workload_dag/finra_demo.json");
     eprintln!("  node-agent run DAGs/workload_dag/finra_demo.json --python");
+    eprintln!("  node-agent run DAGs/workload_dag/finra_demo.json --python --aot");
     eprintln!("  node-agent run DAGs/workload_dag/word_count_demo.json");
     eprintln!("  node-agent run DAGs/demo_dag/img_pipeline_demo.json");
 }

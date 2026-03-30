@@ -365,3 +365,37 @@ Sample ClusterDags provided for word_count, finra, and ml_training in `NodeAgent
 | `coordinator.rs` | Accept workers, distribute jobs, collect results, handle submit/status queries |
 
 Design decisions: static membership (config file, no service discovery), TCP control plane (RDMA mesh is per-job inside the Executor), coordinator model (not P2P — matches existing asymmetric RDMA DAGs), separate process (Executor is single-run, NodeAgent is long-running).
+
+---
+
+## 22. Unified DAG format — Rust/Python from a single JSON
+
+**Files:** `NodeAgent/agent/src/dag_transform.rs` (new), `NodeAgent/agent/src/main.rs`, all DAG JSONs in `DAGs/workload_dag/` and `DAGs/demo_dag/`
+
+Previously each workload had separate Rust and Python DAG files (e.g., `finra_demo.json` and `py_finra_demo.json`). These are now unified into a single file per workload using abstract node kinds:
+
+| Unified Kind | Rust mode | Python mode |
+|---|---|---|
+| `Func` | `WasmVoid` | `PyFunc` |
+| `Pipeline` | `StreamPipeline` | `PyPipeline` |
+| `Grouping` | `WasmGrouping` | `PyGrouping` |
+
+The `--python` flag on `node-agent run` triggers the transformation. `Func` nodes carry `arg`/`arg2` (Python convention); an optional `wasm_arg` field overrides `arg` for Rust mode where the calling conventions differ (e.g., FINRA's `finra_audit_rule` where Rust takes rule_id directly but Python takes `(input_slot, rule_id)`). Pipeline/Grouping stages use `arg`/`arg2` → `arg0`/`arg1` conversion for Rust.
+
+Python mode also injects `python_script`/`python_wasm`, prefixes `shm_path` and output paths with `py_`, and adds `slot: 1` to Output nodes.
+
+Deleted 6 duplicate `py_*` DAG files. The 4 workloads + 2 image demos now each have a single JSON file.
+
+---
+
+## 23. Python cold-start optimizations — lazy imports and AOT compilation
+
+**Files:** `Executor/py_guest/python/runner.py`, `Executor/host/src/runtime/dag_runner/workers.rs`, `NodeAgent/agent/src/main.rs`
+
+Two optimizations to reduce Python WASM process startup overhead:
+
+**Lazy module imports** — `runner.py` previously imported all 5 workload modules eagerly at startup (~200-500ms). Now uses a prefix-based lookup table (`wc_` → `word_count`, `finra_` → `finra_workload`, etc.) and imports only the module that owns the requested function. A FINRA run no longer pays the cost of loading `image_process`, `ml_workload`, etc.
+
+**AOT pre-compilation** (`--aot` flag) — Pre-compiles `python.wasm` to a `.cwasm` file via `wasmtime compile` (one-time, cached on disk). Subsequent runs load pre-compiled native code directly, skipping Cranelift JIT on each process spawn. The executor's `wasmtime run` command detects `.cwasm` files and adds `--allow-precompiled` automatically. The compiled output is identical to JIT (same Cranelift backend, same optimization passes).
+
+Measured on FINRA (11 PyFunc nodes): JIT 23.4s → AOT 21.3s (~9% reduction). The saving is per-process but partially masked by wave parallelism (8 concurrent rule nodes share wall-clock JIT cost).

@@ -87,6 +87,9 @@ cd /path/to/WebAsShared
 ./node-agent run DAGs/workload_dag/ml_training_demo.json --python
 ./node-agent run DAGs/workload_dag/tfidf_demo.json --python
 
+# Python with AOT pre-compilation (skips JIT on each spawn)
+./node-agent run DAGs/workload_dag/finra_demo.json --python --aot
+
 # Image pipeline demos
 ./node-agent run DAGs/demo_dag/img_pipeline_demo.json
 ./node-agent run DAGs/demo_dag/img_pipeline_demo.json --python

@@ -32,6 +32,9 @@ All commands run from the `WebAsShared/` project root.
 ./node-agent run DAGs/workload_dag/finra_demo.json --python
 ./node-agent run DAGs/workload_dag/word_count_demo.json --python
 
+# Python with AOT pre-compilation (skips JIT on each spawn)
+./node-agent run DAGs/workload_dag/finra_demo.json --python --aot
+
 # Image pipeline demos
 ./node-agent run DAGs/demo_dag/img_pipeline_demo.json
 ./node-agent run DAGs/demo_dag/img_pipeline_demo.json --python
@@ -44,6 +47,8 @@ The `--python` flag tells the NodeAgent to transform the unified DAG for Python 
 - `Func` → `PyFunc`, `Pipeline` → `PyPipeline`, `Grouping` → `PyGrouping`
 - Injects `python_script` and `python_wasm` paths
 - Prefixes `shm_path` and output paths with `py_`
+
+The `--aot` flag pre-compiles `python.wasm` to a `.cwasm` file via `wasmtime compile` (one-time, cached on disk). Subsequent runs load the pre-compiled native code directly, skipping Cranelift JIT compilation on each process spawn. The generated code is identical to JIT — same Cranelift backend, same optimization passes — just compiled ahead of time.
 
 The `run` command:
 1. Reads the DAG JSON and transforms unified nodes for the target mode

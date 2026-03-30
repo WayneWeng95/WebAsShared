@@ -9,8 +9,8 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
 
-const DEFAULT_PYTHON_SCRIPT: &str = "Executor/py_guest/python/runner.py";
-const DEFAULT_PYTHON_WASM: &str = "/opt/myapp/python-3.12.0.wasm";
+pub(crate) const DEFAULT_PYTHON_SCRIPT: &str = "Executor/py_guest/python/runner.py";
+pub(crate) const DEFAULT_PYTHON_WASM: &str = "/opt/myapp/python-3.12.0.wasm";
 
 /// Transform a unified DAG JSON for the target execution mode.
 ///
