@@ -1,22 +1,11 @@
 {
+  "_comment": "Image grouping demo: sequential 6-stage chain per image, one at a time.",
+  "_comment2": "Uses unified Grouping node. Run with: node-agent run (Rust) or node-agent run --python (Python).",
   "shm_path": "/dev/shm/img_grouping_demo",
   "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "mode": "reset",
   "runs": 3,
-
-  "_comment": [
-    "WasmGrouping demo — mirrors py_img_grouping_demo.json in structure.",
-    "",
-    "Input loads one PPM file per run (cycle: true), so run 0 → gradient,",
-    "run 1 → checkerboard, run 2 → rings.  A single WasmGrouping node runs",
-    "the full 6-stage chain on that one image, writing the result to I/O slot 1.",
-    "Output cycles through three destination paths in lock-step with the input.",
-    "FreeSlots frees and resets all cursors so the next run starts clean.",
-    "",
-    "This contrasts with StreamPipeline (img_pipeline_demo.json), which overlaps",
-    "stages across rounds — here each image completes the full chain before the next begins."
-  ],
 
   "nodes": [
     {
@@ -37,14 +26,14 @@
     {
       "id": "group",
       "deps": ["load"],
-      "kind": { "WasmGrouping": {
+      "kind": { "Grouping": {
         "stages": [
-          { "func": "img_load_ppm",   "arg0": 10, "arg1": 20 },
-          { "func": "img_rotate",     "arg0": 20, "arg1": 30 },
-          { "func": "img_grayscale",  "arg0": 30, "arg1": 40 },
-          { "func": "img_equalize",   "arg0": 40, "arg1": 50 },
-          { "func": "img_blur",       "arg0": 50, "arg1": 60 },
-          { "func": "img_export_ppm", "arg0": 60, "arg1": 1  }
+          { "func": "img_load_ppm", "arg": 10, "arg2": 20 },
+          { "func": "img_rotate",   "arg": 20, "arg2": 30 },
+          { "func": "img_grayscale","arg": 30, "arg2": 40 },
+          { "func": "img_equalize", "arg": 40, "arg2": 50 },
+          { "func": "img_blur",     "arg": 50, "arg2": 60 },
+          { "func": "img_export_ppm","arg": 60, "arg2": 1  }
         ]
       }}
     },

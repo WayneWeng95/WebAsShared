@@ -1,4 +1,6 @@
 {
+  "_comment": "Image pipeline demo: load PPM -> rotate -> grayscale -> equalize -> blur -> export.",
+  "_comment2": "Uses unified Pipeline node. Run with: node-agent run (Rust) or node-agent run --python (Python).",
   "shm_path": "/dev/shm/img_pipeline_demo",
   "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
@@ -23,15 +25,15 @@
     {
       "id": "pipeline",
       "deps": ["load"],
-      "kind": { "StreamPipeline": {
+      "kind": { "Pipeline": {
         "rounds": 3,
         "stages": [
-          { "func": "img_load_ppm",   "arg0": 10, "arg1": 20 },
-          { "func": "img_rotate",     "arg0": 20, "arg1": 30 },
-          { "func": "img_grayscale",  "arg0": 30, "arg1": 40 },
-          { "func": "img_equalize",   "arg0": 40, "arg1": 50 },
-          { "func": "img_blur",       "arg0": 50, "arg1": 60 },
-          { "func": "img_export_ppm", "arg0": 60, "arg1": 1  }
+          { "func": "img_load_ppm_binary", "arg": 10, "arg2": 20, "wasm_func": "img_load_ppm" },
+          { "func": "img_rotate",          "arg": 20, "arg2": 30 },
+          { "func": "img_grayscale",       "arg": 30, "arg2": 40 },
+          { "func": "img_equalize",        "arg": 40, "arg2": 50 },
+          { "func": "img_blur",            "arg": 50, "arg2": 60 },
+          { "func": "img_export_ppm",      "arg": 60, "arg2": 1  }
         ]
       }}
     },

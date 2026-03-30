@@ -1,6 +1,7 @@
 mod cluster_dag;
 mod config;
 mod coordinator;
+mod dag_transform;
 mod executor;
 mod metrics;
 mod protocol;
@@ -49,9 +50,24 @@ fn cmd_run(args: &[String]) -> Result<()> {
         .unwrap_or_else(|_| DEFAULT_EXECUTOR_BIN.to_string());
     let metrics_log = parse_string_flag(args, "--metrics-log")
         .unwrap_or_else(|_| "/tmp/node_agent_metrics.jsonl".to_string());
+    let python_mode = has_flag(args, "--python");
+    let python_script = parse_string_flag(args, "--python-script").ok();
+    let python_wasm = parse_string_flag(args, "--python-wasm").ok();
 
-    let dag_json = std::fs::read_to_string(&dag_path)
+    let raw_dag_json = std::fs::read_to_string(&dag_path)
         .with_context(|| format!("read DAG file: {}", dag_path))?;
+
+    // Transform unified Func nodes into WasmVoid or PyFunc.
+    let dag_json = dag_transform::transform_dag(
+        &raw_dag_json,
+        python_mode,
+        python_script.as_deref(),
+        python_wasm.as_deref(),
+    )?;
+
+    if python_mode {
+        println!("Mode: Python");
+    }
 
     // Extract shm_path for metrics.
     let shm_path: Option<String> = serde_json::from_str::<serde_json::Value>(&dag_json)
@@ -277,21 +293,29 @@ fn parse_string_flag(args: &[String], flag: &str) -> Result<String> {
     bail!("{} not specified", flag)
 }
 
+fn has_flag(args: &[String], flag: &str) -> bool {
+    args.iter().any(|a| a == flag)
+}
+
 fn print_usage() {
     eprintln!("NodeAgent v0.1.0 — Distributed DAG execution agent");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  node-agent run    <dag.json> [--executor <path>]     Run a DAG locally (single-node)");
-    eprintln!("  node-agent start  [--config agent.toml]              Start the agent daemon (multi-node)");
-    eprintln!("  node-agent submit [--config agent.toml] --dag <file> Submit a ClusterDag job");
-    eprintln!("  node-agent status [--config agent.toml]              Query cluster status");
+    eprintln!("  node-agent run    <dag.json> [--python] [--executor <path>]");
+    eprintln!("  node-agent start  [--config agent.toml]");
+    eprintln!("  node-agent submit [--config agent.toml] --dag <file>");
+    eprintln!("  node-agent status [--config agent.toml]");
     eprintln!();
-    eprintln!("Single-node mode:");
-    eprintln!("  Run from the project root (WebAsShared/).  The agent spawns the Executor");
-    eprintln!("  as a subprocess, collects metrics, and reports results.");
+    eprintln!("Run flags:");
+    eprintln!("  --python                Execute with Python guest (default: Rust/WASM)");
+    eprintln!("  --python-script <path>  Python runner script (default: Executor/py_guest/python/runner.py)");
+    eprintln!("  --python-wasm <path>    Python WASM runtime (default: /opt/myapp/python-3.12.0.wasm)");
+    eprintln!("  --executor <path>       Executor binary (default: Executor/target/release/host)");
+    eprintln!("  --metrics-log <path>    Metrics log file (default: /tmp/node_agent_metrics.jsonl)");
     eprintln!();
     eprintln!("Examples:");
     eprintln!("  node-agent run DAGs/workload_dag/finra_demo.json");
-    eprintln!("  node-agent run DAGs/workload_dag/py_word_count_demo.json");
+    eprintln!("  node-agent run DAGs/workload_dag/finra_demo.json --python");
+    eprintln!("  node-agent run DAGs/workload_dag/word_count_demo.json");
     eprintln!("  node-agent run DAGs/demo_dag/img_pipeline_demo.json");
 }

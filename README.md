@@ -75,21 +75,21 @@ All commands run from the `WebAsShared/` root directory:
 ```bash
 cd /path/to/WebAsShared
 
-# Rust workloads
+# Rust/WASM workloads (default)
 ./node-agent run DAGs/workload_dag/word_count_demo.json
 ./node-agent run DAGs/workload_dag/finra_demo.json
 ./node-agent run DAGs/workload_dag/ml_training_demo.json
 ./node-agent run DAGs/workload_dag/tfidf_demo.json
 
-# Python workloads
-./node-agent run DAGs/workload_dag/py_word_count_demo.json
-./node-agent run DAGs/workload_dag/py_finra_demo.json
-./node-agent run DAGs/workload_dag/py_ml_training_demo.json
-./node-agent run DAGs/workload_dag/py_tfidf_demo.json
+# Same DAGs, Python execution (--python flag)
+./node-agent run DAGs/workload_dag/word_count_demo.json --python
+./node-agent run DAGs/workload_dag/finra_demo.json --python
+./node-agent run DAGs/workload_dag/ml_training_demo.json --python
+./node-agent run DAGs/workload_dag/tfidf_demo.json --python
 
 # Image pipeline demos
 ./node-agent run DAGs/demo_dag/img_pipeline_demo.json
-./node-agent run DAGs/demo_dag/py_img_pipeline_demo.json
+./node-agent run DAGs/demo_dag/img_pipeline_demo.json --python
 ```
 
 Results are written to `/tmp/` (e.g., `/tmp/finra_result.txt`, `/tmp/ml_training_result.txt`).
@@ -125,6 +125,7 @@ The NodeAgent is a higher-level daemon that orchestrates multi-machine DAG execu
 | Module | Role |
 |--------|------|
 | `main.rs` | CLI: `run` (single-node), `start` (daemon), `submit` (job), `status` (query) |
+| `dag_transform.rs` | Unified `Func`/`Pipeline`/`Grouping` → native node kinds per mode |
 | `coordinator.rs` | Accept workers, distribute per-node DAGs, aggregate results |
 | `worker.rs` | Connect to coordinator, receive jobs, launch Executor subprocess |
 | `executor.rs` | Spawn/monitor `host dag` subprocesses with live or captured output |

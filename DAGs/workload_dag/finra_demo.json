@@ -1,6 +1,7 @@
 {
-  "_comment": "FINRA audit workflow (Rust/WASM): financial trade validation pipeline.",
-  "_comment2": "4 stages: FetchPrivate || FetchPublic → RunAuditRule ×8 → MergeResults.",
+  "_comment": "FINRA audit workflow: financial trade validation pipeline.",
+  "_comment2": "4 stages: FetchPrivate || FetchPublic -> RunAuditRule x8 -> MergeResults.",
+  "_comment3": "Uses unified Func nodes. Run with: node-agent run (Rust) or node-agent run --python (Python).",
   "shm_path": "/dev/shm/finra_demo",
   "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
@@ -13,17 +14,17 @@
     },
 
     {
-      "_comment": "─── FetchPrivateData: parse trades CSV → stream slot 5 ──────────────────────",
+      "_comment": "FetchPrivateData: parse trades CSV -> stream slot 5",
       "id": "fetch_private",
       "deps": ["load_trades"],
-      "kind": { "WasmVoid": { "func": "finra_fetch_private", "arg": 0 } }
+      "kind": { "Func": { "func": "finra_fetch_private", "arg": 0, "arg2": 5 } }
     },
 
     {
-      "_comment": "─── FetchPublicData: market reference → stream slot 6 ───────────────────────",
+      "_comment": "FetchPublicData: market reference -> stream slot 6. Rust ignores slot arg (hardcoded).",
       "id": "fetch_public",
       "deps": [],
-      "kind": { "WasmVoid": { "func": "finra_fetch_public", "arg": 0 } }
+      "kind": { "Func": { "func": "finra_fetch_public", "arg": 6, "wasm_arg": 0 } }
     },
 
     {
@@ -33,16 +34,16 @@
     },
 
     {
-      "_comment": "─── 8 parallel RunAuditRule workers ──────────────────────────────────────────",
-      "id": "rule_0", "deps": ["aggregate_inputs"], "kind": { "WasmVoid": { "func": "finra_audit_rule", "arg": 0 } }
+      "_comment": "8 parallel RunAuditRule workers. Rust uses rule_id as sole arg; Python takes (input_slot, rule_id).",
+      "id": "rule_0", "deps": ["aggregate_inputs"], "kind": { "Func": { "func": "finra_audit_rule", "arg": 200, "arg2": 0, "wasm_arg": 0 } }
     },
-    { "id": "rule_1", "deps": ["aggregate_inputs"], "kind": { "WasmVoid": { "func": "finra_audit_rule", "arg": 1 } } },
-    { "id": "rule_2", "deps": ["aggregate_inputs"], "kind": { "WasmVoid": { "func": "finra_audit_rule", "arg": 2 } } },
-    { "id": "rule_3", "deps": ["aggregate_inputs"], "kind": { "WasmVoid": { "func": "finra_audit_rule", "arg": 3 } } },
-    { "id": "rule_4", "deps": ["aggregate_inputs"], "kind": { "WasmVoid": { "func": "finra_audit_rule", "arg": 4 } } },
-    { "id": "rule_5", "deps": ["aggregate_inputs"], "kind": { "WasmVoid": { "func": "finra_audit_rule", "arg": 5 } } },
-    { "id": "rule_6", "deps": ["aggregate_inputs"], "kind": { "WasmVoid": { "func": "finra_audit_rule", "arg": 6 } } },
-    { "id": "rule_7", "deps": ["aggregate_inputs"], "kind": { "WasmVoid": { "func": "finra_audit_rule", "arg": 7 } } },
+    { "id": "rule_1", "deps": ["aggregate_inputs"], "kind": { "Func": { "func": "finra_audit_rule", "arg": 200, "arg2": 1, "wasm_arg": 1 } } },
+    { "id": "rule_2", "deps": ["aggregate_inputs"], "kind": { "Func": { "func": "finra_audit_rule", "arg": 200, "arg2": 2, "wasm_arg": 2 } } },
+    { "id": "rule_3", "deps": ["aggregate_inputs"], "kind": { "Func": { "func": "finra_audit_rule", "arg": 200, "arg2": 3, "wasm_arg": 3 } } },
+    { "id": "rule_4", "deps": ["aggregate_inputs"], "kind": { "Func": { "func": "finra_audit_rule", "arg": 200, "arg2": 4, "wasm_arg": 4 } } },
+    { "id": "rule_5", "deps": ["aggregate_inputs"], "kind": { "Func": { "func": "finra_audit_rule", "arg": 200, "arg2": 5, "wasm_arg": 5 } } },
+    { "id": "rule_6", "deps": ["aggregate_inputs"], "kind": { "Func": { "func": "finra_audit_rule", "arg": 200, "arg2": 6, "wasm_arg": 6 } } },
+    { "id": "rule_7", "deps": ["aggregate_inputs"], "kind": { "Func": { "func": "finra_audit_rule", "arg": 200, "arg2": 7, "wasm_arg": 7 } } },
 
     {
       "id": "aggregate_rules",
@@ -51,10 +52,10 @@
     },
 
     {
-      "_comment": "─── MergeResults: summarize violations ───────────────────────────────────────",
+      "_comment": "MergeResults: summarize violations",
       "id": "merge",
       "deps": ["aggregate_rules"],
-      "kind": { "WasmVoid": { "func": "finra_merge_results", "arg": 300 } }
+      "kind": { "Func": { "func": "finra_merge_results", "arg": 300 } }
     },
 
     {
