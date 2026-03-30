@@ -139,7 +139,7 @@ Set `"transfer": false` to connect the mesh for RDMA atomics (`fetch_and_add`, `
 
 ## Example DAGs
 
-### Rust Word Count (`demo_dag/word_count_demo.json`)
+### Rust Word Count (`../DAGs/demo_dag/word_count_demo.json`)
 
 ```
 load (corpus.txt → slot 0)
@@ -150,7 +150,7 @@ load (corpus.txt → slot 0)
   → save          (I/O slot → result.txt)
 ```
 
-### Python Image Pipeline (`demo_dag/py_img_pipeline_demo.json`)
+### Python Image Pipeline (`../DAGs/demo_dag/py_img_pipeline_demo.json`)
 
 ```
 load (3 PPM images → slot 10)
@@ -177,7 +177,7 @@ cargo build --release -p guest --target wasm32-wasip1
 
 ```bash
 # Run a DAG pipeline
-cargo run --release -p host -- dag demo_dag/word_count_demo.json
+cargo run --release -p host -- dag ../DAGs/demo_dag/word_count_demo.json
 
 # Run a single WASM function call (used internally by the DAG runner)
 cargo run --release -p host -- wasm-call <wasm_path> <func> <arg> <shm_path>
@@ -211,7 +211,7 @@ Then reference the `.cwasm` path in the DAG JSON.
 ## Project Structure
 
 ```
-astest/
+Executor/
 ├── Cargo.toml                  # Workspace (host, guest, common, connect)
 ├── common/src/lib.rs           # Superblock, Page, RegistryEntry definitions
 ├── connect/src/
@@ -267,8 +267,10 @@ astest/
 │   ├── runner.py               # One-shot and --loop entry point
 │   ├── shm.py                  # WASI-compatible SHM reader (seek+read)
 │   └── HELPER.md               # Complete Python guest API reference for workloads
-├── demo_dag/                   # Single-node example DAG JSON specifications
-└── rdma_demo_dag/              # Multi-node RDMA DAG JSON pairs (node0 + node1)
+├── ../DAGs/demo_dag/           # Single-node example DAG JSON specifications
+├── ../DAGs/workload_dag/       # Single-node workload DAG specifications
+├── ../DAGs/rdma_demo_dag/      # Multi-node RDMA demo DAG pairs (node0 + node1)
+└── ../DAGs/rdma_workload_dag/  # Multi-node RDMA workload DAG pairs (node0 + node1)
 ```
 
 ## Key Design Decisions
@@ -363,7 +365,7 @@ astest/
   - Word Count:      Load corpus → distribute → 10× parallel map → aggregate → reduce
   - Image Pipeline:  Load PPMs → PyPipeline (rotate, gray, equalize, blur) → save
   - Multi-machine:   Node 0 produces → RemoteSend → Node 1 RemoteRecv → process
-  - RDMA demos:      rdma_demo_dag/ — 4 pairs (wasm/py × word-count/img-pipeline)
+  - RDMA demos:      DAGs/rdma_demo_dag/ — 4 pairs (wasm/py × word-count/img-pipeline)
 
   Tech Stack
 

@@ -1,0 +1,57 @@
+{
+  "shm_path": "/dev/shm/img_pipeline_demo",
+  "log_level": "info",
+  "mode": "reset",
+  "runs": 3,
+
+  "nodes": [
+    {
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": {
+        "paths": [
+          "../data/img_gradient.ppm",
+          "../data/img_checkerboard.ppm",
+          "../data/img_rings.ppm"
+        ],
+        "slot": 10,
+        "binary": true
+      }}
+    },
+
+    {
+      "id": "pipeline",
+      "deps": ["load"],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_load_ppm",   "arg0": 10, "arg1": 20 },
+          { "func": "img_rotate",     "arg0": 20, "arg1": 30 },
+          { "func": "img_grayscale",  "arg0": 30, "arg1": 40 },
+          { "func": "img_equalize",   "arg0": 40, "arg1": 50 },
+          { "func": "img_blur",       "arg0": 50, "arg1": 60 },
+          { "func": "img_export_ppm", "arg0": 60, "arg1": 1  }
+        ]
+      }}
+    },
+
+    {
+      "id": "save",
+      "deps": ["pipeline"],
+      "kind": { "Output": {
+        "paths": [
+          "/tmp/img_pipeline_out/gradient_processed.pgm",
+          "/tmp/img_pipeline_out/checkerboard_processed.pgm",
+          "/tmp/img_pipeline_out/rings_processed.pgm"
+        ],
+        "slot": 1
+      }}
+    },
+
+    {
+      "id": "free",
+      "deps": ["save"],
+      "kind": { "FreeSlots": { "stream": [20, 30, 40, 50, 60], "io": [1] } }
+    }
+  ]
+}

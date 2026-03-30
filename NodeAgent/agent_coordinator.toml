@@ -1,0 +1,20 @@
+# NodeAgent config — coordinator (node 0)
+
+node_id = 0
+role = "coordinator"
+
+[cluster]
+ips = ["192.168.1.10", "192.168.1.11"]
+agent_port = 9500
+
+[paths]
+executor_bin = "../Executor/target/release/host"
+executor_work_dir = "../Executor/host"
+
+[metrics]
+interval_ms = 2000
+log_path = "/tmp/node_agent_metrics.jsonl"
+
+[timeouts]
+job_timeout_s = 300
+health_check_s = 5

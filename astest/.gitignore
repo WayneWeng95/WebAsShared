@@ -1,4 +1,0 @@
-/target
-/py_guest/micropython
-__pycache__/
-*.pyc

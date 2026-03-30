@@ -1,0 +1,64 @@
+{
+  "_comment": "RDMA FINRA (Python) — Node 0 (sender).",
+  "_comment2": "Node 0 runs FetchPrivate + FetchPublic, then 8 audit rules locally,",
+  "_comment3": "aggregates rule results and sends them to node 1 via RDMA.",
+  "shm_path": "/dev/shm/rdma_py_finra_node0",
+  "python_script": "../py_guest/python/runner.py",
+  "python_wasm": "/opt/myapp/python-3.12.0.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 0,
+    "total": 2,
+    "ips": ["192.168.1.10", "192.168.1.11"],
+    "transfer": true
+  },
+  "nodes": [
+
+    {
+      "id": "load_trades",
+      "deps": [],
+      "kind": { "Input": { "path": "../data/trades.csv", "slot": 0, "prefetch": true } }
+    },
+
+    {
+      "id": "fetch_private",
+      "deps": ["load_trades"],
+      "kind": { "PyFunc": { "func": "finra_fetch_private", "arg": 0, "arg2": 5 } }
+    },
+
+    {
+      "id": "fetch_public",
+      "deps": [],
+      "kind": { "PyFunc": { "func": "finra_fetch_public", "arg": 6 } }
+    },
+
+    {
+      "id": "aggregate_inputs",
+      "deps": ["fetch_private", "fetch_public"],
+      "kind": { "Aggregate": { "upstream": [5, 6], "downstream": 200 } }
+    },
+
+    { "id": "rule_0", "deps": ["aggregate_inputs"], "kind": { "PyFunc": { "func": "finra_audit_rule", "arg": 200, "arg2": 0 } } },
+    { "id": "rule_1", "deps": ["aggregate_inputs"], "kind": { "PyFunc": { "func": "finra_audit_rule", "arg": 200, "arg2": 1 } } },
+    { "id": "rule_2", "deps": ["aggregate_inputs"], "kind": { "PyFunc": { "func": "finra_audit_rule", "arg": 200, "arg2": 2 } } },
+    { "id": "rule_3", "deps": ["aggregate_inputs"], "kind": { "PyFunc": { "func": "finra_audit_rule", "arg": 200, "arg2": 3 } } },
+    { "id": "rule_4", "deps": ["aggregate_inputs"], "kind": { "PyFunc": { "func": "finra_audit_rule", "arg": 200, "arg2": 4 } } },
+    { "id": "rule_5", "deps": ["aggregate_inputs"], "kind": { "PyFunc": { "func": "finra_audit_rule", "arg": 200, "arg2": 5 } } },
+    { "id": "rule_6", "deps": ["aggregate_inputs"], "kind": { "PyFunc": { "func": "finra_audit_rule", "arg": 200, "arg2": 6 } } },
+    { "id": "rule_7", "deps": ["aggregate_inputs"], "kind": { "PyFunc": { "func": "finra_audit_rule", "arg": 200, "arg2": 7 } } },
+
+    {
+      "id": "aggregate_rules",
+      "deps": ["rule_0","rule_1","rule_2","rule_3","rule_4","rule_5","rule_6","rule_7"],
+      "kind": { "Aggregate": { "upstream": [10, 11, 12, 13, 14, 15, 16, 17], "downstream": 300 } }
+    },
+
+    {
+      "_comment": "─── Send aggregated audit results (slot 300) to node 1 ───────────────────────",
+      "id": "send",
+      "deps": ["aggregate_rules"],
+      "kind": { "RemoteSend": { "slot": 300, "slot_kind": "Stream", "peer": 1 } }
+    }
+
+  ]
+}

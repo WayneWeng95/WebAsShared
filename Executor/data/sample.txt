@@ -1,0 +1,15 @@
+The quick brown fox jumps over the lazy dog
+Hello world this is a word count demo
+Rust is a systems programming language focused on safety speed and concurrency
+WebAssembly enables high performance applications on the web
+The shared memory architecture allows zero copy data passing between host and guest
+DAG based execution pipelines enable fine grained parallelism
+Each node in the pipeline processes data and passes results downstream
+Memory pages are recycled through a sharded free list for efficiency
+Bump allocation provides fast sequential memory allocation from a contiguous region
+The host loads input files via memory mapped I/O for zero copy reads
+Word counting is a classic map reduce workload often used to benchmark frameworks
+This sample text contains multiple sentences of varying lengths and word counts
+The map stage counts words per line and emits intermediate records to the stream
+The reduce stage aggregates all intermediate records to produce the final total
+Performance critical paths use atomic operations to avoid lock contention

@@ -1,0 +1,49 @@
+{
+  "_comment": "ML Training workflow (Rust/WASM): image classification pipeline.",
+  "_comment2": "Partition → PCA ×2 → Redistribute → Train ×8 → Aggregate → Validate.",
+  "shm_path": "/dev/shm/ml_training_demo",
+  "log_level": "info",
+  "nodes": [
+
+    { "id": "load", "deps": [],
+      "kind": { "Input": { "path": "../data/mnist_features.csv", "slot": 0, "prefetch": true } } },
+
+    { "_comment": "─── Partition dataset into 2 shards (slots 10–11) ─────────────────────────────",
+      "id": "partition", "deps": ["load"],
+      "kind": { "WasmVoid": { "func": "ml_partition", "arg": 2 } } },
+
+    { "_comment": "─── PCA ×2: power-iteration feature extraction ──────────────────────────────",
+      "id": "pca_0", "deps": ["partition"], "kind": { "WasmVoid": { "func": "ml_pca", "arg": 10 } } },
+    { "id": "pca_1", "deps": ["partition"], "kind": { "WasmVoid": { "func": "ml_pca", "arg": 11 } } },
+
+    { "id": "aggregate_pca", "deps": ["pca_0", "pca_1"],
+      "kind": { "Aggregate": { "upstream": [110, 111], "downstream": 200 } } },
+
+    { "_comment": "─── Redistribute PCA output to 8 training shards (slots 30–37) ──────────────",
+      "id": "redistribute", "deps": ["aggregate_pca"],
+      "kind": { "WasmVoid": { "func": "ml_redistribute", "arg": 200 } } },
+
+    { "_comment": "─── Train ×8: decision stump trainers ────────────────────────────────────────",
+      "id": "train_0", "deps": ["redistribute"], "kind": { "WasmVoid": { "func": "ml_train", "arg": 30 } } },
+    { "id": "train_1", "deps": ["redistribute"], "kind": { "WasmVoid": { "func": "ml_train", "arg": 31 } } },
+    { "id": "train_2", "deps": ["redistribute"], "kind": { "WasmVoid": { "func": "ml_train", "arg": 32 } } },
+    { "id": "train_3", "deps": ["redistribute"], "kind": { "WasmVoid": { "func": "ml_train", "arg": 33 } } },
+    { "id": "train_4", "deps": ["redistribute"], "kind": { "WasmVoid": { "func": "ml_train", "arg": 34 } } },
+    { "id": "train_5", "deps": ["redistribute"], "kind": { "WasmVoid": { "func": "ml_train", "arg": 35 } } },
+    { "id": "train_6", "deps": ["redistribute"], "kind": { "WasmVoid": { "func": "ml_train", "arg": 36 } } },
+    { "id": "train_7", "deps": ["redistribute"], "kind": { "WasmVoid": { "func": "ml_train", "arg": 37 } } },
+
+    { "_comment": "─── Aggregate stump models + PCA test data → slot 300 ────────────────────────",
+      "id": "aggregate_train",
+      "deps": ["train_0","train_1","train_2","train_3","train_4","train_5","train_6","train_7"],
+      "kind": { "Aggregate": { "upstream": [130, 131, 132, 133, 134, 135, 136, 137, 200], "downstream": 300 } } },
+
+    { "_comment": "─── Validate: ensemble stumps, compute accuracy ──────────────────────────────",
+      "id": "validate", "deps": ["aggregate_train"],
+      "kind": { "WasmVoid": { "func": "ml_validate", "arg": 300 } } },
+
+    { "id": "save", "deps": ["validate"],
+      "kind": { "Output": { "path": "/tmp/ml_training_result.txt" } } }
+
+  ]
+}
