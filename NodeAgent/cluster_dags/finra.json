@@ -8,7 +8,7 @@
   "node_dags": {
     "0": [
       { "id": "load_trades", "deps": [],
-        "kind": { "Input": { "path": "../data/trades.csv", "slot": 0, "prefetch": true } } },
+        "kind": { "Input": { "path": "Executor/data/trades.csv", "slot": 0, "prefetch": true } } },
 
       { "id": "fetch_private", "deps": ["load_trades"],
         "kind": { "WasmVoid": { "func": "finra_fetch_private", "arg": 0 } } },
@@ -36,7 +36,7 @@
     ],
     "1": [
       { "id": "load_trades", "deps": [],
-        "kind": { "Input": { "path": "../data/trades.csv", "slot": 0, "prefetch": true } } },
+        "kind": { "Input": { "path": "Executor/data/trades.csv", "slot": 0, "prefetch": true } } },
 
       { "id": "fetch_private", "deps": ["load_trades"],
         "kind": { "WasmVoid": { "func": "finra_fetch_private", "arg": 0 } } },

@@ -3,6 +3,7 @@
   "_comment2": "Node 1 computes its own local aggregate (slot 200), receives node 0's aggregate",
   "_comment3": "into slot 201, merges both into slot 300, then reduces to produce the final count.",
   "shm_path": "/dev/shm/rdma_wc_node1",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "rdma": {
     "node_id": 1,
@@ -16,7 +17,7 @@
       "_comment": "─── Stage 1: load corpus into I/O slot 0 ───────────────────────────────────",
       "id": "load",
       "deps": [],
-      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
     },
 
     {

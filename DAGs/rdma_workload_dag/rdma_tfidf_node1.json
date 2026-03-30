@@ -3,6 +3,7 @@
   "_comment2": "Node 1 computes its own local TF/DF aggregate concurrently with receiving",
   "_comment3": "node 0's aggregate, merges both, then outputs global top-50 TF-IDF scores.",
   "shm_path": "/dev/shm/rdma_tfidf_node1",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "rdma": {
     "node_id": 1,
@@ -16,7 +17,7 @@
       "_comment": "─── Stage 1: load corpus into I/O slot 0 ───────────────────────────────────",
       "id": "load",
       "deps": [],
-      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
     },
 
     {

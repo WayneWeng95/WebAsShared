@@ -3,7 +3,8 @@
   "_comment2": "Node 1 runs its own audit rules locally, receives node 0's aggregated",
   "_comment3": "rule results, merges both, and produces the final audit summary.",
   "shm_path": "/dev/shm/rdma_py_finra_node1",
-  "python_script": "../py_guest/python/runner.py",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "python_script": "Executor/py_guest/python/runner.py",
   "python_wasm": "/opt/myapp/python-3.12.0.wasm",
   "log_level": "info",
   "rdma": {
@@ -17,7 +18,7 @@
     {
       "id": "load_trades",
       "deps": [],
-      "kind": { "Input": { "path": "../data/trades.csv", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "Executor/data/trades.csv", "slot": 0, "prefetch": true } }
     },
 
     {

@@ -1,6 +1,7 @@
 {
   "_comment": "RDMA ML Training (Rust/WASM) — Node 1 (receiver + validator).",
   "shm_path": "/dev/shm/rdma_ml_node1",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "rdma": {
     "node_id": 1,
@@ -11,7 +12,7 @@
   "nodes": [
 
     { "id": "load", "deps": [],
-      "kind": { "Input": { "path": "../data/mnist_features.csv", "slot": 0, "prefetch": true } } },
+      "kind": { "Input": { "path": "Executor/data/mnist_features.csv", "slot": 0, "prefetch": true } } },
 
     { "id": "partition", "deps": ["load"],
       "kind": { "WasmVoid": { "func": "ml_partition", "arg": 2 } } },

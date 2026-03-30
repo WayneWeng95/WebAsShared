@@ -2,6 +2,7 @@
   "_comment": "RDMA Word Count — Node 0 (sender).  Run this DAG on machine 0.",
   "_comment2": "Node 0 computes its local word-count aggregate then sends slot 200 to node 1.",
   "shm_path": "/dev/shm/rdma_wc_node0",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "rdma": {
     "node_id": 0,
@@ -15,7 +16,7 @@
       "_comment": "─── Stage 1: load corpus into I/O slot 0 ───────────────────────────────────",
       "id": "load",
       "deps": [],
-      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
     },
 
     {

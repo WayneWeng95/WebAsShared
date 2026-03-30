@@ -4,6 +4,7 @@
   "_comment3": "that decodes each image (img_load_ppm) into stream slot 20 and sends it to node 1",
   "_comment4": "via RDMA after each round.  free_after=true clears slot 20 between rounds.",
   "shm_path": "/dev/shm/rdma_img_node0",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "rdma": {
     "node_id": 0,
@@ -19,9 +20,9 @@
       "deps": [],
       "kind": { "Input": {
         "paths": [
-          "../data/img_gradient.ppm",
-          "../data/img_checkerboard.ppm",
-          "../data/img_rings.ppm"
+          "Executor/data/img_gradient.ppm",
+          "Executor/data/img_checkerboard.ppm",
+          "Executor/data/img_rings.ppm"
         ],
         "slot": 10,
         "binary": true

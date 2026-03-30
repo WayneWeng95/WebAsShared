@@ -3,7 +3,8 @@
   "_comment2": "Runs its own training pipeline, receives node 0's trained stumps,",
   "_comment3": "merges both, and validates the ensemble.",
   "shm_path": "/dev/shm/rdma_py_ml_node1",
-  "python_script": "../py_guest/python/runner.py",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "python_script": "Executor/py_guest/python/runner.py",
   "python_wasm": "/opt/myapp/python-3.12.0.wasm",
   "log_level": "info",
   "rdma": {
@@ -15,7 +16,7 @@
   "nodes": [
 
     { "id": "load", "deps": [],
-      "kind": { "Input": { "path": "../data/mnist_features.csv", "slot": 0, "prefetch": true } } },
+      "kind": { "Input": { "path": "Executor/data/mnist_features.csv", "slot": 0, "prefetch": true } } },
 
     { "id": "partition", "deps": ["load"],
       "kind": { "PyFunc": { "func": "ml_partition", "arg": 2, "arg2": 10 } } },

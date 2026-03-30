@@ -3,7 +3,8 @@
   "_comment2": "Modeled after the FINRA serverless workflow from RMMAP (EuroSys'24).",
   "_comment3": "4 stages: FetchPrivate || FetchPublic → RunAuditRule ×8 → MergeResults.",
   "shm_path": "/dev/shm/py_finra_demo",
-  "python_script": "../py_guest/python/runner.py",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "python_script": "Executor/py_guest/python/runner.py",
   "python_wasm": "/opt/myapp/python-3.12.0.wasm",
   "log_level": "info",
   "nodes": [
@@ -12,7 +13,7 @@
       "_comment": "─── Load trades CSV into I/O slot 0 ─────────────────────────────────────────",
       "id": "load_trades",
       "deps": [],
-      "kind": { "Input": { "path": "../data/trades.csv", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "Executor/data/trades.csv", "slot": 0, "prefetch": true } }
     },
 
     {

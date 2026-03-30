@@ -1,6 +1,7 @@
 {
   "shm_path": "/dev/shm/py_img_pipeline_demo",
-  "python_script": "../py_guest/python/runner.py",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "python_script": "Executor/py_guest/python/runner.py",
   "python_wasm": "/opt/myapp/python-3.12.0.wasm",
   "log_level": "info",
   "mode": "reset",
@@ -12,9 +13,9 @@
       "deps": [],
       "kind": { "Input": {
         "paths": [
-          "../data/img_gradient.ppm",
-          "../data/img_checkerboard.ppm",
-          "../data/img_rings.ppm"
+          "Executor/data/img_gradient.ppm",
+          "Executor/data/img_checkerboard.ppm",
+          "Executor/data/img_rings.ppm"
         ],
         "slot": 10,
         "binary": true

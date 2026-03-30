@@ -2,13 +2,14 @@
   "_comment": "FINRA audit workflow (Rust/WASM): financial trade validation pipeline.",
   "_comment2": "4 stages: FetchPrivate || FetchPublic → RunAuditRule ×8 → MergeResults.",
   "shm_path": "/dev/shm/finra_demo",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "nodes": [
 
     {
       "id": "load_trades",
       "deps": [],
-      "kind": { "Input": { "path": "../data/trades.csv", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "Executor/data/trades.csv", "slot": 0, "prefetch": true } }
     },
 
     {

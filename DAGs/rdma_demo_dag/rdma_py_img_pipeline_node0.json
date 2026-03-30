@@ -3,7 +3,8 @@
   "_comment2": "Mirrors rdma_img_pipeline_node0.json but uses PyPipeline with img_load_ppm_binary.",
   "_comment3": "The Python guest uses read_next_io_record (cursor-based) to consume one PPM per round.",
   "shm_path": "/dev/shm/rdma_py_img_node0",
-  "python_script": "../py_guest/python/runner.py",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "python_script": "Executor/py_guest/python/runner.py",
   "python_wasm": "/opt/myapp/python-3.12.0.wasm",
   "log_level": "info",
   "rdma": {
@@ -20,9 +21,9 @@
       "deps": [],
       "kind": { "Input": {
         "paths": [
-          "../data/img_gradient.ppm",
-          "../data/img_checkerboard.ppm",
-          "../data/img_rings.ppm"
+          "Executor/data/img_gradient.ppm",
+          "Executor/data/img_checkerboard.ppm",
+          "Executor/data/img_rings.ppm"
         ],
         "slot": 10,
         "binary": true

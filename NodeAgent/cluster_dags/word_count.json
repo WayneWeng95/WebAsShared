@@ -9,7 +9,7 @@
     "0": [
       {
         "id": "load", "deps": [],
-        "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+        "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
       },
       {
         "id": "distribute", "deps": ["load"],
@@ -37,7 +37,7 @@
     "1": [
       {
         "id": "load", "deps": [],
-        "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+        "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
       },
       {
         "id": "distribute", "deps": ["load"],

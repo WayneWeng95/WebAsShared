@@ -1,5 +1,6 @@
 {
   "shm_path": "/dev/shm/word_count_demo",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "nodes": [
 
@@ -7,7 +8,7 @@
       "_comment": "─── Stage 1: load corpus into I/O slot 0, one record per line ───────────────",
       "id": "load",
       "deps": [],
-      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
     },
 
     {

@@ -1,6 +1,7 @@
 {
   "_comment": "RDMA FINRA (Rust/WASM) — Node 1 (receiver + global merger).",
   "shm_path": "/dev/shm/rdma_finra_node1",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "rdma": {
     "node_id": 1,
@@ -11,7 +12,7 @@
   "nodes": [
 
     { "id": "load_trades", "deps": [],
-      "kind": { "Input": { "path": "../data/trades.csv", "slot": 0, "prefetch": true } } },
+      "kind": { "Input": { "path": "Executor/data/trades.csv", "slot": 0, "prefetch": true } } },
 
     { "id": "fetch_private", "deps": ["load_trades"],
       "kind": { "WasmVoid": { "func": "finra_fetch_private", "arg": 0 } } },

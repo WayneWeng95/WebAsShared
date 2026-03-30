@@ -2,11 +2,12 @@
   "_comment": "ML Training workflow (Rust/WASM): image classification pipeline.",
   "_comment2": "Partition → PCA ×2 → Redistribute → Train ×8 → Aggregate → Validate.",
   "shm_path": "/dev/shm/ml_training_demo",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "nodes": [
 
     { "id": "load", "deps": [],
-      "kind": { "Input": { "path": "../data/mnist_features.csv", "slot": 0, "prefetch": true } } },
+      "kind": { "Input": { "path": "Executor/data/mnist_features.csv", "slot": 0, "prefetch": true } } },
 
     { "_comment": "─── Partition dataset into 2 shards (slots 10–11) ─────────────────────────────",
       "id": "partition", "deps": ["load"],

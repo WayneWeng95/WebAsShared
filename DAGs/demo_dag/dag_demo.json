@@ -1,5 +1,6 @@
 {
   "shm_path": "/dev/shm/dag_demo",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "debug",
   "nodes": [
 
@@ -206,7 +207,7 @@
       "deps": [],
       "kind": {
         "FileDispatch": {
-          "path": "../demo_dag/dag_demo.json",
+          "path": "DAGs/demo_dag/dag_demo.json",
           "workers": 3,
           "policy": { "type": "LineBoundary" }
         }

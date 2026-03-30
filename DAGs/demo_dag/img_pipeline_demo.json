@@ -1,5 +1,6 @@
 {
   "shm_path": "/dev/shm/img_pipeline_demo",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "mode": "reset",
   "runs": 3,
@@ -10,9 +11,9 @@
       "deps": [],
       "kind": { "Input": {
         "paths": [
-          "../data/img_gradient.ppm",
-          "../data/img_checkerboard.ppm",
-          "../data/img_rings.ppm"
+          "Executor/data/img_gradient.ppm",
+          "Executor/data/img_checkerboard.ppm",
+          "Executor/data/img_rings.ppm"
         ],
         "slot": 10,
         "binary": true

@@ -3,7 +3,8 @@
   "_comment2": "Each line is a document. 8 parallel map workers compute per-shard",
   "_comment3": "TF+DF counts; the reducer merges them and outputs top-50 TF-IDF terms.",
   "shm_path": "/dev/shm/py_tfidf_demo",
-  "python_script": "../py_guest/python/runner.py",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "python_script": "Executor/py_guest/python/runner.py",
   "python_wasm": "/opt/myapp/python-3.12.0.wasm",
   "log_level": "info",
   "nodes": [
@@ -12,7 +13,7 @@
       "_comment": "─── Stage 1: load corpus into I/O slot 0 ───────────────────────────────────",
       "id": "load",
       "deps": [],
-      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
     },
 
     {

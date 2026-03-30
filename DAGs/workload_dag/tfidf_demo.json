@@ -3,6 +3,7 @@
   "_comment2": "Reuses wc_distribute for line fanout; 8 parallel tfidf_map workers compute",
   "_comment3": "per-shard TF+DF counts; tfidf_reduce merges and outputs top-50 TF-IDF terms.",
   "shm_path": "/dev/shm/tfidf_demo",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "nodes": [
 
@@ -10,7 +11,7 @@
       "_comment": "─── Stage 1: load corpus into I/O slot 0, one record per line ───────────────",
       "id": "load",
       "deps": [],
-      "kind": { "Input": { "path": "../data/corpus.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
     },
 
     {

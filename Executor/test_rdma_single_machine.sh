@@ -26,10 +26,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-# The host binary resolves relative paths (../target/..., ../data/...) from
-# the host/ subdirectory — run it from there so all default paths line up.
+# All DAG JSON paths are relative to the WebAsShared root directory.
 HOST_BIN="$SCRIPT_DIR/target/release/host"   # absolute path
-HOST_DIR="$SCRIPT_DIR/host"                  # working directory for host invocations
+HOST_DIR="$SCRIPT_DIR/.."                    # working directory: WebAsShared root
 DEMO_DIR="$SCRIPT_DIR/../DAGs/rdma_demo_dag"
 LOG_DIR="/tmp/rdma_test_logs"
 LOCALHOST="127.0.0.1"

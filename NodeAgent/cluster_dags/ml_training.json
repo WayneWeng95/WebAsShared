@@ -8,7 +8,7 @@
   "node_dags": {
     "0": [
       { "id": "load", "deps": [],
-        "kind": { "Input": { "path": "../data/mnist_features.csv", "slot": 0, "prefetch": true } } },
+        "kind": { "Input": { "path": "Executor/data/mnist_features.csv", "slot": 0, "prefetch": true } } },
 
       { "id": "partition", "deps": ["load"],
         "kind": { "WasmVoid": { "func": "ml_partition", "arg": 2 } } },
@@ -40,7 +40,7 @@
     ],
     "1": [
       { "id": "load", "deps": [],
-        "kind": { "Input": { "path": "../data/mnist_features.csv", "slot": 0, "prefetch": true } } },
+        "kind": { "Input": { "path": "Executor/data/mnist_features.csv", "slot": 0, "prefetch": true } } },
 
       { "id": "partition", "deps": ["load"],
         "kind": { "WasmVoid": { "func": "ml_partition", "arg": 2 } } },

@@ -4,6 +4,7 @@
   "_comment3": "then runs a 5-stage StreamPipeline: rotate→grayscale→equalize→blur→export.",
   "_comment4": "The RDMA recv frees slot 20 before each receive so records don't accumulate.",
   "shm_path": "/dev/shm/rdma_img_node1",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
   "rdma": {
     "node_id": 1,
