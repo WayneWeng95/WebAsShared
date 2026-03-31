@@ -5,6 +5,7 @@
 
    cargo +nightly build --release
 
+   ./NodeAgent/build.sh
 
    cargo run dag ../demo_dag/dag_demo.json 
 
