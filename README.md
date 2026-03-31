@@ -70,7 +70,12 @@ cd ..
 cd ../NodeAgent
 cargo build --release
 cp target/release/node-agent ..
+
+# Optional: AOT pre-compile python.wasm for faster Python execution
+wasmtime compile /opt/myapp/python-3.12.0.wasm -o /opt/myapp/python-3.12.0.cwasm
 ```
+
+A `build.sh` script in the project root builds all three in one step: `./build.sh`
 
 ### Running (Single-Node via NodeAgent)
 
