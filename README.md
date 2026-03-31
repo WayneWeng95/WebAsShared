@@ -42,12 +42,12 @@ WebAsShared/
 │   └── data/                       # Test datasets (corpus, trades, MNIST, images)
 ├── NodeAgent/                      # Multi-machine deployment agent
 │   ├── agent/src/                  # Coordinator/worker daemon, executor interface, metrics
-│   ├── cluster_dags/               # ClusterDag definitions (word_count, finra, ml_training)
 │   ├── agent_coordinator.toml      # Sample coordinator config
 │   └── agent_worker.toml           # Sample worker config
 └── DAGs/                           # All DAG JSON specifications
     ├── demo_dag/                   # Single-node demos (word count, image pipeline)
     ├── workload_dag/               # Single-node workloads (FINRA, ML training, TF-IDF)
+    ├── cluster_dag/                # ClusterDag definitions for distributed execution
     ├── rdma_demo_dag/              # Multi-node RDMA demo pairs (node0 + node1)
     └── rdma_workload_dag/          # Multi-node RDMA workload pairs (node0 + node1)
 ```
@@ -112,14 +112,14 @@ Results are written to `/tmp/` (e.g., `/tmp/finra_result.txt`, `/tmp/ml_training
 
 # Submit distributed jobs (from any machine with coordinator access):
 # Rust/WASM workloads
-./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/word_count.json
-./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/finra.json
-./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/ml_training.json
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/word_count.json
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/ml_training.json
 
 # Same DAGs, Python execution (--python flag)
-./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/word_count.json --python
-./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/finra.json --python
-./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/ml_training.json --python
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/word_count.json --python
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json --python
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/ml_training.json --python
 ```
 
 ## Architecture

@@ -260,27 +260,32 @@ fn prefix_path_dir(path: &str, prefix: &str) -> String {
     }
 }
 
-/// Transform a ClusterDag JSON for Python execution.
+/// Transform a ClusterDag JSON for the target execution mode.
 ///
-/// Converts native node kinds to their Python equivalents:
-///   `WasmVoid` → `PyFunc`, `StreamPipeline` → `PyPipeline`, `WasmGrouping` → `PyGrouping`
+/// When `python_mode` is true:
+///   `Func` → `PyFunc`, `WasmVoid` → `PyFunc`, etc.
+///   Injects `python_script` / `python_wasm` and prefixes `shm_path_prefix`.
 ///
-/// Also injects `python_script` / `python_wasm` and prefixes `shm_path_prefix`.
+/// When `python_mode` is false:
+///   `Func` → `WasmVoid`, etc. (so the Executor understands the node kinds).
 pub fn transform_cluster_dag(
     cluster_dag_json: &str,
+    python_mode: bool,
     python_script: Option<&str>,
     python_wasm: Option<&str>,
 ) -> Result<String> {
     let mut dag: Value = serde_json::from_str(cluster_dag_json).context("parse ClusterDag JSON")?;
 
-    let script = python_script.unwrap_or(DEFAULT_PYTHON_SCRIPT);
-    let wasm = python_wasm.unwrap_or(DEFAULT_PYTHON_WASM);
-    dag["python_script"] = Value::String(script.to_string());
-    dag["python_wasm"] = Value::String(wasm.to_string());
+    if python_mode {
+        let script = python_script.unwrap_or(DEFAULT_PYTHON_SCRIPT);
+        let wasm = python_wasm.unwrap_or(DEFAULT_PYTHON_WASM);
+        dag["python_script"] = Value::String(script.to_string());
+        dag["python_wasm"] = Value::String(wasm.to_string());
 
-    // Prefix shm_path_prefix: /dev/shm/rdma_wc → /dev/shm/py_rdma_wc
-    if let Some(prefix) = dag.get("shm_path_prefix").and_then(|v| v.as_str()).map(String::from) {
-        dag["shm_path_prefix"] = Value::String(prefix_filename(&prefix, "py_"));
+        // Prefix shm_path_prefix: /dev/shm/rdma_wc → /dev/shm/py_rdma_wc
+        if let Some(prefix) = dag.get("shm_path_prefix").and_then(|v| v.as_str()).map(String::from) {
+            dag["shm_path_prefix"] = Value::String(prefix_filename(&prefix, "py_"));
+        }
     }
 
     // Transform each node in every node_dag.
@@ -288,7 +293,12 @@ pub fn transform_cluster_dag(
         for (_node_id, nodes) in node_dags.iter_mut() {
             if let Some(arr) = nodes.as_array_mut() {
                 for node in arr.iter_mut() {
-                    transform_node_to_python(node)?;
+                    // Transform unified Func/Pipeline/Grouping → native kinds.
+                    transform_node(node, python_mode)?;
+                    // For Python mode, also convert any remaining native WasmVoid → PyFunc.
+                    if python_mode {
+                        transform_node_to_python(node)?;
+                    }
                 }
             }
         }

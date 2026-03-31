@@ -187,16 +187,17 @@ fn cmd_submit(args: &[String]) -> Result<()> {
     let raw_json = std::fs::read_to_string(&dag_path)
         .with_context(|| format!("read ClusterDag file: {}", dag_path))?;
 
-    let cluster_dag_json = if python_mode {
+    if python_mode {
         println!("Mode: Python (distributed)");
-        dag_transform::transform_cluster_dag(
-            &raw_json,
-            python_script.as_deref(),
-            python_wasm.as_deref(),
-        )?
-    } else {
-        raw_json
-    };
+    }
+
+    // Always transform: converts unified Func nodes to native kinds (WasmVoid or PyFunc).
+    let cluster_dag_json = dag_transform::transform_cluster_dag(
+        &raw_json,
+        python_mode,
+        python_script.as_deref(),
+        python_wasm.as_deref(),
+    )?;
 
     // Validate the ClusterDag before sending.
     let _cluster_dag = cluster_dag::ClusterDag::from_json(&cluster_dag_json)?;
