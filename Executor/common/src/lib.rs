@@ -6,7 +6,7 @@ use core::sync::atomic::AtomicU32;
 // ── Shared path / buffer constants ──────────────────────────────────────────
 
 /// Path to the compiled guest WASM module (relative to the host working dir).
-pub const WASM_PATH: &str = "../target/wasm32-unknown-unknown/release/guest.wasm";
+pub const WASM_PATH: &str = "Executor/target/wasm32-unknown-unknown/release/guest.wasm";
 
 /// Persistent buffer used to extend the lifetime of a returned payload across
 /// the WASM ABI boundary.  Shared by any guest function that returns a fat
