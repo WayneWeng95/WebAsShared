@@ -16,5 +16,5 @@ interval_ms = 2000
 log_path = "/tmp/node_agent_metrics.jsonl"
 
 [timeouts]
-job_timeout_s = 300
+job_timeout_s = 600
 health_check_s = 5

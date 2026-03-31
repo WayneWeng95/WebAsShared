@@ -88,9 +88,20 @@ pub fn server_exchange(tcp_port: u16, local: &QpInfo) -> Result<(QpInfo, TcpStre
 }
 
 /// Client side: connect to `host:tcp_port` and swap QP info.
+/// Retries for up to 30 seconds to allow the peer executor to start.
 pub fn client_exchange(host: &str, tcp_port: u16, local: &QpInfo) -> Result<(QpInfo, TcpStream)> {
-    let mut stream = TcpStream::connect((host, tcp_port))
-        .map_err(|e| anyhow!("connect {}:{}: {}", host, tcp_port, e))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut stream = loop {
+        match TcpStream::connect((host, tcp_port)) {
+            Ok(s) => break s,
+            Err(e) => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(anyhow!("connect {}:{}: {} (timed out after 30s)", host, tcp_port, e));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+    };
     println!("[exchange] connected to {}:{}", host, tcp_port);
 
     // read server's info first, then send ours
@@ -146,9 +157,20 @@ pub fn server_ctrl_only(tcp_port: u16) -> Result<TcpStream> {
 }
 
 /// Client side: connect to `host:tcp_port`, return the stream.
+/// Retries for up to 30 seconds to allow the peer executor to start.
 pub fn client_ctrl_only(host: &str, tcp_port: u16) -> Result<TcpStream> {
-    let stream = TcpStream::connect((host, tcp_port))
-        .map_err(|e| anyhow!("connect {}:{}: {}", host, tcp_port, e))?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let stream = loop {
+        match TcpStream::connect((host, tcp_port)) {
+            Ok(s) => break s,
+            Err(e) => {
+                if std::time::Instant::now() >= deadline {
+                    return Err(anyhow!("connect {}:{}: {} (timed out after 30s)", host, tcp_port, e));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+        }
+    };
     println!("[exchange] ctrl-only connected to {}:{}", host, tcp_port);
     Ok(stream)
 }
