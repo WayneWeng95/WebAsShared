@@ -131,6 +131,8 @@ def _read_chain(head: int) -> list:
         if lb is None:
             break
         plen = struct.unpack("<I", lb)[0]
+        if plen > 64 * 1024 * 1024:  # sanity: >64 MiB is corrupted
+            break
         ob = read_n(4)
         if ob is None:
             break
