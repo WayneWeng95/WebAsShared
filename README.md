@@ -120,6 +120,9 @@ Results are written to `/tmp/` (e.g., `/tmp/finra_result.txt`, `/tmp/ml_training
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/word_count.json --python
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json --python
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/ml_training.json --python
+
+# Python with AOT pre-compilation (--aot skips JIT on each subprocess spawn)
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json --python --aot
 ```
 
 ## Architecture

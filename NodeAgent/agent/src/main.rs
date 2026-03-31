@@ -180,15 +180,25 @@ fn cmd_submit(args: &[String]) -> Result<()> {
     let config_path = parse_config_flag(args)?;
     let dag_path = parse_dag_flag(args)?;
     let python_mode = has_flag(args, "--python");
+    let aot_mode = has_flag(args, "--aot");
     let python_script = parse_string_flag(args, "--python-script").ok();
-    let python_wasm = parse_string_flag(args, "--python-wasm").ok();
+    let mut python_wasm = parse_string_flag(args, "--python-wasm").ok();
     let config = AgentConfig::load(Path::new(&config_path))?;
+
+    // AOT: pre-compile python.wasm → .cwasm if needed.
+    if python_mode && aot_mode {
+        let wasm_path = python_wasm
+            .as_deref()
+            .unwrap_or(dag_transform::DEFAULT_PYTHON_WASM);
+        let cwasm_path = aot_compile(wasm_path)?;
+        python_wasm = Some(cwasm_path);
+    }
 
     let raw_json = std::fs::read_to_string(&dag_path)
         .with_context(|| format!("read ClusterDag file: {}", dag_path))?;
 
     if python_mode {
-        println!("Mode: Python (distributed)");
+        println!("Mode: Python (distributed){}", if aot_mode { " (AOT)" } else { "" });
     }
 
     // Always transform: converts unified Func nodes to native kinds (WasmVoid or PyFunc).
@@ -378,7 +388,7 @@ fn print_usage() {
     eprintln!("Usage:");
     eprintln!("  node-agent run    <dag.json> [--python] [--executor <path>]");
     eprintln!("  node-agent start  [--config agent.toml]");
-    eprintln!("  node-agent submit [--config agent.toml] --dag <file> [--python]");
+    eprintln!("  node-agent submit [--config agent.toml] --dag <file> [--python] [--aot]");
     eprintln!("  node-agent status [--config agent.toml]");
     eprintln!();
     eprintln!("Run flags:");
@@ -397,4 +407,5 @@ fn print_usage() {
     eprintln!("  node-agent run DAGs/demo_dag/img_pipeline_demo.json");
     eprintln!("  node-agent submit --config agent.toml --dag cluster_dags/finra.json");
     eprintln!("  node-agent submit --config agent.toml --dag cluster_dags/finra.json --python");
+    eprintln!("  node-agent submit --config agent.toml --dag cluster_dags/finra.json --python --aot");
 }
