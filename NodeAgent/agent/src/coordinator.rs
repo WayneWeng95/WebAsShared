@@ -68,6 +68,8 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
         match listener.accept() {
             Ok((mut stream, addr)) => {
                 // Could be a worker or a client command.
+                // Ensure accepted socket is blocking (listener is non-blocking).
+                stream.set_nonblocking(false)?;
                 stream.set_read_timeout(Some(Duration::from_secs(5)))?;
                 match recv_message(&mut stream) {
                     Ok(msg) => {

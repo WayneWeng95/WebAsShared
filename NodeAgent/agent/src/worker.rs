@@ -113,14 +113,14 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
             }
             Err(e) => {
                 // Timeout is expected — check if the executor has finished.
-                let err_str = format!("{}", e);
+                let err_str = format!("{:#}", e);
                 if !err_str.contains("timed out")
                     && !err_str.contains("WouldBlock")
                     && !err_str.contains("Resource temporarily unavailable")
                 {
                     // Real error — coordinator disconnected?
                     eprintln!(
-                        "[worker {}] connection error: {}",
+                        "[worker {}] connection error: {:#}",
                         config.node_id, e
                     );
                     break;
