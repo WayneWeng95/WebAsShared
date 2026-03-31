@@ -27,6 +27,8 @@
    sudo apt-get install -y libibverbs-dev
    sudo apt-get install -y pkg-config
    sudo apt-get install -y librdmacm-dev
+   sudo apt install ibverbs-utils
+   sudo apt install perftest
 
    rdma_mesh_node   rdma_mesh_atomic
 
@@ -50,3 +52,7 @@
   bash test_rdma_single_machine.sh py      # Python word count                                                     
   bash test_rdma_single_machine.sh img     # WASM image pipeline                                                   
   bash test_rdma_single_machine.sh pyimg   # Python image pipeline  
+
+
+  ibv_devinfo
+  ip addr show

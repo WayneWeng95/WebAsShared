@@ -4,7 +4,7 @@ node_id = 0
 role = "coordinator"
 
 [cluster]
-ips = ["192.168.1.10", "192.168.1.11"]
+ips = ["10.10.1.2", "10.10.1.1"]
 agent_port = 9500
 
 [paths]

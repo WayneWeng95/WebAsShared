@@ -30,8 +30,8 @@ mod staging;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-pub(in crate::mesh) const RDMA_PORT: u8  = 1;
-pub(in crate::mesh) const GID_INDEX: u8  = 0;
+pub(in crate::mesh) const RDMA_PORT: u8  = 2;
+pub(in crate::mesh) const GID_INDEX: u8  = 2;
 pub(in crate::mesh) const CQ_SIZE:   i32 = 64;
 
 /// Bytes allocated per peer slot in the local MR.

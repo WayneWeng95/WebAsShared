@@ -26,9 +26,9 @@ use crate::rdma::memory_region::MemoryRegion;
 use crate::rdma::queue_pair::QueuePair;
 
 /// RDMA port number to use for device/port addressing (1-based).
-const RDMA_PORT: u8 = 1;
-/// GID index for RoCE (index 0 = link-local GID on most mlx4/mlx5 setups).
-const GID_INDEX: u8 = 0;
+const RDMA_PORT: u8 = 2;
+/// GID index for RoCE (index 2 = IPv4-mapped GID for 10.10.1.x on CloudLab mlx4).
+const GID_INDEX: u8 = 2;
 /// Shared CQ size.
 const CQ_SIZE: i32 = 16;
 
