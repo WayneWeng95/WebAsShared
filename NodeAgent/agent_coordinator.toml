@@ -8,8 +8,8 @@ ips = ["10.10.1.2", "10.10.1.1"]
 agent_port = 9500
 
 [paths]
-executor_bin = "Executor/target/release/host"
-executor_work_dir = "Executor/host"
+executor_bin = "/opt/myapp/WebAsShared/Executor/target/release/host"
+executor_work_dir = "/opt/myapp/WebAsShared/Executor/host"
 
 [metrics]
 interval_ms = 2000
