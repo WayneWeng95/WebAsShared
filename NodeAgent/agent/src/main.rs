@@ -179,10 +179,24 @@ fn cmd_start(args: &[String]) -> Result<()> {
 fn cmd_submit(args: &[String]) -> Result<()> {
     let config_path = parse_config_flag(args)?;
     let dag_path = parse_dag_flag(args)?;
+    let python_mode = has_flag(args, "--python");
+    let python_script = parse_string_flag(args, "--python-script").ok();
+    let python_wasm = parse_string_flag(args, "--python-wasm").ok();
     let config = AgentConfig::load(Path::new(&config_path))?;
 
-    let cluster_dag_json = std::fs::read_to_string(&dag_path)
+    let raw_json = std::fs::read_to_string(&dag_path)
         .with_context(|| format!("read ClusterDag file: {}", dag_path))?;
+
+    let cluster_dag_json = if python_mode {
+        println!("Mode: Python (distributed)");
+        dag_transform::transform_cluster_dag(
+            &raw_json,
+            python_script.as_deref(),
+            python_wasm.as_deref(),
+        )?
+    } else {
+        raw_json
+    };
 
     // Validate the ClusterDag before sending.
     let _cluster_dag = cluster_dag::ClusterDag::from_json(&cluster_dag_json)?;
@@ -363,7 +377,7 @@ fn print_usage() {
     eprintln!("Usage:");
     eprintln!("  node-agent run    <dag.json> [--python] [--executor <path>]");
     eprintln!("  node-agent start  [--config agent.toml]");
-    eprintln!("  node-agent submit [--config agent.toml] --dag <file>");
+    eprintln!("  node-agent submit [--config agent.toml] --dag <file> [--python]");
     eprintln!("  node-agent status [--config agent.toml]");
     eprintln!();
     eprintln!("Run flags:");
@@ -380,4 +394,6 @@ fn print_usage() {
     eprintln!("  node-agent run DAGs/workload_dag/finra_demo.json --python --aot");
     eprintln!("  node-agent run DAGs/workload_dag/word_count_demo.json");
     eprintln!("  node-agent run DAGs/demo_dag/img_pipeline_demo.json");
+    eprintln!("  node-agent submit --config agent.toml --dag cluster_dags/finra.json");
+    eprintln!("  node-agent submit --config agent.toml --dag cluster_dags/finra.json --python");
 }

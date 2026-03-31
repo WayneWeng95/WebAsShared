@@ -260,6 +260,103 @@ fn prefix_path_dir(path: &str, prefix: &str) -> String {
     }
 }
 
+/// Transform a ClusterDag JSON for Python execution.
+///
+/// Converts native node kinds to their Python equivalents:
+///   `WasmVoid` → `PyFunc`, `StreamPipeline` → `PyPipeline`, `WasmGrouping` → `PyGrouping`
+///
+/// Also injects `python_script` / `python_wasm` and prefixes `shm_path_prefix`.
+pub fn transform_cluster_dag(
+    cluster_dag_json: &str,
+    python_script: Option<&str>,
+    python_wasm: Option<&str>,
+) -> Result<String> {
+    let mut dag: Value = serde_json::from_str(cluster_dag_json).context("parse ClusterDag JSON")?;
+
+    let script = python_script.unwrap_or(DEFAULT_PYTHON_SCRIPT);
+    let wasm = python_wasm.unwrap_or(DEFAULT_PYTHON_WASM);
+    dag["python_script"] = Value::String(script.to_string());
+    dag["python_wasm"] = Value::String(wasm.to_string());
+
+    // Prefix shm_path_prefix: /dev/shm/rdma_wc → /dev/shm/py_rdma_wc
+    if let Some(prefix) = dag.get("shm_path_prefix").and_then(|v| v.as_str()).map(String::from) {
+        dag["shm_path_prefix"] = Value::String(prefix_filename(&prefix, "py_"));
+    }
+
+    // Transform each node in every node_dag.
+    if let Some(node_dags) = dag.get_mut("node_dags").and_then(|v| v.as_object_mut()) {
+        for (_node_id, nodes) in node_dags.iter_mut() {
+            if let Some(arr) = nodes.as_array_mut() {
+                for node in arr.iter_mut() {
+                    transform_node_to_python(node)?;
+                }
+            }
+        }
+    }
+
+    serde_json::to_string_pretty(&dag).context("serialize transformed ClusterDag")
+}
+
+/// Convert a native Executor node kind to its Python equivalent.
+fn transform_node_to_python(node: &mut Value) -> Result<()> {
+    let kind = match node.get_mut("kind") {
+        Some(k) => k,
+        None => return Ok(()),
+    };
+
+    // WasmVoid { func, arg } → PyFunc { func, arg }
+    if let Some(params) = kind.get("WasmVoid").cloned() {
+        *kind = serde_json::json!({ "PyFunc": params });
+        return Ok(());
+    }
+
+    // StreamPipeline → PyPipeline (convert stage arg naming: arg0→arg, arg1→arg2)
+    if let Some(mut params) = kind.get("StreamPipeline").cloned() {
+        if let Some(stages) = params.get_mut("stages").and_then(|v| v.as_array_mut()) {
+            for stage in stages.iter_mut() {
+                rename_stage_args_to_python(stage);
+            }
+        }
+        *kind = serde_json::json!({ "PyPipeline": params });
+        return Ok(());
+    }
+
+    // WasmGrouping → PyGrouping
+    if let Some(mut params) = kind.get("WasmGrouping").cloned() {
+        if let Some(stages) = params.get_mut("stages").and_then(|v| v.as_array_mut()) {
+            for stage in stages.iter_mut() {
+                rename_stage_args_to_python(stage);
+            }
+        }
+        *kind = serde_json::json!({ "PyGrouping": params });
+        return Ok(());
+    }
+
+    // Output: prefix path with py_, add slot: 1
+    if let Some(output_params) = kind.get_mut("Output") {
+        if let Some(path) = output_params.get("path").and_then(|v| v.as_str()).map(String::from) {
+            output_params["path"] = Value::String(prefix_filename(&path, "py_"));
+        }
+        if output_params.get("slot").is_none() {
+            output_params["slot"] = Value::Number(1.into());
+        }
+    }
+
+    Ok(())
+}
+
+/// Rename Rust-style stage args (arg0, arg1) to Python-style (arg, arg2).
+fn rename_stage_args_to_python(stage: &mut Value) {
+    if let Some(obj) = stage.as_object_mut() {
+        if let Some(a0) = obj.remove("arg0") {
+            obj.insert("arg".to_string(), a0);
+        }
+        if let Some(a1) = obj.remove("arg1") {
+            obj.insert("arg2".to_string(), a1);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

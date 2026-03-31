@@ -3,6 +3,7 @@
    10  rustup target add wasm32-unknown-unknown --toolchain nightly
    11  rustup component add rust-src --toolchain nightly
 
+   cd /Executor/guest
    cargo +nightly build --release
 
    ./NodeAgent/build.sh
@@ -57,3 +58,5 @@
 
   ibv_devinfo
   ip addr show
+
+  

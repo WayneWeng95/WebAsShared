@@ -57,10 +57,14 @@ WebAsShared/
 ### Building
 
 ```bash
-# Build the Executor
+# Build the Executor host
 cd Executor
 cargo +nightly build --release
-cargo +nightly build --release -p guest --target wasm32-unknown-unknown
+
+# Build the WASM guest (from guest/ to pick up .cargo/config.toml with shared-memory flags)
+cd guest
+cargo +nightly build --release
+cd ..
 
 # Build the NodeAgent
 cd ../NodeAgent
@@ -106,8 +110,16 @@ Results are written to `/tmp/` (e.g., `/tmp/finra_result.txt`, `/tmp/ml_training
 # On worker machine (node 1):
 ./node-agent start --config NodeAgent/agent_worker.toml
 
-# Submit a distributed job (from any machine with coordinator access):
+# Submit distributed jobs (from any machine with coordinator access):
+# Rust/WASM workloads
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/word_count.json
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/finra.json
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/ml_training.json
+
+# Same DAGs, Python execution (--python flag)
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/word_count.json --python
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/finra.json --python
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag NodeAgent/cluster_dags/ml_training.json --python
 ```
 
 ## Architecture
