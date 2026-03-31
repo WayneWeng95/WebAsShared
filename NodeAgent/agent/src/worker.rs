@@ -151,8 +151,8 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                         )?;
                     } else {
                         eprintln!(
-                            "[worker {}] job {} failed (exit={:?})",
-                            config.node_id, job_id, result.exit_code
+                            "[worker {}] job {} failed (exit={:?}):\n{}",
+                            config.node_id, job_id, result.exit_code, result.stderr_tail
                         );
                         send_message(
                             &mut stream,
