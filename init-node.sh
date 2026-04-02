@@ -35,11 +35,15 @@ sudo apt-get install -y libibverbs-dev pkg-config librdmacm-dev ibverbs-utils pe
 info "Setting up Rust environment..."
 source "$ROOT/start.sh"
 
-# ── Step 4: Claude Code setup ──────────────────────────────
+# ── Step 4: Install wasmtime (for Python/WASM execution) ───
+info "Installing wasmtime..."
+bash "$ROOT/install_wasmtime.sh"
+
+# ── Step 5: Claude Code setup ──────────────────────────────
 info "Running Claude Code setup..."
 bash "$ROOT/claude-code-setup.sh"
 
-# ── Step 5: Build all projects ──────────────────────────────
+# ── Step 6: Build all projects ──────────────────────────────
 info "Building all projects..."
 bash "$ROOT/build.sh"
 

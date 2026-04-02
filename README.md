@@ -129,6 +129,7 @@ Start the coordinator and worker daemons, then submit jobs:
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/word_count.json
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/ml_training.json
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/pipeline_routing.json
 
 # Python
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/word_count.json --python
