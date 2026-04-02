@@ -187,6 +187,7 @@ fn handle_submit(
     drop(s); // Release lock before spawning executor.
 
     // Phase 2: Launch local executor (for this node's DAG).
+    let job_start = Instant::now();
     if let Some(my_dag) = per_node_dags.get(&config.node_id) {
         println!("[coordinator] launching local executor");
         let handle = ExecutorHandle::spawn(
@@ -199,10 +200,11 @@ fn handle_submit(
 
         // Wait for local executor to complete.
         let result = handle.wait()?;
+        let local_ms = result.duration_ms;
         if result.success {
             println!(
                 "[coordinator] local executor completed in {}ms",
-                result.duration_ms
+                local_ms
             );
         } else {
             eprintln!(
@@ -212,7 +214,7 @@ fn handle_submit(
         }
 
         // Collect results from workers.
-        collect_worker_results(config, state, &job_id, client_stream)?;
+        collect_worker_results(config, state, &job_id, client_stream, job_start, local_ms)?;
     }
 
     Ok(())
@@ -224,12 +226,15 @@ fn collect_worker_results(
     state: &Arc<Mutex<CoordinatorState>>,
     job_id: &str,
     client_stream: &mut TcpStream,
+    job_start: Instant,
+    local_ms: u64,
 ) -> Result<()> {
     let start = Instant::now();
     let timeout = Duration::from_secs(config.timeouts.job_timeout_s);
     let mut completed_workers = Vec::new();
     let mut all_success = true;
     let mut summary_lines = Vec::new();
+    let mut worker_durations: Vec<(u32, u64)> = Vec::new();
 
     let expected_workers: Vec<u32> = {
         let s = state.lock().unwrap();
@@ -263,6 +268,7 @@ fn collect_worker_results(
                                 "[coordinator] worker {} completed job in {}ms",
                                 worker_id, p.duration_ms
                             );
+                            worker_durations.push((*worker_id, p.duration_ms));
                             summary_lines.push(format!(
                                 "worker {}: completed in {}ms",
                                 worker_id, p.duration_ms
@@ -311,8 +317,34 @@ fn collect_worker_results(
         thread::sleep(Duration::from_millis(50));
     }
 
+    // Print timing summary.
+    let total_wall_ms = job_start.elapsed().as_millis() as u64;
+    println!("[coordinator] ── Job Summary ──────────────────────────");
+    println!("[coordinator]   node 0 (local):  {}ms", local_ms);
+    for (wid, wms) in &worker_durations {
+        let compute_est = wms.saturating_sub(local_ms);
+        println!(
+            "[coordinator]   node {} (worker): {}ms  (transfer ≈ {}ms, compute ≈ {}ms)",
+            wid, wms, local_ms, compute_est
+        );
+    }
+    println!("[coordinator]   total wall time: {}ms", total_wall_ms);
+    println!("[coordinator] ─────────────────────────────────────────");
+
+    // Build summary for client.
+    let mut client_summary = Vec::new();
+    client_summary.push(format!("node 0 (local): {}ms", local_ms));
+    for (wid, wms) in &worker_durations {
+        let compute_est = wms.saturating_sub(local_ms);
+        client_summary.push(format!(
+            "node {} (worker): {}ms (transfer ≈ {}ms, compute ≈ {}ms)",
+            wid, wms, local_ms, compute_est
+        ));
+    }
+    client_summary.push(format!("total wall time: {}ms", total_wall_ms));
+
     // Send final result to the client.
-    let summary = summary_lines.join("\n");
+    let summary = client_summary.join("\n");
     let _ = send_message(
         client_stream,
         &make_message(
