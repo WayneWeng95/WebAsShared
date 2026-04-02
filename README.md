@@ -32,7 +32,12 @@ Input file
 ```
 WebAsShared/
 |-- build.sh                        # Build all binaries (host, guest, node-agent)
+|-- init-node.sh                    # One-shot new node setup (pull, install, build)
 |-- node-agent                      # NodeAgent binary (entry point)
+|-- scripts/                        # Setup and utility scripts
+|   |-- start.sh                    # Rust environment setup (source this)
+|   |-- install_wasmtime.sh         # Install wasmtime for Python/WASM execution
+|   +-- claude-code-setup.sh        # Claude Code remote server setup
 |-- Executor/                       # Execution engine (host + WASM/Python guests)
 |   |-- Cargo.toml                  # Workspace (host, guest, common, connect)
 |   |-- host/src/                   # Orchestrator: DAG runner, WASM executor, routing, I/O, RDMA
@@ -55,6 +60,16 @@ WebAsShared/
 ```
 
 ## Quick Start
+
+### New Node Setup
+
+Run the one-shot init script to set up a fresh node (pulls code, installs packages, builds everything):
+
+```bash
+chmod +x init-node.sh && ./init-node.sh
+```
+
+This runs: `git pull` → RDMA packages → Rust env (`scripts/start.sh`) → wasmtime (`scripts/install_wasmtime.sh`) → Claude Code (`scripts/claude-code-setup.sh`) → `build.sh`.
 
 ### Building
 
@@ -239,6 +254,7 @@ The host creates a SHM file and maps it at a fixed offset (`0x80000000`) in each
 | FINRA Audit | FetchPrivate || FetchPublic -> 8 audit rules -> merge results | Yes | Yes |
 | ML Training | Partition -> PCA x2 -> redistribute -> train x8 stumps -> validate | Yes | Yes |
 | Image Pipeline | Load PPM -> rotate -> grayscale -> equalize -> blur -> export PGM | Yes | Yes |
+| Pipeline + Routing | Distributed: StreamPipeline (image) + Shuffle + Aggregate + Bridge across 2 nodes | Yes | Yes |
 
 ## Multi-machine Execution (RDMA)
 

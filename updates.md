@@ -399,3 +399,65 @@ Two optimizations to reduce Python WASM process startup overhead:
 **AOT pre-compilation** (`--aot` flag) — Pre-compiles `python.wasm` to a `.cwasm` file via `wasmtime compile` (one-time, cached on disk). Subsequent runs load pre-compiled native code directly, skipping Cranelift JIT on each process spawn. The executor's `wasmtime run` command detects `.cwasm` files and adds `--allow-precompiled` automatically. The compiled output is identical to JIT (same Cranelift backend, same optimization passes).
 
 Measured on FINRA (11 PyFunc nodes): JIT 23.4s → AOT 21.3s (~9% reduction). The saving is per-process but partially masked by wave parallelism (8 concurrent rule nodes share wall-clock JIT cost).
+
+---
+
+## 24. Node initialization script and setup reorganization
+
+**Files:** `init-node.sh` (new), `scripts/` (new directory), `scripts/start.sh`, `scripts/install_wasmtime.sh`, `scripts/claude-code-setup.sh`
+
+One-shot `init-node.sh` script for new node provisioning. Runs in order: `git pull` → RDMA/InfiniBand packages (`libibverbs-dev`, `librdmacm-dev`, `ibverbs-utils`, `perftest`) → Rust environment setup → wasmtime install → Claude Code setup → full project build.
+
+Setup scripts (`start.sh`, `install_wasmtime.sh`, `claude-code-setup.sh`) moved from project root into `scripts/` directory.
+
+---
+
+## 25. Distributed pipeline + routing ClusterDag
+
+**Files:** `DAGs/cluster_dag/pipeline_routing.json` (new), `Executor/py_guest/python/routing_tests.py` (new), `Executor/py_guest/python/runner.py`, `NodeAgent/agent/src/dag_transform.rs`
+
+New ClusterDag that combines StreamPipeline and routing primitives in a single distributed job across two nodes. Two parallel data paths:
+
+**Path A (Image Pipeline via RDMA):** Node 0 runs a 3-round StreamPipeline (`img_load_ppm` → `img_rotate` → `img_grayscale`) with `rdma_send` after each round. Node 1 continues with a 3-round StreamPipeline (`img_equalize` → `img_blur` → `img_export_ppm`) with `rdma_recv`, then saves the processed images.
+
+**Path B (Stream Routing via RDMA):** Node 0 runs 4 parallel `produce_stream` workers → `Shuffle` (RoundRobin, 4→2) → `Aggregate` (2→1) → `RemoteSend`. Node 1 does `RemoteRecv` → `Bridge` (600→601) → `Aggregate` with 2 local producers → verify merged count.
+
+Primitives exercised: StreamPipeline, PyPipeline, Shuffle, Aggregate, Bridge, RemoteSend, RemoteRecv.
+
+To support `--python` mode:
+- Created `routing_tests.py` with Python implementations of `produce_stream`, `produce_stream_heavy`, and `count_stream_records` using the SHM module.
+- Registered `routing_tests` module in `runner.py` with prefix matching `("produce_stream", "count_stream_records")`.
+- Added `WasmU32` → `PyFunc` transform in `dag_transform.rs` (was previously missing, only `WasmVoid` was handled).
+
+---
+
+## 26. Coordinator job summary and worker output improvements
+
+**Files:** `NodeAgent/agent/src/coordinator.rs`, `NodeAgent/agent/src/worker.rs`
+
+Improved distributed job output:
+
+- **Coordinator** now prints a timing summary after all nodes complete:
+  ```
+  [coordinator] ── Job Summary ──────────────────────────
+  [coordinator]   node 0 (local):  835ms
+  [coordinator]   node 1 (worker): 1298ms
+  [coordinator]   total wall time: 1350ms
+  [coordinator] ─────────────────────────────────────────
+  ```
+- Same summary is sent to the submit client via `JobResult`.
+- Executor stdout is no longer dumped to the terminal by default (was too verbose). The executor's `log_level` field in DAG JSON controls verbosity (`null` = quiet, `"info"` or `"debug"` for detailed output).
+
+---
+
+## 27. RDMA performance testing and benchmarks
+
+**Files:** `README.md`
+
+Added RDMA performance testing section to README documenting:
+- Prerequisites (`libibverbs-dev`, `perftest`, etc.)
+- Loopback and two-node test commands using `ib_write_lat` / `ib_write_bw`
+- Benchmark results on Mellanox ConnectX-3 (RoCE over 10GbE):
+  - Loopback: 0.75 usec latency, 35.97 Gb/s write bandwidth
+  - Two-node: 1.67 usec latency, 9.14 Gb/s write bandwidth (~10GbE line rate)
+- Tuning notes (MTU, CPU governor, multiple QPs)
