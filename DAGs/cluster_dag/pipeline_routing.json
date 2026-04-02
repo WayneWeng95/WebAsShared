@@ -7,7 +7,7 @@
   "_comment6": "          on node 0; RemoteRecv → Bridge → Aggregate with local producers on node 1.",
   "_comment7": "WASM-only (uses StreamPipeline + WasmVoid directly). Submit without --python.",
   "shm_path_prefix": "/dev/shm/rdma_pr",
-  "log_level": "info",
+  "log_level": null,
   "transfer": true,
   "node_dags": {
     "0": [
