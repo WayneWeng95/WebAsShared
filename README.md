@@ -264,6 +264,76 @@ For multi-node deployment, the NodeAgent introduces the **ClusterDag** format --
 }
 ```
 
+## RDMA Performance Testing
+
+Use the `perftest` suite to verify RDMA connectivity and measure raw link performance between nodes.
+
+### Prerequisites
+
+```bash
+sudo apt-get install -y libibverbs-dev pkg-config librdmacm-dev ibverbs-utils perftest
+```
+
+### Check RDMA Devices
+
+```bash
+ibv_devices        # List available RDMA devices
+ibv_devinfo        # Show device details (ports, MTU, link type, state)
+```
+
+### Single-Node Loopback Test
+
+Run both server and client on the same machine to verify the RDMA stack:
+
+```bash
+# Write latency (loopback)
+ib_write_lat -d mlx4_0 -i 1 -x 0 --report_gbits &
+sleep 2 && ib_write_lat -d mlx4_0 -i 1 -x 0 --report_gbits localhost
+
+# Write bandwidth (loopback)
+ib_write_bw -d mlx4_0 -i 1 -x 0 --report_gbits &
+sleep 2 && ib_write_bw -d mlx4_0 -i 1 -x 0 --report_gbits localhost
+```
+
+### Two-Node Test
+
+Start the server on one node, then the client on the other. Use `-i 2` for port 2 if that is the port on the RDMA network (e.g., `10.10.1.x`).
+
+```bash
+# On the server node (e.g., 10.10.1.1):
+ib_write_lat -d mlx4_0 -i 2 -x 0 --report_gbits
+ib_write_bw  -d mlx4_0 -i 2 -x 0 --report_gbits
+
+# On the client node (e.g., 10.10.1.2):
+ib_write_lat -d mlx4_0 -i 2 -x 0 --report_gbits 10.10.1.1
+ib_write_bw  -d mlx4_0 -i 2 -x 0 --report_gbits 10.10.1.1
+```
+
+### Benchmark Results
+
+**Hardware**: Mellanox ConnectX-3 (`mlx4_0`), dual-port, RoCE (Ethernet link layer), MTU 1024
+
+#### Loopback (single-node, PCIe/internal)
+
+| Test | Result |
+|------|--------|
+| Write Latency | 0.75 usec typical (0.74 min, 0.78 p99) |
+| Write Bandwidth | 35.97 Gb/s |
+| Read Bandwidth | 35.64 Gb/s |
+
+#### Two-Node (10.10.1.1 <-> 10.10.1.2, 10GbE)
+
+| Test | Result |
+|------|--------|
+| Write Latency | 1.67 usec typical (1.63 min, 1.74 p99) |
+| Write Bandwidth | 9.14 Gb/s (~line rate for 10GbE) |
+
+### Tuning Notes
+
+- **MTU**: Currently 1024. Setting jumbo frames (4096 or 9000) on NICs and switch can reduce per-packet overhead.
+- **CPU governor**: Set to `performance` (`sudo cpupower frequency-set -g performance`) for stable latency measurements.
+- **Multiple QPs**: Use `-q 4` with `ib_write_bw` to test with multiple queue pairs.
+
 ## Key Design Decisions
 
 - **Zero-copy local routing**: stream data is never copied between pipeline stages on the same machine; only page-chain head/tail pointers are atomically updated.
