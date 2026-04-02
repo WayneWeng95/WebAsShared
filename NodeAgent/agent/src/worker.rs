@@ -138,6 +138,11 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                             "[worker {}] job {} completed in {}ms",
                             config.node_id, job_id, result.duration_ms
                         );
+                        if !result.stdout_tail.is_empty() {
+                            for line in result.stdout_tail.lines() {
+                                println!("[worker {}]   {}", config.node_id, line);
+                            }
+                        }
                         send_message(
                             &mut stream,
                             &make_message(

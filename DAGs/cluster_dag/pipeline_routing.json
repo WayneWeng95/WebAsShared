@@ -1,0 +1,160 @@
+{
+  "_comment": "ClusterDag: Distributed pipeline + routing demo across 2 nodes.",
+  "_comment2": "Two parallel data paths exercise both pipelining and routing primitives:",
+  "_comment3": "  Path A: Image StreamPipeline split across nodes (load→rotate→grayscale on node 0,",
+  "_comment4": "          equalize→blur→export on node 1) with per-round RDMA send/recv.",
+  "_comment5": "  Path B: Parallel stream producers → Shuffle(RoundRobin) → Aggregate → RemoteSend",
+  "_comment6": "          on node 0; RemoteRecv → Bridge → Aggregate with local producers on node 1.",
+  "_comment7": "WASM-only (uses StreamPipeline + WasmVoid directly). Submit without --python.",
+  "shm_path_prefix": "/dev/shm/rdma_pr",
+  "log_level": "info",
+  "transfer": true,
+  "node_dags": {
+    "0": [
+      {
+        "_comment": "Path A: Image pipeline (3 rounds) → RDMA send",
+        "id": "load_images",
+        "deps": [],
+        "kind": { "Input": {
+          "paths": [
+            "Executor/data/img_gradient.ppm",
+            "Executor/data/img_checkerboard.ppm",
+            "Executor/data/img_rings.ppm"
+          ],
+          "slot": 10,
+          "binary": true
+        }}
+      },
+
+      {
+        "_comment": "3-round pipeline: decode PPM → rotate → grayscale, send each round to node 1.",
+        "_comment2": "free_after=true resets slot 40 between rounds so each send is one image.",
+        "id": "img_pipeline",
+        "deps": ["load_images"],
+        "kind": { "StreamPipeline": {
+          "rounds": 3,
+          "stages": [
+            { "func": "img_load_ppm", "arg0": 10, "arg1": 20 },
+            { "func": "img_rotate",    "arg0": 20, "arg1": 30 },
+            { "func": "img_grayscale", "arg0": 30, "arg1": 40 }
+          ],
+          "rdma_send": {
+            "peer": 1,
+            "slot": 40,
+            "slot_kind": "Stream",
+            "free_after": true
+          }
+        }}
+      },
+
+      { "_comment": "Path B: Producers → Shuffle → Aggregate → RDMA send",
+        "id": "prod_0", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 500 } } },
+      { "id": "prod_1", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 501 } } },
+      { "id": "prod_2", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 502 } } },
+      { "id": "prod_3", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 503 } } },
+
+      {
+        "_comment": "Shuffle 4 upstream slots into 2 downstream slots via RoundRobin.",
+        "id": "shuffle_rr",
+        "deps": ["prod_0", "prod_1", "prod_2", "prod_3"],
+        "kind": { "Shuffle": {
+          "upstream":   [500, 501, 502, 503],
+          "downstream": [510, 511],
+          "policy": { "type": "RoundRobin" }
+        }}
+      },
+
+      {
+        "_comment": "Aggregate the 2 shuffled slots into a single stream.",
+        "id": "agg_shuffled",
+        "deps": ["shuffle_rr"],
+        "kind": { "Aggregate": { "upstream": [510, 511], "downstream": 520 } }
+      },
+
+      {
+        "id": "count_agg",
+        "deps": ["agg_shuffled"],
+        "kind": { "WasmU32": { "func": "count_stream_records", "arg": 520 } }
+      },
+
+      {
+        "_comment": "Send the aggregated stream to node 1 via RDMA.",
+        "id": "send_stream",
+        "deps": ["agg_shuffled"],
+        "kind": { "RemoteSend": { "slot": 520, "slot_kind": "Stream", "peer": 1 } }
+      }
+    ],
+
+    "1": [
+      {
+        "_comment": "Path A: receive grayscale images from node 0 into slot 40,",
+        "_comment2": "then equalize → blur → export to I/O slot 1.",
+        "id": "img_pipeline",
+        "deps": [],
+        "kind": { "StreamPipeline": {
+          "rounds": 3,
+          "stages": [
+            { "func": "img_equalize",   "arg0": 40, "arg1": 50 },
+            { "func": "img_blur",       "arg0": 50, "arg1": 60 },
+            { "func": "img_export_ppm", "arg0": 60, "arg1": 1  }
+          ],
+          "rdma_recv": {
+            "peer": 0,
+            "slot": 40,
+            "slot_kind": "Stream"
+          }
+        }}
+      },
+
+      {
+        "id": "save_images",
+        "deps": ["img_pipeline"],
+        "kind": { "Output": {
+          "paths": [
+            "/tmp/rdma_pipeline_routing_out/gradient_processed.pgm",
+            "/tmp/rdma_pipeline_routing_out/checkerboard_processed.pgm",
+            "/tmp/rdma_pipeline_routing_out/rings_processed.pgm"
+          ],
+          "slot": 1
+        }}
+      },
+
+      {
+        "_comment": "Path B: Receive the shuffled+aggregated stream from node 0.",
+        "id": "recv_stream",
+        "deps": [],
+        "kind": { "RemoteRecv": { "slot": 600, "slot_kind": "Stream", "peer": 0 } }
+      },
+
+      {
+        "_comment": "Bridge: zero-copy redirect slot 600 → 601.",
+        "id": "bridge_recv",
+        "deps": ["recv_stream"],
+        "kind": { "Bridge": { "from": 600, "to": 601 } }
+      },
+
+      { "id": "local_prod_0", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 700 } } },
+      { "id": "local_prod_1", "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 701 } } },
+
+      {
+        "_comment": "Aggregate: merge bridged remote data + local producers into one stream.",
+        "id": "agg_all",
+        "deps": ["bridge_recv", "local_prod_0", "local_prod_1"],
+        "kind": { "Aggregate": { "upstream": [601, 700, 701], "downstream": 800 } }
+      },
+
+      {
+        "_comment": "Verify: count total records after merging remote + local streams.",
+        "id": "count_merged",
+        "deps": ["agg_all"],
+        "kind": { "WasmU32": { "func": "count_stream_records", "arg": 800 } }
+      },
+
+      {
+        "id": "free",
+        "deps": ["save_images", "count_merged"],
+        "kind": { "FreeSlots": { "stream": [40, 50, 60, 600, 601, 700, 701, 800], "io": [1] } }
+      }
+    ]
+  }
+}

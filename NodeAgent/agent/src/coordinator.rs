@@ -204,6 +204,11 @@ fn handle_submit(
                 "[coordinator] local executor completed in {}ms",
                 result.duration_ms
             );
+            if !result.stdout_tail.is_empty() {
+                for line in result.stdout_tail.lines() {
+                    println!("[coordinator]   {}", line);
+                }
+            }
         } else {
             eprintln!(
                 "[coordinator] local executor failed (exit={:?}): {}",
@@ -263,6 +268,11 @@ fn collect_worker_results(
                                 "[coordinator] worker {} completed job in {}ms",
                                 worker_id, p.duration_ms
                             );
+                            if !p.stdout_tail.is_empty() {
+                                for line in p.stdout_tail.lines() {
+                                    println!("[coordinator]   worker {}: {}", worker_id, line);
+                                }
+                            }
                             summary_lines.push(format!(
                                 "worker {}: completed in {}ms",
                                 worker_id, p.duration_ms
