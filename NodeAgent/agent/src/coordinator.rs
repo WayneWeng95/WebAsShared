@@ -319,22 +319,12 @@ fn collect_worker_results(
 
     // Print timing summary.
     let total_wall_ms = job_start.elapsed().as_millis() as u64;
-    let sum_all: u64 = local_ms + worker_durations.iter().map(|(_, ms)| ms).sum::<u64>();
-    let overlap_ms = sum_all.saturating_sub(total_wall_ms);
-    let slowest_worker = worker_durations.iter().map(|(_, ms)| *ms).max().unwrap_or(0);
 
     println!("[coordinator] ── Job Summary ──────────────────────────");
     println!("[coordinator]   node 0 (local):  {}ms", local_ms);
     for (wid, wms) in &worker_durations {
         println!("[coordinator]   node {} (worker): {}ms", wid, wms);
     }
-    println!("[coordinator]   ────────────────────────────────────");
-    println!("[coordinator]   overlap:         {}ms", overlap_ms);
-    println!("[coordinator]   speedup:         {:.2}x  ({} / {}ms)",
-        sum_all as f64 / total_wall_ms as f64, sum_all, total_wall_ms);
-    println!("[coordinator]   bottleneck:      {}",
-        if local_ms >= slowest_worker { "node 0 (local)" }
-        else { "worker (waiting for data)" });
     println!("[coordinator]   total wall time: {}ms", total_wall_ms);
     println!("[coordinator] ─────────────────────────────────────────");
 
@@ -344,7 +334,6 @@ fn collect_worker_results(
     for (wid, wms) in &worker_durations {
         client_summary.push(format!("node {} (worker): {}ms", wid, wms));
     }
-    client_summary.push(format!("overlap: {}ms, speedup: {:.2}x", overlap_ms, sum_all as f64 / total_wall_ms as f64));
     client_summary.push(format!("total wall time: {}ms", total_wall_ms));
 
     // Send final result to the client.

@@ -28,6 +28,7 @@ _MODULE_MAP = {
     "finra_workload": ("finra_",),
     "ml_workload":    ("ml_",),
     "image_process":  ("img_",),
+    "routing_tests":  ("produce_stream", "count_stream_records"),
 }
 
 _loaded_modules = {}

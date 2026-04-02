@@ -320,6 +320,12 @@ fn transform_node_to_python(node: &mut Value) -> Result<()> {
         return Ok(());
     }
 
+    // WasmU32 { func, arg } → PyFunc { func, arg }
+    if let Some(params) = kind.get("WasmU32").cloned() {
+        *kind = serde_json::json!({ "PyFunc": params });
+        return Ok(());
+    }
+
     // StreamPipeline → PyPipeline (convert stage arg naming: arg0→arg, arg1→arg2)
     if let Some(mut params) = kind.get("StreamPipeline").cloned() {
         if let Some(stages) = params.get_mut("stages").and_then(|v| v.as_array_mut()) {

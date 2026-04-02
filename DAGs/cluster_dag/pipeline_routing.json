@@ -5,7 +5,7 @@
   "_comment4": "          equalize→blur→export on node 1) with per-round RDMA send/recv.",
   "_comment5": "  Path B: Parallel stream producers → Shuffle(RoundRobin) → Aggregate → RemoteSend",
   "_comment6": "          on node 0; RemoteRecv → Bridge → Aggregate with local producers on node 1.",
-  "_comment7": "WASM-only (uses StreamPipeline + WasmVoid directly). Submit without --python.",
+  "_comment7": "Works in both WASM and Python modes (submit with or without --python).",
   "shm_path_prefix": "/dev/shm/rdma_pr",
   "log_level": null,
   "transfer": true,
