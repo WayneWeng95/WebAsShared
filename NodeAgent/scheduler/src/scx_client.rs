@@ -3,15 +3,12 @@
 //! Protocol: send a JSON request line, receive a JSON response line.
 //! Socket default: `/var/run/scx/root/stats`
 
+use node_agent_common as common;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
-
-const DEFAULT_SOCKET_PATH: &str = "/var/run/scx/root/stats";
-const CONNECT_TIMEOUT_MS: u64 = 500;
-const READ_TIMEOUT_MS: u64 = 1000;
 
 /// Snapshot of SCX scheduler stats relevant for cross-node scheduling decisions.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -62,7 +59,7 @@ impl ScxStatsClient {
     pub fn new(socket_path: Option<&str>) -> Self {
         Self {
             socket_path: socket_path
-                .unwrap_or(DEFAULT_SOCKET_PATH)
+                .unwrap_or(common::DEFAULT_SCX_SOCKET)
                 .to_string(),
         }
     }
@@ -72,10 +69,10 @@ impl ScxStatsClient {
     pub fn fetch(&self) -> Option<ScxNodeSnapshot> {
         let stream = UnixStream::connect(&self.socket_path).ok()?;
         stream
-            .set_read_timeout(Some(Duration::from_millis(READ_TIMEOUT_MS)))
+            .set_read_timeout(Some(Duration::from_millis(common::SCX_READ_TIMEOUT_MS)))
             .ok()?;
         stream
-            .set_write_timeout(Some(Duration::from_millis(CONNECT_TIMEOUT_MS)))
+            .set_write_timeout(Some(Duration::from_millis(common::SCX_CONNECT_TIMEOUT_MS)))
             .ok()?;
 
         self.fetch_from_stream(stream)

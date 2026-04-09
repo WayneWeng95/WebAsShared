@@ -67,8 +67,21 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
     println!("[coordinator] use `node-agent submit` to submit jobs");
     println!("[coordinator] press Ctrl+C to stop");
 
+    let status_interval = Duration::from_secs(config.metrics.status_print_interval_s);
+    let mut last_status_print = Instant::now();
+
     // Main event loop: accept client connections for submit/status.
     loop {
+        // Periodic cluster status printout.
+        if last_status_print.elapsed() >= status_interval {
+            let s = state.lock().unwrap();
+            if !s.workers.is_empty() || s.scx_view.node_count() > 0 {
+                print_cluster_status(&s);
+            }
+            drop(s);
+            last_status_print = Instant::now();
+        }
+
         match listener.accept() {
             Ok((mut stream, addr)) => {
                 // Could be a worker or a client command.
@@ -304,12 +317,16 @@ fn collect_worker_results(
                             );
                         }
                         MessageKind::Metrics => {
-                            // Log metrics from worker.
+                            // Log metrics and update cluster view.
                             if let Ok(m) = serde_json::from_value::<metrics::NodeMetrics>(msg.payload) {
-                                // Update SCX cluster view if worker reported SCX data.
-                                if let Some(ref scx_snap) = m.scx {
-                                    s.scx_view.update(m.node_id, scx_snap.clone(), m.timestamp_ms);
-                                }
+                                s.scx_view.update(
+                                    m.node_id,
+                                    m.scx.clone(),
+                                    m.rss_bytes,
+                                    m.executor_running,
+                                    m.current_job_id.clone(),
+                                    m.timestamp_ms,
+                                );
                                 let _ = metrics::append_metrics_log(&config.metrics.log_path, &m);
                             }
                         }
@@ -394,6 +411,36 @@ fn handle_status(
         )?,
     )?;
     Ok(())
+}
+
+/// Print cluster node states to the console.
+fn print_cluster_status(state: &CoordinatorState) {
+    println!("[coordinator] ── Cluster Status ──");
+    for w in state.workers.values() {
+        let job_str = w.running_job.as_deref().unwrap_or("idle");
+        print!("  node {}: job={}", w.node_id, job_str);
+
+        if let Some(status) = state.scx_view.snapshots.get(&w.node_id) {
+            let rss_mb = status.rss_bytes as f64 / (1024.0 * 1024.0);
+            print!(", rss={:.0} MiB", rss_mb);
+            if let Some(ref scx) = status.scx {
+                print!(
+                    ", cpu_busy={:.1}%, load={:.1}, migrations={}",
+                    scx.cpu_busy, scx.load, scx.nr_migrations,
+                );
+            }
+        }
+        println!();
+    }
+
+    if state.scx_view.node_count() > 0 {
+        let scores = scheduler::score_nodes(&state.scx_view);
+        if !scores.is_empty() {
+            let best: Vec<u32> = scores.iter().map(|(id, _)| *id).collect();
+            println!("  placement order: {:?} (best first)", best);
+        }
+    }
+    println!("[coordinator] ─────────────────────");
 }
 
 /// Generate a simple timestamp-based ID (no external deps).

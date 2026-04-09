@@ -1,5 +1,6 @@
 //! Agent configuration: parsed from `agent.toml`.
 
+use node_agent_common as common;
 use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::Path;
@@ -36,12 +37,12 @@ pub enum Role {
 pub struct ClusterConfig {
     /// IP addresses of all nodes in the cluster, in node_id order.
     pub ips: Vec<String>,
-    /// TCP port for NodeAgent control plane (default: 9500).
+    /// TCP port for NodeAgent control plane.
     #[serde(default = "default_agent_port")]
     pub agent_port: u16,
 }
 
-fn default_agent_port() -> u16 { 9500 }
+fn default_agent_port() -> u16 { common::DEFAULT_AGENT_PORT }
 
 #[derive(Debug, Deserialize)]
 pub struct PathsConfig {
@@ -54,7 +55,7 @@ pub struct PathsConfig {
 }
 
 fn default_executor_bin() -> String { "../Executor/target/release/host".into() }
-fn default_executor_work_dir() -> String { "../Executor/host".into() }
+fn default_executor_work_dir() -> String { common::DEFAULT_EXECUTOR_WORK_DIR.into() }
 
 #[derive(Debug, Deserialize)]
 pub struct MetricsConfig {
@@ -64,16 +65,21 @@ pub struct MetricsConfig {
     /// Path to the metrics JSON-lines log file.
     #[serde(default = "default_metrics_log")]
     pub log_path: String,
+    /// Interval for printing node status to the console (seconds).
+    #[serde(default = "default_status_print_interval")]
+    pub status_print_interval_s: u64,
 }
 
-fn default_metrics_interval() -> u64 { 2000 }
-fn default_metrics_log() -> String { "/tmp/node_agent_metrics.jsonl".into() }
+fn default_metrics_interval() -> u64 { common::DEFAULT_METRICS_INTERVAL_MS }
+fn default_metrics_log() -> String { common::DEFAULT_METRICS_LOG.into() }
+fn default_status_print_interval() -> u64 { common::DEFAULT_STATUS_PRINT_INTERVAL_S }
 
 impl Default for MetricsConfig {
     fn default() -> Self {
         Self {
             interval_ms: default_metrics_interval(),
             log_path: default_metrics_log(),
+            status_print_interval_s: default_status_print_interval(),
         }
     }
 }
@@ -88,8 +94,8 @@ pub struct TimeoutConfig {
     pub health_check_s: u64,
 }
 
-fn default_job_timeout() -> u64 { 300 }
-fn default_health_check() -> u64 { 5 }
+fn default_job_timeout() -> u64 { common::DEFAULT_JOB_TIMEOUT_S }
+fn default_health_check() -> u64 { common::DEFAULT_HEALTH_CHECK_S }
 
 impl Default for TimeoutConfig {
     fn default() -> Self {
@@ -110,8 +116,8 @@ pub struct ScxConfig {
     pub socket_path: String,
 }
 
-fn default_scx_enabled() -> bool { true }
-fn default_scx_socket() -> String { "/var/run/scx/root/stats".into() }
+fn default_scx_enabled() -> bool { common::DEFAULT_SCX_ENABLED }
+fn default_scx_socket() -> String { common::DEFAULT_SCX_SOCKET.into() }
 
 impl Default for ScxConfig {
     fn default() -> Self {

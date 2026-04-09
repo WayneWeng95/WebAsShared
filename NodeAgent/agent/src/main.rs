@@ -7,13 +7,13 @@ mod metrics;
 mod protocol;
 mod worker;
 
+use node_agent_common as common;
+
 use anyhow::{bail, Context, Result};
 use config::{AgentConfig, Role};
 use metrics::MetricsCollector;
 use std::path::Path;
 use std::time::Instant;
-
-const DEFAULT_EXECUTOR_BIN: &str = "Executor/target/release/host";
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -47,9 +47,13 @@ fn main() -> Result<()> {
 fn cmd_run(args: &[String]) -> Result<()> {
     let dag_path = parse_dag_flag(args)?;
     let executor_bin = parse_executor_flag(args)
-        .unwrap_or_else(|_| DEFAULT_EXECUTOR_BIN.to_string());
+        .unwrap_or_else(|_| common::DEFAULT_EXECUTOR_BIN.to_string());
     let metrics_log = parse_string_flag(args, "--metrics-log")
-        .unwrap_or_else(|_| "/tmp/node_agent_metrics.jsonl".to_string());
+        .unwrap_or_else(|_| common::DEFAULT_METRICS_LOG.to_string());
+    let status_interval_s: u64 = parse_string_flag(args, "--status-interval")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(common::DEFAULT_STATUS_PRINT_INTERVAL_S);
     let python_mode = has_flag(args, "--python");
     let aot_mode = has_flag(args, "--aot");
     let python_script = parse_string_flag(args, "--python-script").ok();
@@ -117,11 +121,13 @@ fn cmd_run(args: &[String]) -> Result<()> {
 
     // Poll executor and collect metrics until it finishes.
     let mut collector = MetricsCollector::new(0);
-    let metrics_interval = std::time::Duration::from_secs(2);
+    let metrics_interval = std::time::Duration::from_millis(common::DEFAULT_METRICS_INTERVAL_MS);
     let mut last_metrics = Instant::now();
+    let status_interval = std::time::Duration::from_secs(status_interval_s);
+    let mut last_status = Instant::now();
 
     loop {
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        std::thread::sleep(std::time::Duration::from_millis(common::POLL_SLEEP_MS));
 
         // Sample metrics periodically.
         if last_metrics.elapsed() >= metrics_interval {
@@ -132,6 +138,13 @@ fn cmd_run(args: &[String]) -> Result<()> {
                 Some(handle.elapsed_ms()),
             );
             let _ = metrics::append_metrics_log(&metrics_log, &m);
+
+            // Print node status to console.
+            if last_status.elapsed() >= status_interval {
+                print_node_status(&m);
+                last_status = Instant::now();
+            }
+
             last_metrics = Instant::now();
         }
 
@@ -287,22 +300,31 @@ fn cmd_status(args: &[String]) -> Result<()> {
             );
         }
 
-        // Display SCX scheduling data if available.
+        // Display node scheduling data if available.
         if let Some(ref scx_view) = payload.scx_cluster {
-            println!("\n=== SCX Scheduler Stats ===");
+            println!("\n=== Node Scheduling Stats ===");
             let scores = scheduler::score_nodes(scx_view);
             for (node_id, score) in &scores {
-                if let Some(snap) = scx_view.snapshots.get(node_id) {
-                    println!(
-                        "  node {}: cpu_busy={:.1}%, load={:.1}, migrations={}, score={:.3}",
-                        node_id, snap.cpu_busy, snap.load, snap.nr_migrations, score
+                if let Some(status) = scx_view.snapshots.get(node_id) {
+                    let job_str = status.current_job_id.as_deref().unwrap_or("idle");
+                    let rss_mb = status.rss_bytes as f64 / (1024.0 * 1024.0);
+                    print!(
+                        "  node {}: rss={:.0} MiB, job={}, score={:.3}",
+                        node_id, rss_mb, job_str, score
                     );
-                    for (numa_id, numa) in &snap.numa_nodes {
-                        println!(
-                            "    NUMA {}: load={:.1}, imbal={:.1}",
-                            numa_id, numa.load, numa.imbal
+                    if let Some(ref scx) = status.scx {
+                        print!(
+                            ", cpu_busy={:.1}%, load={:.1}, migrations={}",
+                            scx.cpu_busy, scx.load, scx.nr_migrations
                         );
+                        for (numa_id, numa) in &scx.numa_nodes {
+                            print!(
+                                "\n    NUMA {}: load={:.1}, imbal={:.1}",
+                                numa_id, numa.load, numa.imbal
+                            );
+                        }
                     }
+                    println!();
                 }
             }
             if !scores.is_empty() {
@@ -405,6 +427,31 @@ fn aot_compile(wasm_path: &str) -> Result<String> {
     Ok(cwasm_path)
 }
 
+// ── Status printing ─────────────────────────────────────────────────────────
+
+/// Print a single-node status line to the console.
+fn print_node_status(m: &metrics::NodeMetrics) {
+    let rss_mb = m.rss_bytes as f64 / (1024.0 * 1024.0);
+    let job_str = m.current_job_id.as_deref().unwrap_or("idle");
+    let elapsed_str = m.job_elapsed_ms
+        .map(|ms| format!("{:.1}s", ms as f64 / 1000.0))
+        .unwrap_or_else(|| "-".into());
+
+    let mut line = format!(
+        "[status] node={}, cpu={:.1}%, rss={:.0} MiB, shm_bump={}, job={}, elapsed={}",
+        m.node_id, m.cpu_usage_pct, rss_mb, m.shm_bump_offset, job_str, elapsed_str,
+    );
+
+    if let Some(ref scx) = m.scx {
+        line.push_str(&format!(
+            ", scx(cpu_busy={:.1}%, load={:.1}, migrations={})",
+            scx.cpu_busy, scx.load, scx.nr_migrations,
+        ));
+    }
+
+    println!("{}", line);
+}
+
 fn print_usage() {
     eprintln!("NodeAgent v0.1.0 — Distributed DAG execution agent");
     eprintln!();
@@ -415,12 +462,13 @@ fn print_usage() {
     eprintln!("  node-agent status [--config agent.toml]");
     eprintln!();
     eprintln!("Run flags:");
-    eprintln!("  --python                Execute with Python guest (default: Rust/WASM)");
-    eprintln!("  --aot                   AOT-compile python.wasm to .cwasm (skips JIT at runtime)");
-    eprintln!("  --python-script <path>  Python runner script (default: Executor/py_guest/python/runner.py)");
-    eprintln!("  --python-wasm <path>    Python WASM runtime (default: /opt/myapp/python-3.12.0.wasm)");
-    eprintln!("  --executor <path>       Executor binary (default: Executor/target/release/host)");
-    eprintln!("  --metrics-log <path>    Metrics log file (default: /tmp/node_agent_metrics.jsonl)");
+    eprintln!("  --python                   Execute with Python guest (default: Rust/WASM)");
+    eprintln!("  --aot                      AOT-compile python.wasm to .cwasm (skips JIT at runtime)");
+    eprintln!("  --python-script <path>     Python runner script (default: Executor/py_guest/python/runner.py)");
+    eprintln!("  --python-wasm <path>       Python WASM runtime (default: /opt/myapp/python-3.12.0.wasm)");
+    eprintln!("  --executor <path>          Executor binary (default: {})", common::DEFAULT_EXECUTOR_BIN);
+    eprintln!("  --metrics-log <path>       Metrics log file (default: {})", common::DEFAULT_METRICS_LOG);
+    eprintln!("  --status-interval <secs>   Status print interval (default: {}s)", common::DEFAULT_STATUS_PRINT_INTERVAL_S);
     eprintln!();
     eprintln!("Examples:");
     eprintln!("  node-agent run DAGs/workload_dag/finra_demo.json");

@@ -47,11 +47,16 @@ name = "node-agent"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "node-agent-common",
  "scheduler",
  "serde",
  "serde_json",
  "toml",
 ]
+
+[[package]]
+name = "node-agent-common"
+version = "0.1.0"
 
 [[package]]
 name = "proc-macro2"
@@ -75,6 +80,7 @@ dependencies = [
 name = "scheduler"
 version = "0.1.0"
 dependencies = [
+ "node-agent-common",
  "serde",
  "serde_json",
 ]

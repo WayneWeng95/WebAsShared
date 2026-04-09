@@ -1,6 +1,7 @@
 //! Worker daemon: connects to coordinator, receives jobs, launches executor.
 
 use crate::config::AgentConfig;
+use node_agent_common as common;
 use crate::executor::ExecutorHandle;
 use crate::metrics::{self, MetricsCollector};
 use crate::protocol::*;
@@ -20,8 +21,11 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
         config.node_id, coord_addr
     );
 
-    let mut stream = connect_with_retry(&coord_addr, 10, Duration::from_secs(2))
-        .with_context(|| format!("connect to coordinator at {}", coord_addr))?;
+    let mut stream = connect_with_retry(
+        &coord_addr,
+        common::WORKER_CONNECT_RETRIES,
+        Duration::from_secs(common::WORKER_CONNECT_RETRY_INTERVAL_S),
+    ).with_context(|| format!("connect to coordinator at {}", coord_addr))?;
 
     println!("[worker {}] connected", config.node_id);
 
@@ -39,9 +43,12 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
     let mut current_executor: Option<ExecutorHandle> = None;
     let mut current_shm_path: Option<String> = None;
 
+    let status_interval = Duration::from_secs(config.metrics.status_print_interval_s);
+    let mut last_status_print = Instant::now();
+
     // Main loop: receive messages from coordinator.
     // Use non-blocking reads with a poll interval so we can also monitor the executor.
-    stream.set_read_timeout(Some(Duration::from_millis(500)))?;
+    stream.set_read_timeout(Some(Duration::from_millis(common::WORKER_POLL_TIMEOUT_MS)))?;
 
     loop {
         // Try to receive a message (with timeout).
@@ -175,7 +182,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                 }
                 None => {
                     // Still running — send periodic metrics.
-                    // (Throttled by the 500ms read timeout above.)
+                    // (Throttled by the poll timeout above.)
                     let m = collector.sample(
                         current_shm_path.as_deref(),
                         true,
@@ -183,6 +190,12 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                         Some(exec.elapsed_ms()),
                     );
                     let _ = metrics::append_metrics_log(&config.metrics.log_path, &m);
+
+                    // Print status to console periodically.
+                    if last_status_print.elapsed() >= status_interval {
+                        print_worker_status(config.node_id, &m);
+                        last_status_print = Instant::now();
+                    }
 
                     // Send metrics to coordinator at a lower rate.
                     static mut LAST_METRICS: Option<Instant> = None;
@@ -226,6 +239,29 @@ fn connect_with_retry(addr: &str, max_retries: u32, interval: Duration) -> Resul
         }
     }
     unreachable!()
+}
+
+/// Print worker node status to the console.
+fn print_worker_status(node_id: u32, m: &metrics::NodeMetrics) {
+    let rss_mb = m.rss_bytes as f64 / (1024.0 * 1024.0);
+    let job_str = m.current_job_id.as_deref().unwrap_or("idle");
+    let elapsed_str = m.job_elapsed_ms
+        .map(|ms| format!("{:.1}s", ms as f64 / 1000.0))
+        .unwrap_or_else(|| "-".into());
+
+    let mut line = format!(
+        "[worker {}] cpu={:.1}%, rss={:.0} MiB, job={}, elapsed={}",
+        node_id, m.cpu_usage_pct, rss_mb, job_str, elapsed_str,
+    );
+
+    if let Some(ref scx) = m.scx {
+        line.push_str(&format!(
+            ", scx(cpu_busy={:.1}%, load={:.1}, migrations={})",
+            scx.cpu_busy, scx.load, scx.nr_migrations,
+        ));
+    }
+
+    println!("{}", line);
 }
 
 /// Extract shm_path from a DAG JSON string (best-effort).

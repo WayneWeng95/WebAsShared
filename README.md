@@ -48,6 +48,7 @@ WebAsShared/
 |   |-- py_guest/python/            # Python workloads (runner.py, shm.py, workload modules)
 |   +-- data/                       # Test datasets (corpus, trades, MNIST, images)
 |-- NodeAgent/                      # Multi-machine deployment agent
+|   |-- common/src/lib.rs           # All tunable constants (network, timeouts, metrics, SCX, advisor)
 |   |-- agent/src/                  # Coordinator/worker daemon, executor interface, metrics
 |   |-- scheduler/src/              # SCX sched_ext integration (stats client, cluster view, advisor)
 |   |-- agent_coordinator.toml      # Coordinator config (IPs, ports, paths, timeouts, SCX)
@@ -190,7 +191,7 @@ ClusterDag files use unified `Func` nodes that are automatically transformed to 
 | `cluster_dag.rs` | Split a ClusterDag into per-node DAGs with RDMA config injection |
 | `metrics.rs` | CPU, RSS, SHM bump offset sampling; JSON-lines log output |
 | `protocol.rs` | Length-prefixed JSON over TCP control plane |
-| `config.rs` | Agent config (role, cluster IPs, paths, timeouts, SCX settings) |
+| `config.rs` | Agent config parsed from `agent.toml` (references `common` crate for defaults) |
 
 ### Scheduler Crate (`NodeAgent/scheduler/`)
 
@@ -201,8 +202,8 @@ Each worker node runs an SCX scheduler (e.g. `scx_rusty`, `scx_bpfland`) that ex
 | Module | Role |
 |--------|------|
 | `scx_client.rs` | Connects to the local SCX stats UNIX socket (`/var/run/scx/root/stats`), fetches `ScxNodeSnapshot` |
-| `scx_cluster.rs` | `ScxClusterView`: aggregates SCX snapshots from all workers with staleness tracking |
-| `advisor.rs` | Scores nodes for workload placement (CPU busy, NUMA imbalance, migration rate) |
+| `scx_cluster.rs` | `ScxClusterView`: aggregates per-node status (SCX stats, memory, job state) with staleness tracking |
+| `advisor.rs` | Scores nodes for workload placement (CPU busy, memory, NUMA imbalance, migrations, job queue) |
 
 **Data flow:**
 
@@ -211,26 +212,41 @@ SCX Scheduler (kernel)
     │
     │ UNIX socket (JSON)
     v
-Worker MetricsCollector ──► ScxNodeSnapshot
+Worker MetricsCollector ──► ScxNodeSnapshot + rss_bytes + job state
     │
     │ TCP Metrics message
     v
-Coordinator ScxClusterView ──► advisor::score_nodes()
+Coordinator ScxClusterView (NodeStatus per node) ──► advisor::score_nodes()
     │
     v
 StatusResponse (visible via `node-agent status`)
 ```
 
-**SCX stats collected per node:**
+**Data collected per node (`NodeStatus`):**
 
-| Field | Description |
-|-------|-------------|
-| `cpu_busy` | Overall CPU busy percentage (100.0 = all CPUs fully busy) |
-| `load` | Weighted system load (sum of weight * duty_cycle) |
-| `nr_migrations` | Task migrations from load balancing |
-| `slice_us` | Current scheduling time slice (microseconds) |
-| `time_used` | Time spent in userspace scheduler |
-| `numa_nodes` | Per-NUMA-node load and imbalance |
+| Field | Source | Description |
+|-------|--------|-------------|
+| `cpu_busy` | SCX | Overall CPU busy percentage (100.0 = all CPUs fully busy) |
+| `load` | SCX | Weighted system load (sum of weight * duty_cycle) |
+| `nr_migrations` | SCX | Task migrations from load balancing |
+| `slice_us` | SCX | Current scheduling time slice (microseconds) |
+| `time_used` | SCX | Time spent in userspace scheduler |
+| `numa_nodes` | SCX | Per-NUMA-node load and imbalance |
+| `rss_bytes` | `/proc` | Resident memory usage of the agent process |
+| `executor_running` | NodeAgent | Whether a job executor is currently active |
+| `current_job_id` | NodeAgent | ID of the job currently running (if any) |
+
+**Advisor scoring weights:**
+
+| Factor | Weight | Signal |
+|--------|--------|--------|
+| CPU busy | 0.30 | Kernel-level CPU utilization from SCX |
+| Job running | 0.25 | Penalizes nodes already executing a job |
+| Memory | 0.20 | RSS memory pressure relative to cluster |
+| NUMA imbalance | 0.15 | Scheduling imbalance across NUMA nodes |
+| Migrations | 0.10 | High migration rate indicates thrashing |
+
+When SCX is unavailable, the advisor still scores on memory and job state (SCX factors default to 0).
 
 **Configuration** (`agent.toml`):
 
@@ -238,9 +254,85 @@ StatusResponse (visible via `node-agent status`)
 [scx]
 enabled = true                                   # default: true
 socket_path = "/var/run/scx/root/stats"          # default SCX socket
+
+[metrics]
+interval_ms = 2000                               # metrics sampling interval
+status_print_interval_s = 5                      # console status printout interval
+log_path = "/tmp/node_agent_metrics.jsonl"       # metrics log file
+
+[timeouts]
+job_timeout_s = 300                              # max job execution time
+health_check_s = 5                               # idle worker health check interval
+```
+
+All defaults are defined in `common/src/lib.rs` (shared by both `agent` and `scheduler` crates), following the same pattern as `Executor/common/src/lib.rs`:
+
+| Constant | Default | Description |
+|----------|---------|-------------|
+| `DEFAULT_AGENT_PORT` | 9500 | TCP control plane port |
+| `DEFAULT_METRICS_INTERVAL_MS` | 2000 | Metrics sampling interval (ms) |
+| `DEFAULT_STATUS_PRINT_INTERVAL_S` | 5 | Console status printout interval (s) |
+| `DEFAULT_JOB_TIMEOUT_S` | 300 | Max job execution time (s) |
+| `DEFAULT_HEALTH_CHECK_S` | 5 | Worker health check interval (s) |
+| `DEFAULT_SCX_ENABLED` | true | SCX stats collection on/off |
+| `DEFAULT_SCX_SOCKET` | `/var/run/scx/root/stats` | SCX stats UNIX socket path |
+| `MAX_MSG_SIZE` | 64 MiB | Max control plane message size |
+| `WORKER_CONNECT_RETRIES` | 10 | Worker connection retry count |
+| `POLL_SLEEP_MS` | 200 | Main loop sleep granularity (ms) |
+| `SCX_CONNECT_TIMEOUT_MS` | 500 | SCX socket connect timeout (ms) |
+| `SCX_READ_TIMEOUT_MS` | 1000 | SCX socket read timeout (ms) |
+| `ADVISOR_W_CPU_BUSY` | 0.30 | Advisor weight: CPU utilization |
+| `ADVISOR_W_MEMORY` | 0.20 | Advisor weight: memory pressure |
+| `ADVISOR_W_NUMA_IMBAL` | 0.15 | Advisor weight: NUMA imbalance |
+| `ADVISOR_W_MIGRATIONS` | 0.10 | Advisor weight: migration rate |
+| `ADVISOR_W_JOB_RUNNING` | 0.25 | Advisor weight: job-running penalty |
+
+**Live status output:**
+
+During execution, all modes print periodic node status to the console (default every 5s, adjustable via `--status-interval <secs>` for single-node or `status_print_interval_s` in `agent.toml` for multi-node):
+
+```
+# Single-node (run mode):
+[status] node=0, cpu=34.2%, rss=128 MiB, shm_bump=4096, job=local_12345, elapsed=3.2s
+
+# Worker:
+[worker 1] cpu=45.1%, rss=256 MiB, job=job_170000, elapsed=5.0s, scx(cpu_busy=42.3%, load=180.5, migrations=95)
+
+# Coordinator (cluster overview):
+[coordinator] ── Cluster Status ──
+  node 1: job=job_170000, rss=256 MiB, cpu_busy=42.3%, load=180.5, migrations=95
+  node 2: job=idle, rss=64 MiB, cpu_busy=8.1%, load=25.0, migrations=12
+  placement order: [2, 1] (best first)
+[coordinator] ─────────────────────
 ```
 
 When SCX is not running or disabled, the system operates normally -- SCX fields are omitted from metrics and status responses.
+
+**Testing:**
+
+The scheduler crate includes unit tests and integration tests with a mock SCX UNIX socket server:
+
+```bash
+# Run all scheduler tests (11 unit + 3 integration)
+cargo test -p scheduler -- --nocapture
+```
+
+| Test | Type | What it verifies |
+|------|------|-----------------|
+| `test_parse_scx_stats_full` | Unit | JSON parsing of full SCX stats with NUMA nodes |
+| `test_parse_scx_stats_empty` | Unit | Graceful handling of empty/missing fields |
+| `test_cluster_view_update` | Unit | Cluster view insert and node count tracking |
+| `test_staleness` | Unit | Stale data detection by timestamp |
+| `test_busy_count` | Unit | Counting nodes with active executors |
+| `test_score_nodes_prefers_less_loaded` | Unit | Advisor ranks lighter node first (all factors) |
+| `test_job_running_penalty` | Unit | Busy node penalized vs idle node |
+| `test_memory_pressure` | Unit | High-memory node ranks lower |
+| `test_no_scx_still_scores` | Unit | Memory + job scoring works without SCX |
+| `test_best_nodes` | Unit | Top-N selection from scored nodes |
+| `test_empty_view` | Unit | Advisor handles empty cluster view |
+| `test_client_fetches_from_mock_socket` | Integration | Spins up mock SCX UNIX socket, verifies client fetches and parses all fields |
+| `test_client_returns_none_when_no_server` | Integration | Graceful `None` when SCX socket is unavailable |
+| `test_full_pipeline_mock_to_advisor` | Integration | End-to-end: mock socket -> client -> cluster view -> advisor scoring and node ranking |
 
 ### Shared Memory Layout
 

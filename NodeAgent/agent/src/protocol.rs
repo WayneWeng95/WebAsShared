@@ -3,14 +3,12 @@
 //! Wire format: `[4-byte big-endian length][JSON payload]`.
 //! All messages are serialized as `Message { kind, payload }`.
 
+use node_agent_common as common;
 use anyhow::{bail, Context, Result};
 use scheduler::ScxNodeSnapshot;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::net::TcpStream;
-
-/// Maximum message size: 64 MiB (generous for large DAG JSONs).
-const MAX_MSG_SIZE: u32 = 64 * 1024 * 1024;
 
 // ── Message types ────────────────────────────────────────────────────────────
 
@@ -129,7 +127,7 @@ pub struct JobResultPayload {
 pub fn send_message(stream: &mut TcpStream, msg: &Message) -> Result<()> {
     let json = serde_json::to_vec(msg).context("serialize message")?;
     let len = json.len() as u32;
-    if len > MAX_MSG_SIZE {
+    if len > common::MAX_MSG_SIZE {
         bail!("message too large: {} bytes", len);
     }
     stream.write_all(&len.to_be_bytes()).context("write length prefix")?;
@@ -143,7 +141,7 @@ pub fn recv_message(stream: &mut TcpStream) -> Result<Message> {
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).context("read length prefix")?;
     let len = u32::from_be_bytes(len_buf);
-    if len > MAX_MSG_SIZE {
+    if len > common::MAX_MSG_SIZE {
         bail!("message too large: {} bytes", len);
     }
     let mut buf = vec![0u8; len as usize];
