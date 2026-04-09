@@ -286,6 +286,29 @@ fn cmd_status(args: &[String]) -> Result<()> {
                 w.running_job.as_deref().unwrap_or("none")
             );
         }
+
+        // Display SCX scheduling data if available.
+        if let Some(ref scx_view) = payload.scx_cluster {
+            println!("\n=== SCX Scheduler Stats ===");
+            let scores = scheduler::score_nodes(scx_view);
+            for (node_id, score) in &scores {
+                if let Some(snap) = scx_view.snapshots.get(node_id) {
+                    println!(
+                        "  node {}: cpu_busy={:.1}%, load={:.1}, migrations={}, score={:.3}",
+                        node_id, snap.cpu_busy, snap.load, snap.nr_migrations, score
+                    );
+                    for (numa_id, numa) in &snap.numa_nodes {
+                        println!(
+                            "    NUMA {}: load={:.1}, imbal={:.1}",
+                            numa_id, numa.load, numa.imbal
+                        );
+                    }
+                }
+            }
+            if !scores.is_empty() {
+                println!("  Best placement order: {:?}", scheduler::advisor::best_nodes(scx_view, scores.len()));
+            }
+        }
     }
 
     Ok(())

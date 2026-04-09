@@ -1,7 +1,7 @@
 
-    9  rustup toolchain install nightly
-   10  rustup target add wasm32-unknown-unknown --toolchain nightly
-   11  rustup component add rust-src --toolchain nightly
+   rustup toolchain install nightly
+   rustup target add wasm32-unknown-unknown --toolchain nightly
+   rustup component add rust-src --toolchain nightly
 
    cd /Executor/guest
    cargo +nightly build --release
@@ -18,6 +18,12 @@
 
 
    install wasmtime to run the python verison also need to pull a python.wasm, here I use python-3.12.0.wasm
+
+   # Download python-3.12.0.wasm 
+   curl -L -o /opt/myapp/python-3.12.0.wasm "https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python/3.12.0%2B20231211-040d5a6/python-3.12.0.wasm"            
+   
+   # AOT compile to .cwasm 
+   ~/.wasmtime/bin/wasmtime compile /opt/myapp/python-3.12.0.wasm -o /opt/myapp/python-3.12.0.cwasm
 
    cargo run dag ../demo_dag/py_word_count_demo.json
 

@@ -4,6 +4,7 @@
 //! and SHM bump allocator offset from the Superblock.
 
 use anyhow::Result;
+use scheduler::ScxNodeSnapshot;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -18,6 +19,9 @@ pub struct NodeMetrics {
     pub executor_running: bool,
     pub current_job_id: Option<String>,
     pub job_elapsed_ms: Option<u64>,
+    /// SCX sched_ext scheduler stats (None if SCX is not running or disabled).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scx: Option<ScxNodeSnapshot>,
 }
 
 /// State for computing CPU usage deltas between samples.
@@ -25,6 +29,7 @@ pub struct MetricsCollector {
     node_id: u32,
     prev_cpu_total: u64,
     prev_cpu_idle: u64,
+    scx_client: Option<scheduler::ScxStatsClient>,
 }
 
 impl MetricsCollector {
@@ -33,6 +38,17 @@ impl MetricsCollector {
             node_id,
             prev_cpu_total: 0,
             prev_cpu_idle: 0,
+            scx_client: None,
+        }
+    }
+
+    /// Create a collector with SCX stats collection enabled.
+    pub fn with_scx(node_id: u32, socket_path: Option<&str>) -> Self {
+        Self {
+            node_id,
+            prev_cpu_total: 0,
+            prev_cpu_idle: 0,
+            scx_client: Some(scheduler::ScxStatsClient::new(socket_path)),
         }
     }
 
@@ -55,6 +71,8 @@ impl MetricsCollector {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
 
+        let scx = self.scx_client.as_ref().and_then(|c| c.fetch());
+
         NodeMetrics {
             node_id: self.node_id,
             timestamp_ms,
@@ -64,6 +82,7 @@ impl MetricsCollector {
             executor_running,
             current_job_id: current_job_id.map(|s| s.to_string()),
             job_elapsed_ms,
+            scx,
         }
     }
 

@@ -49,7 +49,7 @@ use std::thread;
 use anyhow::{anyhow, Result};
 use nix::sys::mman::{mmap, munmap, MapFlags, ProtFlags};
 
-use common::{Page, Superblock};
+use common::{Page, ShmOffset, Superblock};
 
 use crate::runtime::mem_operation::reclaimer;
 
@@ -201,11 +201,11 @@ impl SlotLoader {
         unsafe { &*(self.splice_addr as *const Superblock) }
     }
 
-    fn page_at(&self, offset: u32) -> &mut Page {
+    fn page_at(&self, offset: ShmOffset) -> &mut Page {
         unsafe { &mut *((self.splice_addr + offset as usize) as *mut Page) }
     }
 
-    fn alloc_page(&self) -> Result<u32> {
+    fn alloc_page(&self) -> Result<ShmOffset> {
         reclaimer::alloc_page(self.splice_addr)
             .map_err(|e| anyhow!("SlotLoader: {}", e))
     }
@@ -221,7 +221,7 @@ impl SlotLoader {
         let sb = self.sb();
         let s = slot as usize;
 
-        let mut tail = sb.io_tails[s].load(Ordering::Acquire);
+        let mut tail: ShmOffset = sb.io_tails[s].load(Ordering::Acquire);
         if tail == 0 {
             tail = self.alloc_page()?;
             sb.io_heads[s].store(tail, Ordering::Release);
@@ -231,7 +231,7 @@ impl SlotLoader {
         while !data.is_empty() {
             let page = self.page_at(tail);
             let cursor = page.cursor.load(Ordering::Relaxed) as usize;
-            let space = 4088usize.saturating_sub(cursor);
+            let space = common::PAGE_DATA_SIZE.saturating_sub(cursor);
 
             if space == 0 {
                 let next = self.alloc_page()?;
@@ -245,7 +245,7 @@ impl SlotLoader {
             unsafe {
                 std::ptr::copy_nonoverlapping(data.as_ptr(), page.data.as_mut_ptr().add(cursor), n);
             }
-            page.cursor.store((cursor + n) as u32, Ordering::Release);
+            page.cursor.store((cursor + n) as ShmOffset, Ordering::Release);
             data = &data[n..];
         }
         Ok(())

@@ -134,7 +134,7 @@ use crate::runtime::worker::{create_wasmtime_engine, setup_vma_environment, Work
 use crate::runtime::input_output::persistence::PersistenceWriter;
 use crate::shm::format_shared_memory;
 use common::WASM_PATH;
-use plan::{build_slot_refcounts, build_waves, is_oneshot_node, node_owned_slots, node_routed_upstream_slots, parse_level, topo_sort, validate_dag};
+use plan::{build_barrier_assignments, build_slot_refcounts, build_waves, is_oneshot_node, node_owned_slots, node_routed_upstream_slots, parse_level, topo_sort, validate_barrier_groups, validate_dag};
 use workers::{spawn_python_subprocess, spawn_wasm_subprocess};
 use dispatch::execute_node;
 use crate::runtime::remote::{execute_remote_recv, execute_remote_send, pre_alloc_staging, STAGE_BYTES_PER_PEER};
@@ -247,6 +247,16 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
 
     let waves = build_waves(&dag.nodes, &order);
     println!("[DAG] {} waves, {} nodes total", waves.len(), order.len());
+
+    // Validate and assign intra-wave barrier groups.
+    validate_barrier_groups(&dag.nodes, &waves)?;
+    let (wave_barriers, barrier_groups) = build_barrier_assignments(&dag.nodes, &waves);
+    if !barrier_groups.is_empty() {
+        println!("[DAG] Barrier groups:");
+        for (name, (bid, count)) in &barrier_groups {
+            println!("[DAG]   '{}' → barrier_id={}, party_count={}", name, bid, count);
+        }
+    }
 
     // Set up the RDMA full-mesh if any RemoteSend/RemoteRecv nodes are present.
     //
@@ -364,7 +374,16 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         let mut remote_recv_dep_remaining = remote_recv_dep_counts.clone();
 
         // Run each wave
-        for wave in &waves {
+        for (wave_idx, wave) in waves.iter().enumerate() {
+            // 0. Reset barrier counters for groups active in this wave.
+            {
+                let splice_addr = store.data().splice_addr;
+                let sb = unsafe { &*(splice_addr as *const common::Superblock) };
+                for &bid in &wave_barriers[wave_idx] {
+                    sb.barriers[bid].store(0, std::sync::atomic::Ordering::Release);
+                }
+            }
+
             // 1. Pre-join prefetches for all deps of nodes in this wave.
             for &idx in wave {
                 let node = &dag.nodes[idx];

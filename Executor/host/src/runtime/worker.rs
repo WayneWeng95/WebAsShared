@@ -12,15 +12,23 @@ pub struct WorkerState {
     pub splice_addr: usize,
 }
 
-/// Creates a Wasmtime engine configured for shared memory:
-/// 4GB static address space, no guard pages (VMA is managed manually), threads enabled.
+/// Creates a Wasmtime engine configured for shared memory.
+/// wasm32: 4 GiB static address space.  wasm64: 64 GiB with memory64 enabled.
+/// Guard pages disabled (VMA is managed manually), threads enabled.
 pub fn create_wasmtime_engine() -> Result<Engine> {
     let mut config = Config::new();
-    // Allow full 4GB address space
-    config.static_memory_maximum_size(1 << 32);
+
+    #[cfg(feature = "wasm64")]
+    {
+        config.wasm_memory64(true);
+        // Reserve 16 GiB of virtual address space so our MAP_FIXED at
+        // TARGET_OFFSET (8 GiB) lands inside the reservation.
+        // Only virtual — no physical pages committed until touched.
+        config.memory_reservation(16 * 1024 * 1024 * 1024);
+    }
+
     // Disable guard pages as we manage VMA manually
-    config.static_memory_guard_size(0);
-    config.dynamic_memory_guard_size(0);
+    config.memory_guard_size(0);
     // Enable threads for Shared Memory
     config.wasm_threads(true);
 
@@ -35,7 +43,22 @@ pub fn setup_vma_environment(
     linker: &mut Linker<WorkerState>,
     file: &File,
 ) -> Result<Memory> {
-    let memory_ty = MemoryType::shared(49152, 65536);
+    // wasm64: small min (1 GiB committed for guest heap), large max (16 GiB).
+    // The memory_reservation in the engine config reserves 16 GiB of virtual
+    // address space; our MAP_FIXED at TARGET_OFFSET (8 GiB) maps the SHM
+    // file into that reservation without committing physical pages.
+    #[cfg(feature = "wasm64")]
+    let memory_ty = MemoryType::builder()
+        .memory64(true)
+        .shared(true)
+        .min(16384)              // 1 GiB committed (guest heap)
+        .max(Some(262144))       // 16 GiB max
+        .build()
+        .map_err(|e| anyhow::anyhow!("bad memory type: {}", e))?;
+
+    #[cfg(not(feature = "wasm64"))]
+    let memory_ty = MemoryType::shared(49152, 65536); // 4 GiB max
+
     let memory = Memory::new(&mut *store, memory_ty)?;
 
     let base_ptr = memory.data_ptr(&*store);
@@ -54,12 +77,12 @@ pub fn setup_vma_environment(
     linker.func_wrap(
         "env",
         "host_remap",
-        |mut caller: Caller<'_, WorkerState>, new_size: u32| {
+        |mut caller: Caller<'_, WorkerState>, new_size: common::ShmOffset| {
             let state = caller.data_mut();
             println!(
                 "[PID:{}] remap to {} MB",
                 std::process::id(),
-                new_size / 1024 / 1024
+                new_size as u64 / 1024 / 1024
             );
             expand_mapping(&state.file, state.splice_addr, new_size as usize).unwrap();
         },
@@ -70,7 +93,7 @@ pub fn setup_vma_environment(
     linker.func_wrap(
         "env",
         "host_resolve_atomic",
-        move |caller: Caller<'_, WorkerState>, ptr: u32, len: u32| -> u32 {
+        move |caller: Caller<'_, WorkerState>, ptr: common::WasmPtr, len: common::WasmPtr| -> u32 {
             let base_ptr = memory_handle.data_ptr(&caller);
             let name_bytes =
                 unsafe { std::slice::from_raw_parts(base_ptr.add(ptr as usize), len as usize) };
@@ -119,7 +142,7 @@ pub fn setup_vma_environment(
                         RegistryEntry {
                             name: entry_name,
                             index: result_index,
-                            payload_offset: core::sync::atomic::AtomicU32::new(0),
+                            payload_offset: common::AtomicShmOffset::new(0),
                             payload_len: core::sync::atomic::AtomicU32::new(0),
                         },
                     );
@@ -132,6 +155,57 @@ pub fn setup_vma_environment(
             lock.store(0, Ordering::Release);
 
             result_index
+        },
+    )?;
+
+    // ── Intra-wave barrier (futex-backed) ───────────────────────────────────
+    //
+    // Guest processes in the same wave call `host_barrier_wait(barrier_id, party_count)`.
+    // The implementation uses Linux futex so waiters sleep (zero CPU) until the
+    // last party arrives and wakes them.  Cross-process because all processes
+    // mmap the same SHM file.
+    linker.func_wrap(
+        "env",
+        "host_barrier_wait",
+        |caller: Caller<'_, WorkerState>, barrier_id: u32, party_count: u32| {
+            let splice_addr = caller.data().splice_addr;
+            let sb = unsafe { &*(splice_addr as *const Superblock) };
+            let barrier = &sb.barriers[barrier_id as usize];
+
+            // Arrive: atomically increment the counter.
+            let arrived = barrier.fetch_add(1, Ordering::AcqRel) + 1;
+
+            if arrived >= party_count {
+                // Last to arrive — wake all sleeping waiters.
+                unsafe {
+                    libc::syscall(
+                        libc::SYS_futex,
+                        barrier as *const _ as *const libc::c_int,
+                        libc::FUTEX_WAKE,
+                        i32::MAX,
+                        std::ptr::null::<libc::timespec>(),
+                    );
+                }
+            } else {
+                // Sleep until the counter reaches party_count.
+                loop {
+                    let current = barrier.load(Ordering::Acquire);
+                    if current >= party_count {
+                        break;
+                    }
+                    // futex(FUTEX_WAIT): sleep only if *barrier == current
+                    // (guards against lost wakeups and spurious returns).
+                    unsafe {
+                        libc::syscall(
+                            libc::SYS_futex,
+                            barrier as *const _ as *const libc::c_int,
+                            libc::FUTEX_WAIT,
+                            current as libc::c_int,
+                            std::ptr::null::<libc::timespec>(),
+                        );
+                    }
+                }
+            }
         },
     )?;
 

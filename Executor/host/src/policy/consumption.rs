@@ -1,9 +1,10 @@
 use std::collections::HashMap;
+use common::ShmOffset;
 
 /// A snapshot of a single conflicting write node, deserialized by the host-side organizer.
 #[derive(Debug, Clone)]
 pub struct ConflictNode {
-    pub offset: u32,
+    pub offset: ShmOffset,
     pub writer_id: u32,
     pub data_len: u32,
     pub registry_index: u32,

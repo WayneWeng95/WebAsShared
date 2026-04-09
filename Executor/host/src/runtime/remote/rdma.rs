@@ -10,7 +10,7 @@ use anyhow::Result;
 use connect::SendChannel;
 use connect::ffi::ibv_sge;
 use connect::rdma::queue_pair::MAX_SEND_SGE;
-use common::PAGE_SIZE;
+use common::{PAGE_SIZE, ShmOffset};
 
 use super::PAGE_DATA;
 
@@ -23,13 +23,13 @@ pub(super) fn rdma_write_page_chain(
     ch:              &SendChannel,
     src_sges:        &[(u64, u32)],
     remote_dest_off: u64,
-    total_bytes:     u32,
+    total_bytes:     ShmOffset,
 ) -> Result<()> {
-    const PAGE_SIZE_U64: u64 = PAGE_SIZE as u64;
-    const PAGE_HEADER:   u64 = 8;
-    const PAGE_DATA_U32: u32 = PAGE_DATA as u32;
+    let page_size_u64: u64 = PAGE_SIZE as u64;
+    let page_header:   u64 = common::PAGE_HEADER_SIZE as u64;
+    let page_data_shm: ShmOffset = PAGE_DATA as ShmOffset;
 
-    let n_dest_pages = (total_bytes + PAGE_DATA_U32 - 1) / PAGE_DATA_U32;
+    let n_dest_pages = (total_bytes + page_data_shm - 1) / page_data_shm;
     let remote_rkey  = ch.remote_rkey;
     let lkey         = ch.lkey;
 
@@ -40,11 +40,11 @@ pub(super) fn rdma_write_page_chain(
 
     let qp = ch.qp.lock().unwrap();
     for dest_idx in 0..n_dest_pages {
-        let dest_chunk  = PAGE_DATA_U32.min(total_bytes - dest_idx * PAGE_DATA_U32);
+        let dest_chunk  = page_data_shm.min(total_bytes - dest_idx * page_data_shm) as u32;
         let remote_addr = ch.remote_mr_base
             + remote_dest_off
-            + dest_idx as u64 * PAGE_SIZE_U64
-            + PAGE_HEADER;
+            + dest_idx as u64 * page_size_u64
+            + page_header;
         let is_last = dest_idx == n_dest_pages - 1;
 
         let mut sges: Vec<ibv_sge> = Vec::new();
@@ -82,7 +82,7 @@ pub(super) fn rdma_write_flat(
     ch:              &SendChannel,
     src_sges:        &[(u64, u32)],
     remote_dest_off: u64,
-    total_bytes:     u32,
+    total_bytes:     ShmOffset,
 ) -> Result<()> {
     let remote_rkey   = ch.remote_rkey;
     let lkey          = ch.lkey;

@@ -1,10 +1,10 @@
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::Ordering;
 use alloc::vec::Vec;
 use common::*;
 use super::{ShmApi, SHM_BASE, SeekFrom};
 
 extern "C" {
-    fn host_remap(new_size: u32);
+    fn host_remap(new_size: ShmOffset);
 }
 
 // ─── Shared page-chain core helpers ──────────────────────────────────────────
@@ -16,7 +16,7 @@ extern "C" {
 
 /// Append raw bytes into the page chain identified by `(head, tail)` atomics.
 /// Allocates new 4 KiB pages from the bump pool as needed.
-pub(super) fn chain_append_raw(head: &AtomicU32, tail: &AtomicU32, mut data: &[u8]) {
+pub(super) fn chain_append_raw(head: &AtomicShmOffset, tail: &AtomicShmOffset, mut data: &[u8]) {
     let mut tail_offset = tail.load(Ordering::Acquire);
     if tail_offset == 0 {
         tail_offset = ShmApi::try_allocate_page();
@@ -29,7 +29,7 @@ pub(super) fn chain_append_raw(head: &AtomicU32, tail: &AtomicU32, mut data: &[u
     while !data.is_empty() {
         let tail_page = unsafe { &mut *((SHM_BASE + tail_offset as usize) as *mut Page) };
         let current_cursor = tail_page.cursor.load(Ordering::Relaxed);
-        let space_left = 4088 - current_cursor;
+        let space_left = PAGE_DATA_SIZE as ShmOffset - current_cursor;
         if space_left == 0 {
             let new_offset = ShmApi::try_allocate_page();
             let new_page = unsafe { &mut *((SHM_BASE + new_offset as usize) as *mut Page) };
@@ -45,13 +45,13 @@ pub(super) fn chain_append_raw(head: &AtomicU32, tail: &AtomicU32, mut data: &[u
             let dest = tail_page.data.as_mut_ptr().add(current_cursor as usize);
             core::ptr::copy_nonoverlapping(data.as_ptr(), dest, write_len);
         }
-        tail_page.cursor.store(current_cursor + write_len as u32, Ordering::Release);
+        tail_page.cursor.store(current_cursor + write_len as ShmOffset, Ordering::Release);
         data = &data[write_len..];
     }
 }
 
 /// Write a 4-byte LE length header, 4-byte LE origin, followed by `payload` into `(head, tail)`.
-pub(super) fn chain_append_prefixed(head: &AtomicU32, tail: &AtomicU32, origin: u32, payload: &[u8]) {
+pub(super) fn chain_append_prefixed(head: &AtomicShmOffset, tail: &AtomicShmOffset, origin: u32, payload: &[u8]) {
     chain_append_raw(head, tail, &(payload.len() as u32).to_le_bytes());
     chain_append_raw(head, tail, &origin.to_le_bytes());
     chain_append_raw(head, tail, payload);
@@ -59,11 +59,11 @@ pub(super) fn chain_append_prefixed(head: &AtomicU32, tail: &AtomicU32, origin: 
 
 /// Walk the page chain starting at `head_offset` and return the last complete
 /// length-prefixed record as (origin, payload).  Returns `None` when the chain is empty.
-pub(super) fn chain_read_latest(head_offset: u32) -> Option<(u32, Vec<u8>)> {
+pub(super) fn chain_read_latest(head_offset: ShmOffset) -> Option<(u32, Vec<u8>)> {
     if head_offset == 0 { return None; }
     let sb = ShmApi::superblock();
     let mut current_offset = head_offset;
-    let mut cursor_in_page = 0u32;
+    let mut cursor_in_page: ShmOffset = 0;
 
     let mut read_exact = |mut dest: &mut [u8]| -> bool {
         while !dest.is_empty() {
@@ -89,7 +89,7 @@ pub(super) fn chain_read_latest(head_offset: u32) -> Option<(u32, Vec<u8>)> {
                 let src = page.data.as_ptr().add(cursor_in_page as usize);
                 core::ptr::copy_nonoverlapping(src, dest.as_mut_ptr(), read_len);
             }
-            cursor_in_page += read_len as u32;
+            cursor_in_page += read_len as ShmOffset;
             dest = &mut dest[read_len..];
         }
         true
@@ -113,11 +113,11 @@ pub(super) fn chain_read_latest(head_offset: u32) -> Option<(u32, Vec<u8>)> {
 
 /// Walk the page chain starting at `head_offset` and return every
 /// length-prefixed record as (origin, payload) in order.  Returns an empty Vec when the chain is empty.
-pub(super) fn chain_read_all(head_offset: u32) -> Vec<(u32, Vec<u8>)> {
+pub(super) fn chain_read_all(head_offset: ShmOffset) -> Vec<(u32, Vec<u8>)> {
     if head_offset == 0 { return Vec::new(); }
     let sb = ShmApi::superblock();
     let mut current_offset = head_offset;
-    let mut cursor_in_page = 0u32;
+    let mut cursor_in_page: ShmOffset = 0;
 
     let mut read_exact = |dest: &mut [u8]| -> bool {
         let mut dest = dest;
@@ -144,7 +144,7 @@ pub(super) fn chain_read_all(head_offset: u32) -> Vec<(u32, Vec<u8>)> {
                 let src = page.data.as_ptr().add(cursor_in_page as usize);
                 core::ptr::copy_nonoverlapping(src, dest.as_mut_ptr(), read_len);
             }
-            cursor_in_page += read_len as u32;
+            cursor_in_page += read_len as ShmOffset;
             dest = &mut dest[read_len..];
         }
         true
@@ -325,7 +325,7 @@ impl ShmApi {
         let head_offset = sb.writer_heads[writer_id as usize].load(Ordering::Acquire);
         if head_offset == 0 { return None; }
 
-        let mut total = 0u32;
+        let mut total: ShmOffset = 0;
         let mut current_offset = head_offset;
         loop {
             let page = unsafe { &*((SHM_BASE + current_offset as usize) as *const Page) };

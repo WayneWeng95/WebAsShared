@@ -6,5 +6,9 @@ edition = "2021"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = []
+# wasm64 = ["common/wasm64"]  # disabled: wasm64 compiles but has JIT performance issues
+
 [dependencies]
 common = { path = "../common" }

@@ -292,7 +292,7 @@ pub extern "C" fn finra_merge_results(agg_slot: u32) {
     let records = ShmApi::read_all_stream_records(agg_slot);
     let mut current_rule: u32 = 0;
     let mut current_count: u32 = 0;
-    let mut current_name = String::new();
+    let mut current_name;
 
     for (_origin, rec) in &records {
         let s = core::str::from_utf8(rec).unwrap_or("");

@@ -49,7 +49,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use nix::sys::mman::{madvise, MmapAdvise};
 
-use common::{Page, Superblock, FREE_LIST_SHARD_COUNT, FREE_LIST_TRIM_ENABLED,
+use common::{Page, ShmOffset, Superblock, FREE_LIST_SHARD_COUNT, FREE_LIST_TRIM_ENABLED,
              FREE_LIST_TRIM_THRESHOLD, PAGE_SIZE};
 
 // ─── Global round-robin shard counter ────────────────────────────────────────
@@ -69,7 +69,7 @@ static ALLOC_SHARD: AtomicUsize = AtomicUsize::new(0);
 /// before consuming fresh bump address space.
 ///
 /// Returns the page's **byte offset from `splice_addr`**.
-pub fn alloc_page(splice_addr: usize) -> Result<u32> {
+pub fn alloc_page(splice_addr: usize) -> Result<ShmOffset> {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
 
     // ── Sharded free-list pop ─────────────────────────────────────────────────
@@ -139,7 +139,7 @@ pub enum SlotKind {
 /// that are being freed.
 ///
 /// Safe to call from multiple threads simultaneously.
-pub fn free_page_chain(splice_addr: usize, head: u32) {
+pub fn free_page_chain(splice_addr: usize, head: ShmOffset) {
     if head == 0 {
         return;
     }
@@ -244,7 +244,7 @@ pub fn free_io_slot(splice_addr: usize, slot: usize) {
 /// will be reused across runs.  If the cursor atomic has never been registered
 /// (the slot was never read with a cursor), the function is a no-op.
 pub fn reset_slot_cursor(splice_addr: usize, kind: SlotKind, slot: usize) {
-    use std::sync::atomic::AtomicU32;
+    use std::sync::atomic::AtomicU64;
     use common::{ATOMIC_ARENA_OFFSET, REGISTRY_OFFSET, RegistryEntry};
 
     let name_str = match kind {
@@ -259,7 +259,7 @@ pub fn reset_slot_cursor(splice_addr: usize, kind: SlotKind, slot: usize) {
 
     let sb            = unsafe { &*(splice_addr as *const Superblock) };
     let registry_base = (splice_addr + REGISTRY_OFFSET as usize) as *const RegistryEntry;
-    let atomic_base   = (splice_addr + ATOMIC_ARENA_OFFSET as usize) as *mut AtomicU32;
+    let atomic_base   = (splice_addr + ATOMIC_ARENA_OFFSET as usize) as *mut AtomicU64;
 
     // Acquire the registry spinlock (same protocol as host_resolve_atomic in worker.rs).
     while sb.registry_lock
@@ -311,7 +311,7 @@ pub fn count_free_list_pages(splice_addr: usize) -> usize {
 
 /// CAS-pop one page from the first non-empty shard.  Returns its byte offset
 /// from `splice_addr`, or `None` if all shards are empty.
-fn pop_one_free_page(splice_addr: usize) -> Option<u32> {
+fn pop_one_free_page(splice_addr: usize) -> Option<ShmOffset> {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
     for shard in 0..FREE_LIST_SHARD_COUNT {
         loop {
@@ -331,7 +331,7 @@ fn pop_one_free_page(splice_addr: usize) -> Option<u32> {
 }
 
 /// CAS-push a single page back onto its deterministic shard.
-fn push_page_to_free_list(splice_addr: usize, offset: u32) {
+fn push_page_to_free_list(splice_addr: usize, offset: ShmOffset) {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
     let shard = (offset / PAGE_SIZE) as usize % FREE_LIST_SHARD_COUNT;
     let page = unsafe { &*((splice_addr + offset as usize) as *const Page) };

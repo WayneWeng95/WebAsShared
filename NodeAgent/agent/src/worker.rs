@@ -31,7 +31,11 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
         &make_message(MessageKind::Ready, &ReadyPayload { node_id: config.node_id })?,
     )?;
 
-    let mut collector = MetricsCollector::new(config.node_id);
+    let mut collector = if config.scx.enabled {
+        MetricsCollector::with_scx(config.node_id, Some(&config.scx.socket_path))
+    } else {
+        MetricsCollector::new(config.node_id)
+    };
     let mut current_executor: Option<ExecutorHandle> = None;
     let mut current_shm_path: Option<String> = None;
 

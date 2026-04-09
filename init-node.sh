@@ -28,12 +28,12 @@ git pull
 
 # ── Step 2: Install RDMA / InfiniBand packages ─────────────
 info "Installing system packages (RDMA, InfiniBand, perftest)..."
-sudo apt-get update -qq
+sudo apt-get update -qq || true
 sudo apt-get install -y libibverbs-dev pkg-config librdmacm-dev ibverbs-utils perftest
 
 # ── Step 3: Rust environment setup ──────────────────────────
 info "Setting up Rust environment..."
-source "$ROOT/scripts/start.sh"
+source "$ROOT/scripts/rust.sh"
 
 # ── Step 4: Install wasmtime (for Python/WASM execution) ───
 info "Installing wasmtime..."

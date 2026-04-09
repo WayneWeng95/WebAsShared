@@ -10,8 +10,8 @@
 use std::sync::atomic;
 
 use anyhow::{anyhow, Result};
+use common::ShmOffset;
 
-use crate::rdma::exchange;
 use super::{AtomicChannel, MeshNode, SLOT_SIZE};
 
 // ── AtomicChannel operations ──────────────────────────────────────────────────
@@ -23,8 +23,8 @@ impl AtomicChannel {
     /// Returns the old value read from that scratch slot after the completion.
     pub fn rdma_fetch_add(
         &self,
-        remote_shm_offset: u32,
-        result_shm_offset: u32,
+        remote_shm_offset: ShmOffset,
+        result_shm_offset: ShmOffset,
         add_val:           u64,
     ) -> Result<u64> {
         let result_addr = self.local_mr_base  + result_shm_offset as u64;
@@ -48,8 +48,8 @@ impl AtomicChannel {
     /// `result_shm_offset` in our SHM.  Returns the old value.
     pub fn rdma_compare_swap(
         &self,
-        remote_shm_offset: u32,
-        result_shm_offset: u32,
+        remote_shm_offset: ShmOffset,
+        result_shm_offset: ShmOffset,
         compare:           u64,
         swap:              u64,
     ) -> Result<u64> {
@@ -85,8 +85,8 @@ impl MeshNode {
     pub fn rdma_fetch_add_shm(
         &self,
         peer_id:           usize,
-        remote_shm_offset: u32,
-        result_shm_offset: u32,
+        remote_shm_offset: ShmOffset,
+        result_shm_offset: ShmOffset,
         add_val:           u64,
     ) -> Result<u64> {
         assert_eq!(remote_shm_offset % 8, 0, "remote_shm_offset must be 8-byte aligned");
@@ -120,8 +120,8 @@ impl MeshNode {
     pub fn rdma_compare_swap_shm(
         &self,
         peer_id:           usize,
-        remote_shm_offset: u32,
-        result_shm_offset: u32,
+        remote_shm_offset: ShmOffset,
+        result_shm_offset: ShmOffset,
         compare:           u64,
         swap:              u64,
     ) -> Result<u64> {

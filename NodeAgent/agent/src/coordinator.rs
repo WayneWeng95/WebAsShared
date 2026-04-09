@@ -6,6 +6,7 @@ use crate::executor::ExecutorHandle;
 use crate::metrics;
 use crate::protocol::*;
 use anyhow::{Context, Result};
+use scheduler::ScxClusterView;
 use std::collections::HashMap;
 use std::io;
 use std::net::{TcpListener, TcpStream};
@@ -25,6 +26,8 @@ struct WorkerConn {
 struct CoordinatorState {
     workers: HashMap<u32, WorkerConn>,
     current_job_id: Option<String>,
+    /// Aggregated SCX stats from all nodes.
+    scx_view: ScxClusterView,
 }
 
 /// Run the coordinator daemon.
@@ -42,6 +45,7 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
     let state = Arc::new(Mutex::new(CoordinatorState {
         workers: HashMap::new(),
         current_job_id: None,
+        scx_view: ScxClusterView::new(),
     }));
 
     // Accept worker connections in a background thread.
@@ -302,6 +306,10 @@ fn collect_worker_results(
                         MessageKind::Metrics => {
                             // Log metrics from worker.
                             if let Ok(m) = serde_json::from_value::<metrics::NodeMetrics>(msg.payload) {
+                                // Update SCX cluster view if worker reported SCX data.
+                                if let Some(ref scx_snap) = m.scx {
+                                    s.scx_view.update(m.node_id, scx_snap.clone(), m.timestamp_ms);
+                                }
                                 let _ = metrics::append_metrics_log(&config.metrics.log_path, &m);
                             }
                         }
@@ -368,6 +376,12 @@ fn handle_status(
         running_job: w.running_job.clone(),
     }).collect();
 
+    let scx_cluster = if s.scx_view.node_count() > 0 {
+        Some(s.scx_view.clone())
+    } else {
+        None
+    };
+
     send_message(
         client_stream,
         &make_message(
@@ -375,6 +389,7 @@ fn handle_status(
             &StatusResponsePayload {
                 workers,
                 current_job: s.current_job_id.clone(),
+                scx_cluster,
             },
         )?,
     )?;

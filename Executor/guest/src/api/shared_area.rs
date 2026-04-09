@@ -1,4 +1,4 @@
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::Ordering;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -6,8 +6,8 @@ use common::*;
 use super::{ShmApi, SHM_BASE, SeekFrom};
 
 extern "C" {
-    fn host_remap(new_size: u32);
-    fn host_resolve_atomic(ptr: u32, len: u32) -> u32;
+    fn host_remap(new_size: ShmOffset);
+    fn host_resolve_atomic(ptr: WasmPtr, len: WasmPtr) -> u32;
 }
 
 impl ShmApi {
@@ -25,7 +25,7 @@ impl ShmApi {
             if let Some(&idx) = cache.get(name) {
                 idx
             } else {
-                let idx = host_resolve_atomic(name.as_ptr() as u32, name.len() as u32);
+                let idx = host_resolve_atomic(name.as_ptr() as WasmPtr, name.len() as WasmPtr);
                 cache.insert(String::from(name), idx);
                 idx
             }
@@ -36,7 +36,7 @@ impl ShmApi {
     /// Uses a CAS to ensure only one page is ever committed even under concurrent races.
     fn get_bucket_array() -> usize {
         let sb = Self::superblock();
-        let mut map_base = sb.shared_map_base.load(Ordering::Acquire);
+        let map_base = sb.shared_map_base.load(Ordering::Acquire);
         if map_base != 0 { return map_base as usize; }
 
         let new_page_offset = Self::try_allocate_page();
@@ -56,7 +56,7 @@ impl ShmApi {
         // Pointer arithmetic is done via byte pointers to avoid UB.
         let bucket_ptr = unsafe {
             let base_ptr = (SHM_BASE + map_base_offset) as *const u8;
-            base_ptr.add(bucket_idx * 4) as *const AtomicU32
+            base_ptr.add(bucket_idx * core::mem::size_of::<AtomicShmOffset>()) as *const AtomicShmOffset
         };
         let bucket = unsafe { &*bucket_ptr };
 
@@ -66,7 +66,7 @@ impl ShmApi {
             let header = node_ptr as *mut ChainNodeHeader;
             (*header).writer_id = writer_id;
             (*header).data_len = data.len() as u32;
-            let data_dest = node_ptr.add(12);
+            let data_dest = node_ptr.add(core::mem::size_of::<ChainNodeHeader>());
             core::ptr::copy_nonoverlapping(data.as_ptr(), data_dest, data.len());
         }
 
@@ -92,10 +92,10 @@ impl ShmApi {
         let bucket_idx = (key_hash as usize) % BUCKET_COUNT;
         let bucket_ptr = unsafe {
             let base_ptr = (SHM_BASE + map_base_offset as usize) as *const u8;
-            base_ptr.add(bucket_idx * 4) as *const AtomicU32
+            base_ptr.add(bucket_idx * core::mem::size_of::<AtomicShmOffset>()) as *const AtomicShmOffset
         };
 
-        let mut current_offset = unsafe { (*bucket_ptr).load(Ordering::Acquire) };
+        let mut current_offset: ShmOffset = unsafe { (*bucket_ptr).load(Ordering::Acquire) };
         let mut results = Vec::new();
 
         while current_offset != 0 {
@@ -113,7 +113,7 @@ impl ShmApi {
             let mut data = Vec::with_capacity(len as usize);
             unsafe {
                 data.set_len(len as usize);
-                core::ptr::copy_nonoverlapping(node_ptr.add(12), data.as_mut_ptr(), len as usize);
+                core::ptr::copy_nonoverlapping(node_ptr.add(core::mem::size_of::<ChainNodeHeader>()), data.as_mut_ptr(), len as usize);
             }
             results.push((header.writer_id, data));
             current_offset = header.next_node.load(Ordering::Acquire);
@@ -131,7 +131,7 @@ impl ShmApi {
 
         let bucket_ptr = unsafe {
             let base_ptr = (SHM_BASE + map_base_offset) as *const u8;
-            base_ptr.add(bucket_idx * 4) as *const core::sync::atomic::AtomicU32
+            base_ptr.add(bucket_idx * core::mem::size_of::<AtomicShmOffset>()) as *const AtomicShmOffset
         };
         let bucket = unsafe { &*bucket_ptr };
 
@@ -149,28 +149,28 @@ impl ShmApi {
 
             let head_capacity = 4096 - core::mem::size_of::<ChainNodeHeader>();
             let write_len = core::cmp::min(total_len, head_capacity);
-            core::ptr::copy_nonoverlapping(data.as_ptr(), head_ptr.add(20), write_len);
+            core::ptr::copy_nonoverlapping(data.as_ptr(), head_ptr.add(core::mem::size_of::<ChainNodeHeader>()), write_len);
             data_written += write_len;
 
-            let mut prev_next_ptr = &mut (*header).next_payload_page as *mut u32;
+            let mut prev_next_ptr = &mut (*header).next_payload_page as *mut ShmOffset;
             while data_written < total_len {
                 let next_offset = Self::try_allocate_page();
                 *prev_next_ptr = next_offset;
 
                 let next_ptr = (SHM_BASE + next_offset as usize) as *mut u8;
-                let overflow_header = next_ptr as *mut u32;
+                let overflow_header = next_ptr as *mut ShmOffset;
                 *overflow_header = 0;
 
-                let overflow_capacity = 4096 - 4;
+                let overflow_capacity = 4096 - core::mem::size_of::<ShmOffset>();
                 let remain = total_len - data_written;
                 let write_len = core::cmp::min(remain, overflow_capacity);
-                core::ptr::copy_nonoverlapping(data.as_ptr().add(data_written), next_ptr.add(4), write_len);
+                core::ptr::copy_nonoverlapping(data.as_ptr().add(data_written), next_ptr.add(core::mem::size_of::<ShmOffset>()), write_len);
                 data_written += write_len;
 
                 prev_next_ptr = overflow_header;
             }
 
-            let mut old_head = bucket.load(Ordering::Acquire);
+            let mut old_head: ShmOffset = bucket.load(Ordering::Acquire);
             loop {
                 (*header).next_node.store(old_head, Ordering::Relaxed);
                 if bucket.compare_exchange(old_head, head_offset, Ordering::Release, Ordering::Relaxed).is_ok() {
@@ -216,10 +216,10 @@ impl ShmApi {
             let page_ptr = (SHM_BASE + current_offset as usize) as *const u8;
             let (header_size, next_page) = if is_head {
                 let header = unsafe { &*(page_ptr as *const ChainNodeHeader) };
-                (20, header.next_payload_page)
+                (core::mem::size_of::<ChainNodeHeader>(), header.next_payload_page)
             } else {
-                let next = unsafe { *(page_ptr as *const u32) };
-                (4, next)
+                let next = unsafe { *(page_ptr as *const ShmOffset) };
+                (core::mem::size_of::<ShmOffset>(), next)
             };
 
             let read_len = core::cmp::min(total_len - bytes_read, 4096 - header_size);
@@ -269,10 +269,10 @@ impl ShmApi {
             let page_ptr = (SHM_BASE + current_offset as usize) as *const u8;
             let (header_size, next_page) = if is_head {
                 let header = unsafe { &*(page_ptr as *const ChainNodeHeader) };
-                (20usize, header.next_payload_page)
+                (core::mem::size_of::<ChainNodeHeader>(), header.next_payload_page)
             } else {
-                let next = unsafe { *(page_ptr as *const u32) };
-                (4usize, next)
+                let next = unsafe { *(page_ptr as *const ShmOffset) };
+                (core::mem::size_of::<ShmOffset>(), next)
             };
 
             let page_capacity = 4096 - header_size;
@@ -316,7 +316,7 @@ impl ShmApi {
     /// ```
     pub fn lseek_shared_state(task_name: &str, current_pos: u32, whence: SeekFrom) -> Option<u32> {
         let reg_idx = Self::resolve_name_to_index(task_name);
-        let entry_ptr = unsafe {
+        let entry_ptr = {
             let base = SHM_BASE + REGISTRY_OFFSET as usize;
             (base + reg_idx as usize * 64) as *const RegistryEntry
         };

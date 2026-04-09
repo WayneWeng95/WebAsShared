@@ -10,7 +10,7 @@
 
 use std::sync::atomic::Ordering;
 use std::thread;
-use common::{Page, Superblock, PARALLEL_THRESHOLD};
+use common::{Page, ShmOffset, Superblock, PARALLEL_THRESHOLD};
 
 #[derive(Clone, Copy)]
 pub(super) struct ChainSplicer {
@@ -31,7 +31,7 @@ impl ChainSplicer {
         unsafe { &*(self.base as *const Superblock) }
     }
 
-    fn page_at_mut(&self, offset: u32) -> &mut Page {
+    fn page_at_mut(&self, offset: ShmOffset) -> &mut Page {
         unsafe { &mut *((self.base + offset as usize) as *mut Page) }
     }
 

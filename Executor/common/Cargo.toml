@@ -3,4 +3,8 @@ name = "common"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+default = []
+# wasm64 = []  # disabled: wasm64 compiles but has JIT performance issues
+
 [dependencies]

@@ -142,6 +142,21 @@ pub fn recv_u32(stream: &mut TcpStream) -> Result<u32> {
     Ok(u32::from_le_bytes(b))
 }
 
+/// Send a [`ShmOffset`] (little-endian) over the control channel.
+/// Under wasm32 this sends 4 bytes; under wasm64 it sends 8 bytes.
+pub fn send_shm_offset(stream: &mut TcpStream, val: common::ShmOffset) -> Result<()> {
+    stream.write_all(&val.to_le_bytes())?;
+    Ok(stream.flush()?)
+}
+
+/// Receive a [`ShmOffset`] (little-endian) from the control channel.
+/// Under wasm32 this reads 4 bytes; under wasm64 it reads 8 bytes.
+pub fn recv_shm_offset(stream: &mut TcpStream) -> Result<common::ShmOffset> {
+    let mut b = [0u8; core::mem::size_of::<common::ShmOffset>()];
+    stream.read_exact(&mut b)?;
+    Ok(common::ShmOffset::from_le_bytes(b))
+}
+
 /// Server side: listen on `tcp_port`, accept one connection, return the stream.
 ///
 /// Used for the reverse-direction control channel where no QP metadata

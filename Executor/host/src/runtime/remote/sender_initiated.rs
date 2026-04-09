@@ -2,9 +2,9 @@
 //
 //   Sender                              Receiver
 //   ──────                              ────────
-//   TCP send_u32(total_bytes)  ──▶      alloc page chain, set metadata,
+//   TCP send(total_bytes)       ──▶      alloc page chain, set metadata,
 //                                       link chain to slot (head/tail)
-//                              ◀──      TCP send_u32(dest_off)
+//                              ◀──      TCP send(dest_off)
 //   RDMA write into page chain ──▶      HCA writes chunks into page[i].data
 //   TCP send_done              ──▶      worker can now read from slot
 
@@ -30,12 +30,12 @@ pub(super) fn send_si(
     );
 
     // Phase 1: announce size
-    exchange::send_u32(&mut *ch.ctrl.lock().unwrap(), total_bytes)?;
+    exchange::send_shm_offset(&mut *ch.ctrl.lock().unwrap(), total_bytes)?;
 
     if total_bytes == 0 { return Ok(()); }
 
     // Phase 2: receive dest_off
-    let dest_off = exchange::recv_u32(&mut *ch.ctrl.lock().unwrap())?;
+    let dest_off = exchange::recv_shm_offset(&mut *ch.ctrl.lock().unwrap())?;
 
     // Phase 3: RDMA write into receiver's pre-structured page chain
     rdma_write_page_chain(ch, &src_sges, dest_off as u64, total_bytes)?;
@@ -53,7 +53,7 @@ pub(super) fn recv_si(
     ch:          &RecvChannel,
 ) -> Result<()> {
     // Phase 1: receive total_bytes
-    let total_bytes = exchange::recv_u32(&mut *ch.ctrl.lock().unwrap())? as usize;
+    let total_bytes = exchange::recv_shm_offset(&mut *ch.ctrl.lock().unwrap())? as usize;
     println!(
         "[RemoteRecv-SI] slot {} ({:?}): {} bytes",
         slot, slot_kind, total_bytes
@@ -63,7 +63,7 @@ pub(super) fn recv_si(
 
     // Phase 2: alloc page chain, set metadata, link to slot, reply with dest_off
     let dest_off = alloc_and_link(splice_addr, slot, slot_kind, total_bytes)?;
-    exchange::send_u32(&mut *ch.ctrl.lock().unwrap(), dest_off)?;
+    exchange::send_shm_offset(&mut *ch.ctrl.lock().unwrap(), dest_off)?;
 
     // Phase 3: wait for RDMA write to complete
     exchange::wait_done(&mut *ch.ctrl.lock().unwrap())?;

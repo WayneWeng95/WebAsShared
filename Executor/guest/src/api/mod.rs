@@ -4,8 +4,8 @@ use alloc::string::String;
 
 use common::*;
 
-pub(crate) const SHM_BASE: usize = 0x8000_0000;
-pub(crate) static mut LOCAL_CAPACITY: u32 = 36 * MIB;
+pub(crate) const SHM_BASE: usize = TARGET_OFFSET;
+pub(crate) static mut LOCAL_CAPACITY: ShmOffset = INITIAL_SHM_SIZE;
 pub(crate) static mut ATOMIC_INDEX_CACHE: Option<BTreeMap<String, u32>> = None;
 
 /// Seek position specifier, mirroring POSIX `lseek(2)` whence values.
@@ -23,6 +23,7 @@ pub struct ShmApi;
 
 mod page_allocator;
 mod atomic_arena;
+mod barrier;
 mod fan_out;
 mod io_area;
 mod input_output;

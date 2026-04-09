@@ -1,10 +1,10 @@
 use crate::policy::{ConsumptionPolicy, ConsumptionResult, ConflictNode};
 use crate::runtime::worker::WorkerState;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{Ordering};
 use wasmtime::{Memory, Store};
 
 use common::{
-    TARGET_OFFSET, REGISTRY_OFFSET, PAGE_SIZE, BUCKET_COUNT,
+    TARGET_OFFSET, PAGE_SIZE, BUCKET_COUNT, ShmOffset, AtomicShmOffset,
     Superblock, RegistryEntry, ChainNodeHeader,
 };
 
@@ -38,8 +38,8 @@ impl<'a> BucketOrganizer<'a> {
 
         for i in 0..BUCKET_COUNT {
             let bucket_ptr =
-                self.base_ptr.add(map_base_offset as usize).add(i * 4) as *const AtomicU32;
-            let list_head = (*bucket_ptr).swap(0, Ordering::SeqCst);
+                self.base_ptr.add(map_base_offset as usize).add(i * std::mem::size_of::<AtomicShmOffset>()) as *const AtomicShmOffset;
+            let list_head: ShmOffset = (*bucket_ptr).swap(0, Ordering::SeqCst);
 
             if list_head != 0 {
                 self.process_detached_list(list_head, i, &policy);
@@ -53,31 +53,32 @@ impl<'a> BucketOrganizer<'a> {
     /// Applies `policy` to the already-detached linked list rooted at `head_offset`.
     /// Deserializes each node's multi-page payload, invokes the policy, stores the winning
     /// node's offset and length into the Registry, and frees all losing nodes' page chains.
-    unsafe fn process_detached_list<P: ConsumptionPolicy>(&self, head_offset: u32, _bucket_idx: usize, policy: &P) {
+    unsafe fn process_detached_list<P: ConsumptionPolicy>(&self, head_offset: ShmOffset, _bucket_idx: usize, policy: &P) {
         let mut nodes = Vec::new();
-        let mut current_offset = head_offset;
+        let mut current_offset: ShmOffset = head_offset;
 
         while current_offset != 0 {
             let node_ptr = self.base_ptr.add(current_offset as usize);
 
-            let writer_id = *(node_ptr.add(4) as *const u32);
-            let data_len = *(node_ptr.add(8) as *const u32);
-            let registry_index = *(node_ptr.add(12) as *const u32);
-            let next_offset = (*(node_ptr as *const AtomicU32)).load(Ordering::Relaxed);
+            let hdr = &*(node_ptr as *const ChainNodeHeader);
+            let writer_id = hdr.writer_id;
+            let data_len = hdr.data_len;
+            let registry_index = hdr.registry_index;
+            let next_offset: ShmOffset = hdr.next_node.load(Ordering::Relaxed);
 
 
             let mut payload = Vec::with_capacity(data_len as usize);
-            let mut lob_offset = current_offset;
+            let mut lob_offset: ShmOffset = current_offset;
             let mut bytes_read = 0;
             let mut is_head = true;
 
             while bytes_read < data_len as usize {
                 let page_ptr = self.base_ptr.add(lob_offset as usize);
-                let (header_size, next_page) = if is_head {
+                let (header_size, next_page): (usize, ShmOffset) = if is_head {
                     let hdr = &*(page_ptr as *const ChainNodeHeader);
                     (std::mem::size_of::<ChainNodeHeader>(), hdr.next_payload_page)
                 } else {
-                    (std::mem::size_of::<u32>(), *(page_ptr as *const u32))
+                    (std::mem::size_of::<ShmOffset>(), *(page_ptr as *const ShmOffset))
                 };
 
                 let read_len = std::cmp::min(data_len as usize - bytes_read, PAGE_SIZE as usize - header_size);
@@ -96,15 +97,15 @@ impl<'a> BucketOrganizer<'a> {
         let result = policy.process(&nodes);
 
 
-        let free_lob_chain = |start_offset: u32| {
-            let mut free_offset = start_offset;
+        let free_lob_chain = |start_offset: ShmOffset| {
+            let mut free_offset: ShmOffset = start_offset;
             let mut is_head = true;
             while free_offset != 0 {
                 let page_ptr = self.base_ptr.add(free_offset as usize);
-                let next_free = if is_head {
+                let next_free: ShmOffset = if is_head {
                     (*(page_ptr as *const ChainNodeHeader)).next_payload_page
                 } else {
-                    *(page_ptr as *const u32)
+                    *(page_ptr as *const ShmOffset)
                 };
                 self.push_to_free_list(free_offset);
                 free_offset = next_free;
@@ -137,18 +138,18 @@ impl<'a> BucketOrganizer<'a> {
 
     /// Returns every node in the chain starting at `list_head` to the free list.
     /// Walks the top-level `next_node` links of the conflict list (not overflow payload pages).
-    unsafe fn recycle_chain(&self, list_head: u32) {
+    unsafe fn recycle_chain(&self, list_head: ShmOffset) {
         if list_head == 0 {
             return;
         }
 
-        let mut current = list_head;
+        let mut current: ShmOffset = list_head;
         while current != 0 {
             let node_ptr = self.base_ptr.add(current as usize);
-            let next_ptr = &*(node_ptr as *const AtomicU32); // First field of page is next
+            let next_ptr = &*(node_ptr as *const AtomicShmOffset); // First field of page is next
 
             // Save next node offset before we modify current node's next
-            let next_node = next_ptr.load(Ordering::Relaxed);
+            let next_node: ShmOffset = next_ptr.load(Ordering::Relaxed);
 
             // Push onto free list
             self.push_to_free_list(current);
@@ -160,7 +161,7 @@ impl<'a> BucketOrganizer<'a> {
     /// Pushes a single page back onto the sharded free list.
     /// Delegates to `reclaimer::free_page_chain` so the shard selection,
     /// spin_loop backoff, and ABA documentation are all in one place.
-    unsafe fn push_to_free_list(&self, page_offset: u32) {
+    unsafe fn push_to_free_list(&self, page_offset: ShmOffset) {
         let splice_addr = self.base_ptr as usize;
         crate::runtime::mem_operation::reclaimer::free_page_chain(splice_addr, page_offset);
     }

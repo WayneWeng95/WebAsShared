@@ -16,20 +16,18 @@ pub fn format_shared_memory(path: &str) -> Result<()> {
     file.set_len(INITIAL_SHM_SIZE as u64)?;
 
     let magic: u32 = 0xDEADBEEF;
-    let global_capacity: u32 = INITIAL_SHM_SIZE as u32;
+    let global_capacity: ShmOffset = INITIAL_SHM_SIZE;
 
-    // Initialize Superblock fields
-    file.write_all(&magic.to_le_bytes())?;                // +0: Magic
-    file.write_all(&BUMP_ALLOCATOR_START.to_le_bytes())?; // +4: Bump Allocator
-    file.write_all(&global_capacity.to_le_bytes())?;      // +8: Global Capacity
-    file.write_all(&(0u32).to_le_bytes())?;               // +12: Log Offset
-    
-    // [NEW] Synchronization primitives for Registry
-    file.write_all(&(0u32).to_le_bytes())?;               // +16: Registry Spinlock (0 = Unlocked)
-    file.write_all(&(0u32).to_le_bytes())?;               // +20: Next Atomic Index (Starts at 0)
-    file.write_all(&(0u32).to_le_bytes())?;               // +24: Shared Map Base
-    
-    file.write_all(&(0u32).to_le_bytes())?;               // +28: free_list_heads[0] (remaining 15 shards zeroed by set_len)
+    // Initialize Superblock fields — field widths follow ShmOffset (4 or 8 bytes).
+    file.write_all(&magic.to_le_bytes())?;                       // magic (always u32)
+    file.write_all(&BUMP_ALLOCATOR_START.to_le_bytes())?;        // bump_allocator: ShmOffset
+    file.write_all(&global_capacity.to_le_bytes())?;             // global_capacity: ShmOffset
+    file.write_all(&(0 as ShmOffset).to_le_bytes())?;           // log_offset: ShmOffset
+    file.write_all(&(0u32).to_le_bytes())?;                      // registry_lock: u32
+    file.write_all(&(0u32).to_le_bytes())?;                      // next_atomic_idx: u32
+    file.write_all(&(0 as ShmOffset).to_le_bytes())?;           // shared_map_base: ShmOffset
+    file.write_all(&(0 as ShmOffset).to_le_bytes())?;           // free_list_heads[0]
+    // Remaining superblock fields are zeroed by set_len (file is zero-filled).
 
     Ok(())
 }

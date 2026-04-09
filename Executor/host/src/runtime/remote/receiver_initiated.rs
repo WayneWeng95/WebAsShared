@@ -17,7 +17,7 @@ use std::sync::atomic::Ordering;
 use anyhow::{anyhow, Result};
 use connect::{SendChannel, RecvChannel};
 use connect::rdma::exchange;
-use common::{PAGE_SIZE, Page, Superblock};
+use common::{PAGE_SIZE, Page, ShmOffset, Superblock};
 
 use crate::runtime::dag_runner::RemoteSlotKind;
 
@@ -38,8 +38,8 @@ pub(super) fn send_ri(
     );
 
     // Phase 1: receive receiver's pre-announcement (dest_off + avail_cap)
-    let dest_off  = exchange::recv_u32(&mut *ch.ctrl.lock().unwrap())?;
-    let avail_cap = exchange::recv_u32(&mut *ch.ctrl.lock().unwrap())?;
+    let dest_off  = exchange::recv_shm_offset(&mut *ch.ctrl.lock().unwrap())?;
+    let avail_cap = exchange::recv_shm_offset(&mut *ch.ctrl.lock().unwrap())?;
 
     if total_bytes > avail_cap {
         return Err(anyhow!(
@@ -50,7 +50,7 @@ pub(super) fn send_ri(
 
     if total_bytes == 0 {
         // Receiver is waiting for our total_bytes signal.
-        exchange::send_u32(&mut *ch.ctrl.lock().unwrap(), 0)?;
+        exchange::send_shm_offset(&mut *ch.ctrl.lock().unwrap(), 0)?;
         return Ok(());
     }
 
@@ -59,7 +59,7 @@ pub(super) fn send_ri(
     rdma_write_flat(ch, &src_sges, dest_off as u64, total_bytes)?;
 
     // Phase 3: send total_bytes as the done signal
-    exchange::send_u32(&mut *ch.ctrl.lock().unwrap(), total_bytes)?;
+    exchange::send_shm_offset(&mut *ch.ctrl.lock().unwrap(), total_bytes)?;
 
     Ok(())
 }
@@ -83,11 +83,11 @@ pub(super) fn recv_ri(
         slot, slot_kind, dest_off, avail_cap
     );
 
-    exchange::send_u32(&mut *ch.ctrl.lock().unwrap(), dest_off)?;
-    exchange::send_u32(&mut *ch.ctrl.lock().unwrap(), avail_cap)?;
+    exchange::send_shm_offset(&mut *ch.ctrl.lock().unwrap(), dest_off)?;
+    exchange::send_shm_offset(&mut *ch.ctrl.lock().unwrap(), avail_cap)?;
 
     // Phase 2: wait for sender's total_bytes (which also signals RDMA done)
-    let total_bytes = exchange::recv_u32(&mut *ch.ctrl.lock().unwrap())? as usize;
+    let total_bytes = exchange::recv_shm_offset(&mut *ch.ctrl.lock().unwrap())? as usize;
     println!(
         "[RemoteRecv-RI] slot {} ({:?}): {} bytes received",
         slot, slot_kind, total_bytes
@@ -98,7 +98,7 @@ pub(super) fn recv_ri(
     // Reserve the pages we announced.  A properly-ordered DAG ensures no other
     // allocator runs between our load and this fetch_add for the same wave.
     let n_pages        = (total_bytes + PAGE_DATA - 1) / PAGE_DATA;
-    let bytes_to_alloc = (n_pages * PAGE_SIZE as usize) as u32;
+    let bytes_to_alloc = (n_pages as ShmOffset) * PAGE_SIZE;
     let reserved       = sb.bump_allocator.fetch_add(bytes_to_alloc, Ordering::AcqRel);
 
     if reserved != dest_off {
@@ -118,19 +118,19 @@ pub(super) fn recv_ri(
     }
 
     // Phase 3: structure the page chain in-place (data already written by RDMA)
-    for i in 0..n_pages as u32 {
+    for i in 0..n_pages as ShmOffset {
         let page_off = dest_off + i * PAGE_SIZE;
         let page = unsafe { &mut *((splice_addr + page_off as usize) as *mut Page) };
         let data_in_page = PAGE_DATA.min(total_bytes - i as usize * PAGE_DATA);
-        page.cursor.store(data_in_page as u32, Ordering::Relaxed);
-        let next = if i + 1 < n_pages as u32 { dest_off + (i + 1) * PAGE_SIZE } else { 0 };
+        page.cursor.store(data_in_page as ShmOffset, Ordering::Relaxed);
+        let next = if i + 1 < n_pages as ShmOffset { dest_off + (i + 1) * PAGE_SIZE } else { 0 };
         page.next_offset.store(next, Ordering::Relaxed);
     }
     // Fence: ensure page chain metadata is visible before linking to slot.
     std::sync::atomic::fence(Ordering::Release);
 
     // Phase 4: link chain to slot
-    let tail_off = dest_off + (n_pages as u32 - 1) * PAGE_SIZE;
+    let tail_off = dest_off + (n_pages as ShmOffset - 1) * PAGE_SIZE;
     link_to_slot(sb, slot, slot_kind, dest_off, tail_off);
 
     Ok(())

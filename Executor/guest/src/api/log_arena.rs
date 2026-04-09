@@ -8,10 +8,10 @@ impl ShmApi {
     pub fn append_log(msg: &str) {
         let sb = Self::superblock();
         let bytes = msg.as_bytes();
-        let len = bytes.len() as u32;
+        let len = bytes.len() as ShmOffset;
 
         let offset = sb.log_offset.fetch_add(len, Ordering::Relaxed);
-        if offset + len <= LOG_ARENA_SIZE {
+        if offset + len <= LOG_ARENA_SIZE as ShmOffset {
             let dest = (SHM_BASE + LOG_ARENA_OFFSET as usize + offset as usize) as *mut u8;
             unsafe { core::ptr::copy_nonoverlapping(bytes.as_ptr(), dest, bytes.len()); }
         }

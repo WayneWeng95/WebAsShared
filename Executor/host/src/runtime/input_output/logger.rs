@@ -28,7 +28,7 @@
 
 use std::sync::atomic::Ordering;
 
-use common::{LOG_ARENA_OFFSET, LOG_ARENA_SIZE, Superblock};
+use common::{LOG_ARENA_OFFSET, LOG_ARENA_SIZE, ShmOffset, Superblock};
 
 // -----------------------------------------------------------------------------
 // Log level
@@ -113,7 +113,7 @@ impl HostLogger {
         // Format: "[LEVEL][tag] message\n"
         let entry = format!("[{}][{}] {}\n", level.as_str(), tag, msg);
         let bytes = entry.as_bytes();
-        let entry_len = bytes.len() as u32;
+        let entry_len = bytes.len() as ShmOffset;
 
         // Mirror to stdout for live terminal visibility.
         print!("[Host]{}", entry);
@@ -156,7 +156,7 @@ impl HostLogger {
         // If we clamped the write, fix the cursor to reflect the actual bytes
         // written so the reader sees a clean, complete arena.
         if write_len < bytes.len() {
-            log_cursor.store(old_offset + write_len as u32, Ordering::Release);
+            log_cursor.store(old_offset + write_len as ShmOffset, Ordering::Release);
         }
     }
 }

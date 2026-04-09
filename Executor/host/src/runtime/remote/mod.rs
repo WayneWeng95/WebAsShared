@@ -24,8 +24,8 @@ mod receiver_initiated;
 
 // ── Shared constant ───────────────────────────────────────────────────────────
 
-/// Usable data bytes per SHM page (PAGE_SIZE minus the 8-byte header).
-const PAGE_DATA: usize = common::PAGE_SIZE as usize - 8;
+/// Usable data bytes per SHM page (PAGE_SIZE minus the header).
+const PAGE_DATA: usize = common::PAGE_DATA_SIZE;
 
 // ── Compatibility shim ────────────────────────────────────────────────────────
 

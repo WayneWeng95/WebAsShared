@@ -49,7 +49,8 @@ WebAsShared/
 |   +-- data/                       # Test datasets (corpus, trades, MNIST, images)
 |-- NodeAgent/                      # Multi-machine deployment agent
 |   |-- agent/src/                  # Coordinator/worker daemon, executor interface, metrics
-|   |-- agent_coordinator.toml      # Coordinator config (IPs, ports, paths, timeouts)
+|   |-- scheduler/src/              # SCX sched_ext integration (stats client, cluster view, advisor)
+|   |-- agent_coordinator.toml      # Coordinator config (IPs, ports, paths, timeouts, SCX)
 |   +-- agent_worker.toml           # Worker config
 +-- DAGs/                           # All DAG JSON specifications
     |-- demo_dag/                   # Single-node demos (word count, image pipeline)
@@ -189,7 +190,57 @@ ClusterDag files use unified `Func` nodes that are automatically transformed to 
 | `cluster_dag.rs` | Split a ClusterDag into per-node DAGs with RDMA config injection |
 | `metrics.rs` | CPU, RSS, SHM bump offset sampling; JSON-lines log output |
 | `protocol.rs` | Length-prefixed JSON over TCP control plane |
-| `config.rs` | Agent config (role, cluster IPs, paths, timeouts) |
+| `config.rs` | Agent config (role, cluster IPs, paths, timeouts, SCX settings) |
+
+### Scheduler Crate (`NodeAgent/scheduler/`)
+
+A separate library crate that integrates Linux [sched_ext](https://lwn.net/Articles/922405/) (SCX) kernel scheduler data into the NodeAgent for scheduling-aware workload placement.
+
+Each worker node runs an SCX scheduler (e.g. `scx_rusty`, `scx_bpfland`) that exposes real-time kernel scheduling statistics via a UNIX domain socket. The `scheduler` crate collects this data and feeds it to the coordinator for cross-node decision-making.
+
+| Module | Role |
+|--------|------|
+| `scx_client.rs` | Connects to the local SCX stats UNIX socket (`/var/run/scx/root/stats`), fetches `ScxNodeSnapshot` |
+| `scx_cluster.rs` | `ScxClusterView`: aggregates SCX snapshots from all workers with staleness tracking |
+| `advisor.rs` | Scores nodes for workload placement (CPU busy, NUMA imbalance, migration rate) |
+
+**Data flow:**
+
+```
+SCX Scheduler (kernel)
+    │
+    │ UNIX socket (JSON)
+    v
+Worker MetricsCollector ──► ScxNodeSnapshot
+    │
+    │ TCP Metrics message
+    v
+Coordinator ScxClusterView ──► advisor::score_nodes()
+    │
+    v
+StatusResponse (visible via `node-agent status`)
+```
+
+**SCX stats collected per node:**
+
+| Field | Description |
+|-------|-------------|
+| `cpu_busy` | Overall CPU busy percentage (100.0 = all CPUs fully busy) |
+| `load` | Weighted system load (sum of weight * duty_cycle) |
+| `nr_migrations` | Task migrations from load balancing |
+| `slice_us` | Current scheduling time slice (microseconds) |
+| `time_used` | Time spent in userspace scheduler |
+| `numa_nodes` | Per-NUMA-node load and imbalance |
+
+**Configuration** (`agent.toml`):
+
+```toml
+[scx]
+enabled = true                                   # default: true
+socket_path = "/var/run/scx/root/stats"          # default SCX socket
+```
+
+When SCX is not running or disabled, the system operates normally -- SCX fields are omitted from metrics and status responses.
 
 ### Shared Memory Layout
 
@@ -244,6 +295,63 @@ The host creates a SHM file and maps it at a fixed offset (`0x80000000`) in each
 | `Bridge` / `Aggregate` / `Shuffle` / `Broadcast` | Host-side zero-copy routing |
 | `RemoteSend` | RDMA-WRITE a slot to a peer node's SHM staging area |
 | `RemoteRecv` | Receive a slot written by a peer via RDMA into local SHM |
+
+### Intra-Wave Barrier Synchronization
+
+Nodes in the same execution wave normally run in isolation.  When a workload requires peer-to-peer communication within a wave (e.g. produce partial results → exchange → reduce), the **barrier** mechanism enables this without breaking the wave model.
+
+Add `"barrier_group"` to nodes that need to synchronize:
+
+```json
+{ "id": "w0", "deps": [], "barrier_group": "sync1",
+  "kind": { "WasmVoid": { "func": "collaborative_worker", "arg": 0 } } },
+{ "id": "w1", "deps": [], "barrier_group": "sync1",
+  "kind": { "WasmVoid": { "func": "collaborative_worker", "arg": 1 } } }
+```
+
+The host validates that all nodes in a `barrier_group` land in the same wave and assigns a barrier slot ID (printed at startup).  Guest code calls `ShmApi::barrier_wait(barrier_id, party_count)` to synchronize.  The implementation uses Linux `futex` — waiters sleep with zero CPU cost until the last party arrives.
+
+Up to 64 concurrent barrier slots are available.  Multiple barriers can be used within a single workload function for multi-phase synchronization.
+
+Run the barrier test:
+
+```bash
+./node-agent run DAGs/demo_dag/barrier_test.json
+```
+
+See [barrier.md](barrier.md) for full documentation, guest API examples, and constraints.
+
+#### Cross-Node Barrier Limitations (RDMA)
+
+The barrier is a **single-node primitive**.  It relies on Linux `futex` over a shared `mmap`'d SHM file, which has no cross-machine equivalent.  Additionally, the RDMA mesh (`MeshNode`) is owned by the main DAG runner process, but `host_barrier_wait` executes inside subprocess WASM workers spawned via `wasm-call` — these subprocesses have no access to the RDMA connections.
+
+For cross-node data exchange, use the existing `RemoteSend`/`RemoteRecv` between waves.  If a future workload requires mid-function synchronization across machines, the path forward is a **two-tier barrier**:
+
+```
+Subprocess (node A)           DAG runner (node A)           DAG runner (node B)
+       │                              │                             │
+ barrier_wait_remote()                │                             │
+       │                              │                             │
+       ├─futex-wake─► local arrival   │                             │
+       │              tracker         │                             │
+       │                 │            │                             │
+       │          all local workers   │                             │
+       │          arrived?            │                             │
+       │                 ├──TCP──────►│◄──TCP──── local workers     │
+       │                              │           arrived           │
+       │                 ◄──TCP───────┤──TCP────►                   │
+       │                "proceed"     │         "proceed"           │
+       ├─futex-wait ◄── futex-wake    │                             │
+       │                              │                             │
+     continues                        │                             │
+```
+
+1. Subprocesses use the existing local futex to sync with a **host-side barrier watcher thread** on the same node.
+2. When all local workers on a node arrive, the watcher thread sends a TCP message to the coordinator via the mesh control channel.
+3. The coordinator collects arrivals from all nodes and broadcasts "proceed".
+4. Each watcher thread futex-wakes its local subprocesses.
+
+This keeps the subprocess API unchanged (`barrier_wait`) and pushes cross-node logic into the DAG runner which already owns the mesh.  This is not yet implemented — the single-node barrier covers the current use cases, and cross-node synchronization between waves is handled by `RemoteSend`/`RemoteRecv`.
 
 ### Workloads
 
@@ -362,3 +470,4 @@ ib_write_bw  -d mlx4_0 -i 2 -x 0 --report_gbits 10.10.1.1
 - **Unified DAG format**: ClusterDag and single-node DAGs use `Func` nodes that are transformed to `WasmVoid` or `PyFunc` at submission time, enabling the same DAG to run in both Rust and Python modes.
 - **NodeAgent as entry point**: the NodeAgent binary is the single interface for both single-node and multi-node execution, spawning the Executor as a subprocess.
 - **Coordinator-worker model**: static membership, TCP control plane (separate from RDMA data plane), RDMA mesh connects with 30s retry window for robustness. No consensus needed for research-scale clusters (2-32 nodes).
+- **Kernel-aware scheduling**: workers collect real-time SCX sched_ext stats (CPU load, NUMA imbalance, migration pressure) and report them to the coordinator, enabling scheduling decisions informed by actual kernel scheduling state rather than coarse `/proc/stat` samples alone.

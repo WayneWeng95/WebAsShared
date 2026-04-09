@@ -225,7 +225,7 @@ pub(crate) fn read_io_records(base: usize, sb: &Superblock, slot: usize) -> Vec<
 }
 
 /// Core page-chain walker: given a `head` offset, returns every length-prefixed record as (origin, payload).
-fn read_chain_records(base: usize, head: u32) -> Vec<(u32, Vec<u8>)> {
+fn read_chain_records(base: usize, head: ShmOffset) -> Vec<(u32, Vec<u8>)> {
     if head == 0 { return Vec::new(); }
 
     let mut reader = PageReader::new(base, head);
@@ -248,20 +248,20 @@ fn read_chain_records(base: usize, head: u32) -> Vec<(u32, Vec<u8>)> {
 /// Page layout mirrors the guest `write_shared_state`: head page has a
 /// `ChainNodeHeader` (20 bytes) followed by data; continuation pages have a
 /// 4-byte next pointer followed by data.
-fn read_shared_payload(base: usize, payload_offset: u32, total_len: usize) -> Vec<u8> {
+fn read_shared_payload(base: usize, payload_offset: ShmOffset, total_len: usize) -> Vec<u8> {
     let mut result = vec![0u8; total_len];
-    let mut current = payload_offset;
+    let mut current: ShmOffset = payload_offset;
     let mut bytes_read = 0;
     let mut is_head = true;
 
     while bytes_read < total_len && current != 0 {
         let ptr = (base + current as usize) as *const u8;
-        let (header_size, next) = if is_head {
+        let (header_size, next): (usize, ShmOffset) = if is_head {
             let hdr = unsafe { &*(ptr as *const ChainNodeHeader) };
             (std::mem::size_of::<ChainNodeHeader>(), hdr.next_payload_page)
         } else {
-            let next = unsafe { *(ptr as *const u32) };
-            (std::mem::size_of::<u32>(), next)
+            let next = unsafe { *(ptr as *const ShmOffset) };
+            (std::mem::size_of::<ShmOffset>(), next)
         };
         let capacity = PAGE_SIZE as usize - header_size;
         let n = capacity.min(total_len - bytes_read);
@@ -282,12 +282,12 @@ fn read_shared_payload(base: usize, payload_offset: u32, total_len: usize) -> Ve
 /// Sequential page-chain reader for length-prefixed stream records.
 struct PageReader {
     base:          usize,
-    page_offset:   u32,
-    cursor_in_page: u32,
+    page_offset:   ShmOffset,
+    cursor_in_page: ShmOffset,
 }
 
 impl PageReader {
-    fn new(base: usize, head: u32) -> Self {
+    fn new(base: usize, head: ShmOffset) -> Self {
         Self { base, page_offset: head, cursor_in_page: 0 }
     }
 
@@ -314,7 +314,7 @@ impl PageReader {
                     n,
                 );
             }
-            self.cursor_in_page += n as u32;
+            self.cursor_in_page += n as ShmOffset;
             written             += n;
         }
         true

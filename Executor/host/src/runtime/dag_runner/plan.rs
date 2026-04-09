@@ -266,6 +266,87 @@ pub(super) fn build_waves(nodes: &[DagNode], order: &[usize]) -> Vec<Vec<usize>>
     waves
 }
 
+/// Validate that all nodes sharing the same `barrier_group` are placed in the
+/// same wave.  Returns an error listing each group whose members span multiple
+/// waves.
+pub(super) fn validate_barrier_groups(nodes: &[DagNode], waves: &[Vec<usize>]) -> Result<()> {
+    // Build a map: node index → wave index.
+    let mut node_wave: Vec<usize> = vec![0; nodes.len()];
+    for (wi, wave) in waves.iter().enumerate() {
+        for &idx in wave {
+            node_wave[idx] = wi;
+        }
+    }
+
+    // Group nodes by barrier_group name and check wave consistency.
+    let mut groups: HashMap<&str, (usize, Vec<&str>)> = HashMap::new(); // name → (wave, [node_ids])
+    let mut errors: Vec<String> = Vec::new();
+
+    for (idx, node) in nodes.iter().enumerate() {
+        if let Some(ref group) = node.barrier_group {
+            let w = node_wave[idx];
+            match groups.get_mut(group.as_str()) {
+                Some((expected_wave, members)) => {
+                    if *expected_wave != w {
+                        errors.push(format!(
+                            "barrier_group '{}': node '{}' is in wave {} but group expects wave {} \
+                             (members so far: {})",
+                            group, node.id, w, expected_wave, members.join(", ")
+                        ));
+                    }
+                    members.push(&node.id);
+                }
+                None => {
+                    groups.insert(group.as_str(), (w, vec![&node.id]));
+                }
+            }
+        }
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!("Barrier group validation failed:\n  {}", errors.join("\n  ")))
+    }
+}
+
+/// Compute per-wave barrier assignments: for each wave that contains nodes with
+/// `barrier_group`, assign sequential barrier slot IDs (0, 1, ...) and return
+/// the set of barrier IDs that need resetting before each wave.
+///
+/// Returns `(wave_index → Vec<barrier_id_to_reset>, group_name → (barrier_id, party_count))`.
+pub(super) fn build_barrier_assignments(
+    nodes: &[DagNode],
+    waves: &[Vec<usize>],
+) -> (Vec<Vec<usize>>, HashMap<String, (usize, usize)>) {
+    let mut global_id: usize = 0;
+    let mut group_map: HashMap<String, (usize, usize)> = HashMap::new(); // name → (barrier_id, party_count)
+    let mut wave_barriers: Vec<Vec<usize>> = vec![Vec::new(); waves.len()];
+
+    for (wi, wave) in waves.iter().enumerate() {
+        // Collect distinct groups in this wave.
+        let mut wave_groups: HashMap<&str, usize> = HashMap::new(); // name → count
+
+        for &idx in wave {
+            if let Some(ref group) = nodes[idx].barrier_group {
+                *wave_groups.entry(group.as_str()).or_insert(0) += 1;
+            }
+        }
+
+        for (name, count) in wave_groups {
+            if !group_map.contains_key(name) {
+                assert!(global_id < common::BARRIER_COUNT,
+                    "Too many barrier groups (max {})", common::BARRIER_COUNT);
+                group_map.insert(name.to_string(), (global_id, count));
+                wave_barriers[wi].push(global_id);
+                global_id += 1;
+            }
+        }
+    }
+
+    (wave_barriers, group_map)
+}
+
 /// Returns true for node kinds executed as isolated subprocesses
 /// (WasmVoid/WasmU32/WasmFatPtr and PyFunc).
 pub(super) fn is_oneshot_node(kind: &NodeKind) -> bool {

@@ -1,11 +1,11 @@
-use core::sync::atomic::{AtomicU64, Ordering};
+use core::sync::atomic::AtomicU64;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use common::*;
 use super::{ShmApi, SHM_BASE};
 
 extern "C" {
-    fn host_resolve_atomic(ptr: u32, len: u32) -> u32;
+    fn host_resolve_atomic(ptr: WasmPtr, len: WasmPtr) -> u32;
 }
 
 impl ShmApi {
@@ -25,7 +25,7 @@ impl ShmApi {
             if super::ATOMIC_INDEX_CACHE.is_none() { super::ATOMIC_INDEX_CACHE = Some(BTreeMap::new()); }
             let cache = super::ATOMIC_INDEX_CACHE.as_mut().unwrap();
             let index = if let Some(&idx) = cache.get(name) { idx } else {
-                let idx = host_resolve_atomic(name.as_ptr() as u32, name.len() as u32);
+                let idx = host_resolve_atomic(name.as_ptr() as WasmPtr, name.len() as WasmPtr);
                 cache.insert(String::from(name), idx);
                 idx
             };

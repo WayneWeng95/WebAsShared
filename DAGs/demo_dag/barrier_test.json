@@ -1,0 +1,35 @@
+{
+  "shm_path": "/dev/shm/barrier_test",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "info",
+  "nodes": [
+
+    { "id": "bw0", "deps": [], "barrier_group": "basic",
+      "kind": { "WasmVoid": { "func": "barrier_worker", "arg": 0 } } },
+    { "id": "bw1", "deps": [], "barrier_group": "basic",
+      "kind": { "WasmVoid": { "func": "barrier_worker", "arg": 1 } } },
+    { "id": "bw2", "deps": [], "barrier_group": "basic",
+      "kind": { "WasmVoid": { "func": "barrier_worker", "arg": 2 } } },
+
+    { "id": "verify_basic", "deps": ["bw0", "bw1", "bw2"],
+      "kind": { "WasmVoid": { "func": "barrier_verify", "arg": 0 } } },
+
+    { "id": "save_basic", "deps": ["verify_basic"],
+      "kind": { "Output": { "path": "/tmp/barrier_test_basic.txt", "slot": 1 } } },
+
+    { "id": "mb0", "deps": [], "barrier_group": "multi",
+      "kind": { "WasmVoid": { "func": "multi_barrier_worker", "arg": 0 } } },
+    { "id": "mb1", "deps": [], "barrier_group": "multi",
+      "kind": { "WasmVoid": { "func": "multi_barrier_worker", "arg": 1 } } },
+    { "id": "mb2", "deps": [], "barrier_group": "multi",
+      "kind": { "WasmVoid": { "func": "multi_barrier_worker", "arg": 2 } } },
+    { "id": "mb3", "deps": [], "barrier_group": "multi",
+      "kind": { "WasmVoid": { "func": "multi_barrier_worker", "arg": 3 } } },
+
+    { "id": "verify_multi", "deps": ["mb0", "mb1", "mb2", "mb3"],
+      "kind": { "WasmVoid": { "func": "multi_barrier_verify", "arg": 0 } } },
+
+    { "id": "save_multi", "deps": ["verify_multi"],
+      "kind": { "Output": { "path": "/tmp/barrier_test_multi.txt", "slot": 3 } } }
+  ]
+}

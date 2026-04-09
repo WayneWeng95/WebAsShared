@@ -26,7 +26,6 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 use alloc::vec::Vec;
-use alloc::string::String;
 use crate::api::ShmApi;
 
 const PARTITION_BASE: u32 = 10;

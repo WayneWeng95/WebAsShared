@@ -87,6 +87,19 @@ pub struct DagNode {
     #[serde(default)]
     pub deps: Vec<String>,
     pub kind: NodeKind,
+    /// Optional barrier group name for intra-wave synchronization.
+    ///
+    /// All nodes that share the same `barrier_group` string must land in the
+    /// same execution wave (validated at DAG load time).  The guest workload
+    /// calls `ShmApi::barrier_wait(barrier_id, party_count)` to synchronize
+    /// with peers in the group.
+    ///
+    /// The host assigns a sequential barrier slot ID (0, 1, ...) to each
+    /// distinct group name within a wave and resets the counter before the
+    /// wave starts.  The mapping from group name to barrier ID is printed
+    /// to stdout so workload authors can hard-code or parameterise it.
+    #[serde(default)]
+    pub barrier_group: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

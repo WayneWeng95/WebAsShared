@@ -20,6 +20,9 @@ pub struct AgentConfig {
     /// Timeout settings.
     #[serde(default)]
     pub timeouts: TimeoutConfig,
+    /// SCX sched_ext integration settings.
+    #[serde(default)]
+    pub scx: ScxConfig,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq, Clone, Copy)]
@@ -93,6 +96,28 @@ impl Default for TimeoutConfig {
         Self {
             job_timeout_s: default_job_timeout(),
             health_check_s: default_health_check(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ScxConfig {
+    /// Whether SCX stats collection is enabled.
+    #[serde(default = "default_scx_enabled")]
+    pub enabled: bool,
+    /// Path to the SCX stats UNIX socket.
+    #[serde(default = "default_scx_socket")]
+    pub socket_path: String,
+}
+
+fn default_scx_enabled() -> bool { true }
+fn default_scx_socket() -> String { "/var/run/scx/root/stats".into() }
+
+impl Default for ScxConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_scx_enabled(),
+            socket_path: default_scx_socket(),
         }
     }
 }

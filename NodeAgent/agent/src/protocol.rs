@@ -4,6 +4,7 @@
 //! All messages are serialized as `Message { kind, payload }`.
 
 use anyhow::{bail, Context, Result};
+use scheduler::ScxNodeSnapshot;
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 use std::net::TcpStream;
@@ -89,6 +90,9 @@ pub struct MetricsPayload {
     pub executor_running: bool,
     pub current_job_id: Option<String>,
     pub job_elapsed_ms: Option<u64>,
+    /// SCX sched_ext scheduler stats (None if unavailable).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scx: Option<ScxNodeSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -100,6 +104,9 @@ pub struct SubmitJobPayload {
 pub struct StatusResponsePayload {
     pub workers: Vec<WorkerStatus>,
     pub current_job: Option<String>,
+    /// Cluster-wide SCX scheduler stats (if available).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scx_cluster: Option<scheduler::ScxClusterView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

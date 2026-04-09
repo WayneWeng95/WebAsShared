@@ -4,7 +4,7 @@ use common::*;
 use super::{ShmApi, SHM_BASE};
 
 extern "C" {
-    fn host_remap(new_size: u32);
+    fn host_remap(new_size: ShmOffset);
 }
 
 /// Guest-local round-robin counter for shard selection.
@@ -29,7 +29,7 @@ impl ShmApi {
     ///    the current capacity is exhausted.
     ///
     /// Returns the page's byte offset from the shared memory base.
-    pub(crate) fn try_allocate_page() -> u32 {
+    pub(crate) fn try_allocate_page() -> ShmOffset {
         let sb = Self::superblock();
 
         // ── Sharded free-list pop ─────────────────────────────────────────────
@@ -42,7 +42,7 @@ impl ShmApi {
                 if head == 0 {
                     break; // shard empty — try next
                 }
-                let page_ptr = unsafe { (SHM_BASE + head as usize) as *const Page };
+                let page_ptr = (SHM_BASE + head as usize) as *const Page;
                 let next_free = unsafe { (*page_ptr).next_offset.load(Ordering::Relaxed) };
 
                 match sb.free_list_heads[shard].compare_exchange(
@@ -63,7 +63,7 @@ impl ShmApi {
         loop {
             let current_alloc = sb.bump_allocator.load(Ordering::Acquire);
 
-            if current_alloc >= 0x7FF0_0000 { continue; }
+            if current_alloc >= BUMP_SOFT_LIMIT { continue; }
 
             let local_cap = unsafe { super::LOCAL_CAPACITY };
 
@@ -74,7 +74,7 @@ impl ShmApi {
                     continue;
                 } else {
                     let new_cap = local_cap * 2;
-                    if new_cap >= 0x8000_0000 { continue; }
+                    if new_cap >= CAPACITY_HARD_LIMIT { continue; }
                     if sb.global_capacity.compare_exchange(local_cap, new_cap, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
                         unsafe { host_remap(new_cap); super::LOCAL_CAPACITY = new_cap; }
                         continue;

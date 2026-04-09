@@ -1,3 +1,4 @@
+mod barrier_test;
 mod demos;
 mod finra;
 mod img_pipeline;
