@@ -20,6 +20,7 @@ struct WorkerConn {
     node_id: u32,
     stream: TcpStream,
     running_job: Option<String>,
+    last_heartbeat: Instant,
 }
 
 /// Shared coordinator state.
@@ -73,11 +74,40 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
 
     // Main event loop: accept client connections for submit/status.
     loop {
+        // Drain any pending metrics from worker streams (doubles as heartbeat).
+        {
+            let mut s = state.lock().unwrap();
+            let mut pending: Vec<metrics::NodeMetrics> = Vec::new();
+            for worker in s.workers.values_mut() {
+                worker.stream.set_read_timeout(Some(Duration::from_millis(1))).ok();
+                while let Ok(msg) = recv_message(&mut worker.stream) {
+                    worker.last_heartbeat = Instant::now();
+                    if msg.kind == MessageKind::Metrics {
+                        if let Ok(m) = serde_json::from_value::<metrics::NodeMetrics>(msg.payload) {
+                            pending.push(m);
+                        }
+                    }
+                }
+            }
+            for m in pending {
+                s.scx_view.update(
+                    m.node_id,
+                    m.scx.clone(),
+                    m.cpu_usage_pct,
+                    m.rss_bytes,
+                    m.executor_running,
+                    m.current_job_id.clone(),
+                    m.timestamp_ms,
+                );
+            }
+        }
+
         // Periodic cluster status printout.
         if last_status_print.elapsed() >= status_interval {
             let s = state.lock().unwrap();
             let self_sample = self_metrics.sample(None, false, s.current_job_id.as_deref(), None);
-            print_cluster_status(&s, &self_sample, expected_workers);
+            let heartbeat_timeout = Duration::from_secs(config.timeouts.health_check_s * 3);
+            print_cluster_status(&s, &self_sample, expected_workers, heartbeat_timeout);
             drop(s);
             last_status_print = Instant::now();
         }
@@ -104,6 +134,7 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
                                     node_id: payload.node_id,
                                     stream,
                                     running_job: None,
+                                    last_heartbeat: Instant::now(),
                                 });
                             }
                             MessageKind::SubmitJob => {
@@ -277,7 +308,9 @@ fn collect_worker_results(
             if let Some(worker) = s.workers.get_mut(worker_id) {
                 worker.stream.set_read_timeout(Some(Duration::from_millis(100)))?;
                 match recv_message(&mut worker.stream) {
-                    Ok(msg) => match msg.kind {
+                    Ok(msg) => {
+                        worker.last_heartbeat = Instant::now();
+                        match msg.kind {
                         MessageKind::JobCompleted => {
                             let p: JobCompletedPayload =
                                 serde_json::from_value(msg.payload)?;
@@ -342,7 +375,7 @@ fn collect_worker_results(
                             }
                         }
                         _ => {}
-                    },
+                    }},
                     Err(_) => {
                         // Timeout — continue polling.
                     }
@@ -425,7 +458,7 @@ fn handle_status(
 }
 
 /// Print cluster node states to the console.
-fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMetrics, expected_workers: usize) {
+fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMetrics, expected_workers: usize, heartbeat_timeout: Duration) {
     // Coordinator's own status line (same format as workers).
     let self_rss_mb = self_metrics.rss_bytes as f64 / (1024.0 * 1024.0);
     let self_job_str = self_metrics.current_job_id.as_deref().unwrap_or("idle");
@@ -447,6 +480,7 @@ fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMe
 
     // Each worker in the same key=value style.
     for w in state.workers.values() {
+        let stale = w.last_heartbeat.elapsed() > heartbeat_timeout;
         let job_str = w.running_job.as_deref().unwrap_or("idle");
         let mut line = format!("[worker {}] job={}", w.node_id, job_str);
 
@@ -459,6 +493,9 @@ fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMe
                     scx.cpu_busy, scx.load, scx.nr_migrations,
                 ));
             }
+        }
+        if stale {
+            line.push_str(&format!(", STALE (no heartbeat for {:.0}s)", w.last_heartbeat.elapsed().as_secs_f64()));
         }
         println!("{}", line);
     }

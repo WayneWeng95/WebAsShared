@@ -221,6 +221,17 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                     }
                 }
             }
+        } else {
+            // Idle — still send periodic metrics so the coordinator has fresh data.
+            if last_status_print.elapsed() >= status_interval {
+                let m = collector.sample(None, false, None, None);
+                print_worker_status(config.node_id, &m);
+                let _ = send_message(
+                    &mut stream,
+                    &make_message(MessageKind::Metrics, &m)?,
+                );
+                last_status_print = Instant::now();
+            }
         }
     }
 
