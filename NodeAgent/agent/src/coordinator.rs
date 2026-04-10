@@ -292,6 +292,11 @@ fn collect_worker_results(
                             ));
                             completed_workers.push(*worker_id);
                             worker.running_job = None;
+                            // Clear stale snapshot so scheduler sees idle state.
+                            if let Some(snap) = s.scx_view.snapshots.get_mut(worker_id) {
+                                snap.executor_running = false;
+                                snap.current_job_id = None;
+                            }
                         }
                         MessageKind::JobFailed => {
                             let p: JobFailedPayload =
@@ -307,6 +312,11 @@ fn collect_worker_results(
                             all_success = false;
                             completed_workers.push(*worker_id);
                             worker.running_job = None;
+                            // Clear stale snapshot so scheduler sees idle state.
+                            if let Some(snap) = s.scx_view.snapshots.get_mut(worker_id) {
+                                snap.executor_running = false;
+                                snap.current_job_id = None;
+                            }
                         }
                         MessageKind::JobStarted => {
                             let p: JobStartedPayload =

@@ -179,6 +179,13 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                     }
                     current_executor = None;
                     current_shm_path = None;
+
+                    // Send idle metrics so the coordinator's snapshot is up-to-date.
+                    let idle = collector.sample(None, false, None, None);
+                    let _ = send_message(
+                        &mut stream,
+                        &make_message(MessageKind::Metrics, &idle)?,
+                    );
                 }
                 None => {
                     // Still running — send periodic metrics.
