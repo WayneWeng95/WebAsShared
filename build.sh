@@ -2,6 +2,9 @@
 set -e
 
 ROOT=$(cd "$(dirname "$0")" && pwd)
+export PATH="/opt/myapp/.cargo/bin:$PATH"
+export RUSTUP_HOME="/opt/myapp/.rustup"
+export CARGO_HOME="/opt/myapp/.cargo"
 
 # ── WASM64 mode (disabled — wasm64 compiles but has JIT performance issues) ──
 # Set WASM64=1 to build for wasm64 (memory64) instead of wasm32.

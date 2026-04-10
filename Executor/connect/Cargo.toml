@@ -12,10 +12,6 @@ name = "rdma_client"
 [build-dependencies]
 cc = "1.0"
 
-[features]
-default = []
-# wasm64 = ["common/wasm64"]  # disabled: wasm64 compiles but has JIT performance issues
-
 [dependencies]
 anyhow = "1.0"
 common = { path = "../common" }

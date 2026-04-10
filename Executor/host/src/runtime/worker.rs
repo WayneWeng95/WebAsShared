@@ -12,32 +12,15 @@ pub struct WorkerState {
     pub splice_addr: usize,
 }
 
-/// Creates a Wasmtime engine configured for shared memory.
-/// wasm32: 4 GiB static address space.  wasm64: 64 GiB with memory64 enabled.
-/// Guard pages disabled (VMA is managed manually), threads enabled.
+/// Creates a Wasmtime engine configured for shared memory:
+/// 4 GiB static address space, no guard pages (VMA is managed manually), threads enabled.
 pub fn create_wasmtime_engine() -> Result<Engine> {
     let mut config = Config::new();
-
-    #[cfg(feature = "wasm64")]
-    {
-        config.wasm_memory64(true);
-        // Reserve 16 GiB of virtual address space so our MAP_FIXED at
-        // TARGET_OFFSET (8 GiB) lands inside the reservation.
-        // Only virtual — no physical pages committed until touched.
-        config.memory_reservation(16 * 1024 * 1024 * 1024);
-    }
-
-    #[cfg(not(feature = "wasm64"))]
-    {
-        // Reserve 4 GiB so our MAP_FIXED at TARGET_OFFSET (2 GiB) lands
-        // inside a contiguous VMA owned by Wasmtime.  Without this, the
-        // SHM mapping falls outside the reservation and ibv_reg_mr fails
-        // because the RDMA driver cannot pin a fragmented VMA.
-        config.memory_reservation(1u64 << 32);
-    }
-
+    // Allow full 4 GiB address space
+    config.static_memory_maximum_size(1 << 32);
     // Disable guard pages as we manage VMA manually
-    config.memory_guard_size(0);
+    config.static_memory_guard_size(0);
+    config.dynamic_memory_guard_size(0);
     // Enable threads for Shared Memory
     config.wasm_threads(true);
 
@@ -52,21 +35,7 @@ pub fn setup_vma_environment(
     linker: &mut Linker<WorkerState>,
     file: &File,
 ) -> Result<Memory> {
-    // wasm64: small min (1 GiB committed for guest heap), large max (16 GiB).
-    // The memory_reservation in the engine config reserves 16 GiB of virtual
-    // address space; our MAP_FIXED at TARGET_OFFSET (8 GiB) maps the SHM
-    // file into that reservation without committing physical pages.
-    #[cfg(feature = "wasm64")]
-    let memory_ty = MemoryType::builder()
-        .memory64(true)
-        .shared(true)
-        .min(16384)              // 1 GiB committed (guest heap)
-        .max(Some(262144))       // 16 GiB max
-        .build()
-        .map_err(|e| anyhow::anyhow!("bad memory type: {}", e))?;
-
-    #[cfg(not(feature = "wasm64"))]
-    let memory_ty = MemoryType::shared(49152, 65536); // 4 GiB max
+    let memory_ty = MemoryType::shared(49152, 65536);
 
     let memory = Memory::new(&mut *store, memory_ty)?;
 
@@ -86,12 +55,12 @@ pub fn setup_vma_environment(
     linker.func_wrap(
         "env",
         "host_remap",
-        |mut caller: Caller<'_, WorkerState>, new_size: common::ShmOffset| {
+        |mut caller: Caller<'_, WorkerState>, new_size: u32| {
             let state = caller.data_mut();
             println!(
                 "[PID:{}] remap to {} MB",
                 std::process::id(),
-                new_size as u64 / 1024 / 1024
+                new_size / 1024 / 1024
             );
             expand_mapping(&state.file, state.splice_addr, new_size as usize).unwrap();
         },
@@ -102,7 +71,7 @@ pub fn setup_vma_environment(
     linker.func_wrap(
         "env",
         "host_resolve_atomic",
-        move |caller: Caller<'_, WorkerState>, ptr: common::WasmPtr, len: common::WasmPtr| -> u32 {
+        move |caller: Caller<'_, WorkerState>, ptr: u32, len: u32| -> u32 {
             let base_ptr = memory_handle.data_ptr(&caller);
             let name_bytes =
                 unsafe { std::slice::from_raw_parts(base_ptr.add(ptr as usize), len as usize) };
