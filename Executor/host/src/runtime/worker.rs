@@ -27,6 +27,15 @@ pub fn create_wasmtime_engine() -> Result<Engine> {
         config.memory_reservation(16 * 1024 * 1024 * 1024);
     }
 
+    #[cfg(not(feature = "wasm64"))]
+    {
+        // Reserve 4 GiB so our MAP_FIXED at TARGET_OFFSET (2 GiB) lands
+        // inside a contiguous VMA owned by Wasmtime.  Without this, the
+        // SHM mapping falls outside the reservation and ibv_reg_mr fails
+        // because the RDMA driver cannot pin a fragmented VMA.
+        config.memory_reservation(1u64 << 32);
+    }
+
     // Disable guard pages as we manage VMA manually
     config.memory_guard_size(0);
     // Enable threads for Shared Memory

@@ -33,7 +33,8 @@ impl MemoryRegion {
             ibv_reg_mr(ctx.pd.as_ptr(), ptr as *mut _, size, access)
         };
         if mr_ptr.is_null() {
-            return Err(anyhow!("ibv_reg_mr failed for external buffer (addr={:p} size={})", ptr, size));
+            let errno = std::io::Error::last_os_error();
+            return Err(anyhow!("ibv_reg_mr failed for external buffer (addr={:p} size={} errno={})", ptr, size, errno));
         }
         let mr  = unsafe { NonNull::new_unchecked(mr_ptr) };
         // Use a dangling non-null layout so Drop skips dealloc.
