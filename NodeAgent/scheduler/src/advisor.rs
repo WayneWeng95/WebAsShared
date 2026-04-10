@@ -108,6 +108,7 @@ mod tests {
                 numa_nodes: numa0,
                 ..Default::default()
             }),
+            0.0,
             8 * 1024 * 1024 * 1024, // 8 GiB
             true,
             Some("job_123".into()),
@@ -126,6 +127,7 @@ mod tests {
                 numa_nodes: numa1,
                 ..Default::default()
             }),
+            0.0,
             512 * 1024 * 1024, // 512 MiB
             false,
             None,
@@ -144,8 +146,8 @@ mod tests {
         let mut view = ScxClusterView::new();
 
         // Both nodes have identical CPU/memory, but node 0 is running a job.
-        view.update(0, None, 1024 * 1024 * 100, true, Some("job_1".into()), 1000);
-        view.update(1, None, 1024 * 1024 * 100, false, None, 1000);
+        view.update(0, None, 0.0, 1024 * 1024 * 100, true, Some("job_1".into()), 1000);
+        view.update(1, None, 0.0, 1024 * 1024 * 100, false, None, 1000);
 
         let scores = score_nodes(&view);
         assert_eq!(scores[0].0, 1, "idle node should be preferred");
@@ -160,9 +162,9 @@ mod tests {
         let mut view = ScxClusterView::new();
 
         // Node 0: high memory usage
-        view.update(0, None, 16 * 1024 * 1024 * 1024, false, None, 1000);
+        view.update(0, None, 0.0, 16 * 1024 * 1024 * 1024, false, None, 1000);
         // Node 1: low memory usage
-        view.update(1, None, 1 * 1024 * 1024 * 1024, false, None, 1000);
+        view.update(1, None, 0.0, 1 * 1024 * 1024 * 1024, false, None, 1000);
 
         let scores = score_nodes(&view);
         assert_eq!(scores[0].0, 1, "low-memory node preferred");
@@ -172,9 +174,9 @@ mod tests {
     #[test]
     fn test_best_nodes() {
         let mut view = ScxClusterView::new();
-        view.update(0, Some(ScxNodeSnapshot { cpu_busy: 90.0, ..Default::default() }), 4_000_000_000, true, Some("j".into()), 1000);
-        view.update(1, Some(ScxNodeSnapshot { cpu_busy: 10.0, ..Default::default() }), 500_000_000, false, None, 1000);
-        view.update(2, Some(ScxNodeSnapshot { cpu_busy: 50.0, ..Default::default() }), 2_000_000_000, false, None, 1000);
+        view.update(0, Some(ScxNodeSnapshot { cpu_busy: 90.0, ..Default::default() }), 0.0, 4_000_000_000, true, Some("j".into()), 1000);
+        view.update(1, Some(ScxNodeSnapshot { cpu_busy: 10.0, ..Default::default() }), 0.0, 500_000_000, false, None, 1000);
+        view.update(2, Some(ScxNodeSnapshot { cpu_busy: 50.0, ..Default::default() }), 0.0, 2_000_000_000, false, None, 1000);
 
         let best = best_nodes(&view, 2);
         assert_eq!(best.len(), 2);
@@ -193,8 +195,8 @@ mod tests {
     fn test_no_scx_still_scores() {
         // Even without SCX data, memory and job state should be scored.
         let mut view = ScxClusterView::new();
-        view.update(0, None, 8_000_000_000, true, Some("job".into()), 1000);
-        view.update(1, None, 1_000_000_000, false, None, 1000);
+        view.update(0, None, 0.0, 8_000_000_000, true, Some("job".into()), 1000);
+        view.update(1, None, 0.0, 1_000_000_000, false, None, 1000);
 
         let scores = score_nodes(&view);
         assert_eq!(scores[0].0, 1, "idle low-memory node preferred even without SCX");

@@ -108,8 +108,8 @@ fn test_full_pipeline_mock_to_advisor() {
 
     // Build cluster view: node 0 is busy with high memory, node 1 is idle with low memory.
     let mut view = ScxClusterView::new();
-    view.update(0, Some(snap_node0), 8_000_000_000, true, Some("job_42".into()), 1000);
-    view.update(1, Some(snap_node1), 500_000_000, false, None, 1000);
+    view.update(0, Some(snap_node0), 0.0, 8_000_000_000, true, Some("job_42".into()), 1000);
+    view.update(1, Some(snap_node1), 0.0, 500_000_000, false, None, 1000);
 
     // Run advisor.
     let scores = scheduler::score_nodes(&view);

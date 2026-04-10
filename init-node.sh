@@ -31,6 +31,20 @@ info "Installing system packages (RDMA, InfiniBand, perftest)..."
 sudo apt-get update -qq || true
 sudo apt-get install -y libibverbs-dev pkg-config librdmacm-dev ibverbs-utils perftest
 
+# ── Step 2b: Configure memlock for RDMA ────────────────────
+# ibv_reg_mr pins user pages for DMA — requires RLIMIT_MEMLOCK
+# to be at least as large as the SHM region (36 MiB+).
+# Without this, ibv_reg_mr fails with ENOMEM.
+info "Configuring memlock limits for RDMA..."
+LIMITS_FILE="/etc/security/limits.conf"
+if ! grep -q '^\*.*memlock.*unlimited' "$LIMITS_FILE" 2>/dev/null; then
+    echo '* soft memlock unlimited' | sudo tee -a "$LIMITS_FILE" > /dev/null
+    echo '* hard memlock unlimited' | sudo tee -a "$LIMITS_FILE" > /dev/null
+    info "Added memlock unlimited to $LIMITS_FILE (takes effect on next login)"
+fi
+info "Current memlock limit: $(ulimit -l) KB (should be unlimited)"
+
+
 # ── Step 3: Rust environment setup ──────────────────────────
 info "Setting up Rust environment..."
 source "$ROOT/scripts/rust.sh"

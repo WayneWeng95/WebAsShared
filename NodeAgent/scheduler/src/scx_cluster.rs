@@ -11,6 +11,8 @@ use std::collections::HashMap;
 pub struct NodeStatus {
     /// SCX sched_ext stats (None if SCX is not running on this node).
     pub scx: Option<ScxNodeSnapshot>,
+    /// CPU usage percentage (0–100).
+    pub cpu_usage_pct: f32,
     /// Resident memory usage in bytes.
     pub rss_bytes: u64,
     /// Whether an executor is currently running on this node.
@@ -38,6 +40,7 @@ impl ScxClusterView {
         &mut self,
         node_id: u32,
         scx: Option<ScxNodeSnapshot>,
+        cpu_usage_pct: f32,
         rss_bytes: u64,
         executor_running: bool,
         current_job_id: Option<String>,
@@ -47,6 +50,7 @@ impl ScxClusterView {
             node_id,
             NodeStatus {
                 scx,
+                cpu_usage_pct,
                 rss_bytes,
                 executor_running,
                 current_job_id,
@@ -94,7 +98,7 @@ mod tests {
             ..Default::default()
         };
 
-        view.update(1, Some(snap), 1024 * 1024 * 512, false, None, 1000);
+        view.update(1, Some(snap), 0.0, 1024 * 1024 * 512, false, None, 1000);
         assert!(view.has_node(1));
         assert!(!view.has_node(2));
         assert_eq!(view.node_count(), 1);
@@ -104,7 +108,7 @@ mod tests {
     #[test]
     fn test_staleness() {
         let mut view = ScxClusterView::new();
-        view.update(0, None, 0, false, None, 1000);
+        view.update(0, None, 0.0, 0, false, None, 1000);
 
         assert!(!view.is_stale(0, 2000, 5000)); // 1s old, threshold 5s
         assert!(view.is_stale(0, 7000, 5000));  // 6s old, threshold 5s
@@ -114,9 +118,9 @@ mod tests {
     #[test]
     fn test_busy_count() {
         let mut view = ScxClusterView::new();
-        view.update(0, None, 0, true, Some("job_1".into()), 1000);
-        view.update(1, None, 0, false, None, 1000);
-        view.update(2, None, 0, true, Some("job_2".into()), 1000);
+        view.update(0, None, 0.0, 0, true, Some("job_1".into()), 1000);
+        view.update(1, None, 0.0, 0, false, None, 1000);
+        view.update(2, None, 0.0, 0, true, Some("job_2".into()), 1000);
         assert_eq!(view.busy_node_count(), 2);
     }
 }

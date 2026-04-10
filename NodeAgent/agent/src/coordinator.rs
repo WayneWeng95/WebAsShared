@@ -69,15 +69,15 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
 
     let status_interval = Duration::from_secs(config.metrics.status_print_interval_s);
     let mut last_status_print = Instant::now();
+    let mut self_metrics = metrics::MetricsCollector::new(config.node_id);
 
     // Main event loop: accept client connections for submit/status.
     loop {
         // Periodic cluster status printout.
         if last_status_print.elapsed() >= status_interval {
             let s = state.lock().unwrap();
-            if !s.workers.is_empty() || s.scx_view.node_count() > 0 {
-                print_cluster_status(&s);
-            }
+            let self_sample = self_metrics.sample(None, false, s.current_job_id.as_deref(), None);
+            print_cluster_status(&s, &self_sample, expected_workers);
             drop(s);
             last_status_print = Instant::now();
         }
@@ -322,6 +322,7 @@ fn collect_worker_results(
                                 s.scx_view.update(
                                     m.node_id,
                                     m.scx.clone(),
+                                    m.cpu_usage_pct,
                                     m.rss_bytes,
                                     m.executor_running,
                                     m.current_job_id.clone(),
@@ -414,33 +415,51 @@ fn handle_status(
 }
 
 /// Print cluster node states to the console.
-fn print_cluster_status(state: &CoordinatorState) {
-    println!("[coordinator] ── Cluster Status ──");
+fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMetrics, expected_workers: usize) {
+    // Coordinator's own status line (same format as workers).
+    let self_rss_mb = self_metrics.rss_bytes as f64 / (1024.0 * 1024.0);
+    let self_job_str = self_metrics.current_job_id.as_deref().unwrap_or("idle");
+    let mut self_line = format!(
+        "[coordinator] cpu={:.1}%, rss={:.0} MiB, job={}, workers={}/{}",
+        self_metrics.cpu_usage_pct,
+        self_rss_mb,
+        self_job_str,
+        state.workers.len(),
+        expected_workers,
+    );
+    if let Some(ref scx) = self_metrics.scx {
+        self_line.push_str(&format!(
+            ", scx(cpu_busy={:.1}%, load={:.1}, migrations={})",
+            scx.cpu_busy, scx.load, scx.nr_migrations,
+        ));
+    }
+    println!("{}", self_line);
+
+    // Each worker in the same key=value style.
     for w in state.workers.values() {
         let job_str = w.running_job.as_deref().unwrap_or("idle");
-        print!("  node {}: job={}", w.node_id, job_str);
+        let mut line = format!("[worker {}] job={}", w.node_id, job_str);
 
         if let Some(status) = state.scx_view.snapshots.get(&w.node_id) {
             let rss_mb = status.rss_bytes as f64 / (1024.0 * 1024.0);
-            print!(", rss={:.0} MiB", rss_mb);
+            line.push_str(&format!(", cpu={:.1}%, rss={:.0} MiB", status.cpu_usage_pct, rss_mb));
             if let Some(ref scx) = status.scx {
-                print!(
-                    ", cpu_busy={:.1}%, load={:.1}, migrations={}",
+                line.push_str(&format!(
+                    ", scx(cpu_busy={:.1}%, load={:.1}, migrations={})",
                     scx.cpu_busy, scx.load, scx.nr_migrations,
-                );
+                ));
             }
         }
-        println!();
+        println!("{}", line);
     }
 
     if state.scx_view.node_count() > 0 {
         let scores = scheduler::score_nodes(&state.scx_view);
         if !scores.is_empty() {
             let best: Vec<u32> = scores.iter().map(|(id, _)| *id).collect();
-            println!("  placement order: {:?} (best first)", best);
+            println!("[coordinator] placement order: {:?} (best first)", best);
         }
     }
-    println!("[coordinator] ─────────────────────");
 }
 
 /// Generate a simple timestamp-based ID (no external deps).
