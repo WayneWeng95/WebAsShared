@@ -16,7 +16,7 @@
 
 use core::sync::atomic::Ordering;
 use alloc::vec::Vec;
-use common::IO_SLOT_COUNT;
+use common::{IO_SLOT_COUNT, ShmOffset};
 use super::ShmApi;
 use super::stream_area::{chain_append_prefixed, chain_read_latest, chain_read_all};
 
@@ -45,7 +45,7 @@ impl ShmApi {
     ///
     /// Returns `None` when the host has not written any data into this slot.
     pub fn read_latest_io_data(io_slot: u32) -> Option<(u32, Vec<u8>)> {
-        let head = Self::superblock().io_heads[io_slot as usize].load(Ordering::Acquire);
+        let head = Self::superblock().io_heads[io_slot as usize].load(Ordering::Acquire) as ShmOffset;
         chain_read_latest(head)
     }
 
@@ -55,7 +55,7 @@ impl ShmApi {
     /// file; this returns them all so the guest can iterate over every line.
     /// Returns an empty `Vec` when no input has been written.
     pub fn read_all_io_records(io_slot: u32) -> Vec<(u32, Vec<u8>)> {
-        let head = Self::superblock().io_heads[io_slot as usize].load(Ordering::Acquire);
+        let head = Self::superblock().io_heads[io_slot as usize].load(Ordering::Acquire) as ShmOffset;
         chain_read_all(head)
     }
 

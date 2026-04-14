@@ -38,15 +38,16 @@ impl ShmApi {
         for i in 0..FREE_LIST_SHARD_COUNT {
             let shard = (start + i) % FREE_LIST_SHARD_COUNT;
             loop {
-                let head = sb.free_list_heads[shard].load(Ordering::Acquire);
+                let head = sb.free_list_heads[shard].load(Ordering::Acquire) as ShmOffset;
                 if head == 0 {
                     break; // shard empty — try next
                 }
                 let page_ptr = (SHM_BASE + head as usize) as *const Page;
-                let next_free = unsafe { (*page_ptr).next_offset.load(Ordering::Relaxed) };
+                // Page::next_offset is PageId (u64); direct-mode values fit in ShmOffset.
+                let next_free = unsafe { (*page_ptr).next_offset.load(Ordering::Relaxed) } as ShmOffset;
 
                 match sb.free_list_heads[shard].compare_exchange(
-                    head, next_free, Ordering::SeqCst, Ordering::SeqCst,
+                    head as u64, next_free as u64, Ordering::SeqCst, Ordering::SeqCst,
                 ) {
                     Ok(_) => {
                         let mut_page = unsafe { &mut *(page_ptr as *mut Page) };

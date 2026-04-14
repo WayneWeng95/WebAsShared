@@ -39,17 +39,17 @@ impl ChainSplicer {
     /// writer_tails[dst_id] already holds the tail page — no walking needed.
     pub(super) fn chain_onto(&self, dst_id: usize, src_id: usize) {
         let sb = self.superblock();
-        let src_head = sb.writer_heads[src_id].load(Ordering::Acquire);
+        let src_head = sb.writer_heads[src_id].load(Ordering::Acquire) as ShmOffset;
         if src_head == 0 { return; }
-        let src_tail = sb.writer_tails[src_id].load(Ordering::Acquire);
+        let src_tail = sb.writer_tails[src_id].load(Ordering::Acquire) as ShmOffset;
 
-        let dst_tail = sb.writer_tails[dst_id].load(Ordering::Acquire);
+        let dst_tail = sb.writer_tails[dst_id].load(Ordering::Acquire) as ShmOffset;
         if dst_tail == 0 {
-            sb.writer_heads[dst_id].store(src_head, Ordering::Release);
+            sb.writer_heads[dst_id].store(src_head as u64, Ordering::Release);
         } else {
-            self.page_at_mut(dst_tail).next_offset.store(src_head, Ordering::Release);
+            self.page_at_mut(dst_tail).next_offset.store(src_head as u64, Ordering::Release);
         }
-        sb.writer_tails[dst_id].store(src_tail, Ordering::Release);
+        sb.writer_tails[dst_id].store(src_tail as u64, Ordering::Release);
     }
 
     /// Merge `upstream_ids` into `dst_id`.

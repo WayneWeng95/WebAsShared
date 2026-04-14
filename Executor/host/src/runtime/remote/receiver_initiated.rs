@@ -124,7 +124,7 @@ pub(super) fn recv_ri(
         let data_in_page = PAGE_DATA.min(total_bytes - i as usize * PAGE_DATA);
         page.cursor.store(data_in_page as ShmOffset, Ordering::Relaxed);
         let next = if i + 1 < n_pages as ShmOffset { dest_off + (i + 1) * PAGE_SIZE } else { 0 };
-        page.next_offset.store(next, Ordering::Relaxed);
+        page.next_offset.store(next as u64, Ordering::Relaxed);
     }
     // Fence: ensure page chain metadata is visible before linking to slot.
     std::sync::atomic::fence(Ordering::Release);

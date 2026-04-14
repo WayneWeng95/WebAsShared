@@ -1,24 +1,63 @@
 #![no_std]
 extern crate alloc;
 
-use core::sync::atomic::AtomicU32;
+use core::sync::atomic::{AtomicU32, AtomicU64};
 
 // ─── Type aliases ────────────────────────────────────────────────────────────
 
-/// SHM byte offset type.
+/// SHM byte offset type — used for offsets inside fixed-size arenas (Registry,
+/// Atomic, Log, RDMA scratch, Superblock internals).  These arenas live entirely
+/// inside the direct wasm32 window and never overflow, so `u32` is sufficient.
 pub type ShmOffset = u32;
 
 /// Atomic variant of [`ShmOffset`].
 pub type AtomicShmOffset = core::sync::atomic::AtomicU32;
 
-/// WASM linear-memory pointer width.
+/// Identifier for a stream/IO page.  Unlike [`ShmOffset`], a `PageId` may
+/// reference a page that lives outside the direct wasm32 window (i.e. in the
+/// host-side extended pool).  A `PageId` with value `< DIRECT_LIMIT` is a
+/// direct-mode page and its byte offset in the wasm32 window equals its id;
+/// a `PageId` with value `>= DIRECT_LIMIT` is a paged-mode page that must be
+/// resolved through the host-side resolution buffer before use.
+pub type PageId = u64;
+
+/// Atomic variant of [`PageId`].
+pub type AtomicPageId = AtomicU64;
+
+/// WASM linear-memory pointer width.  Always `u32` — this is a wasm32 project.
 pub type WasmPtr = u32;
 
 /// Byte size of one [`ShmOffset`] (4 bytes).
 pub const SHM_OFFSET_SIZE: usize = core::mem::size_of::<ShmOffset>();
 
+/// Byte size of one [`PageId`] (8 bytes).
+pub const PAGE_ID_SIZE: usize = core::mem::size_of::<PageId>();
+
 /// Sentinel value for "no page" / empty chain.
 pub const SHM_NULL: ShmOffset = 0;
+
+/// Sentinel PageId for "no page" / empty chain in the widened chain metadata.
+pub const PAGE_ID_NULL: PageId = 0;
+
+/// Threshold separating direct-mode PageIds from paged-mode PageIds.
+///
+/// A `PageId < DIRECT_LIMIT` is equal to a wasm32 SHM byte offset and can be
+/// resolved by pure arithmetic (`TARGET_OFFSET + id`) with no host call.
+/// A `PageId >= DIRECT_LIMIT` references a page in the host-side extended pool
+/// and must go through `host_fetch_page` (with a guest-side resident cache in
+/// front of it).  Chosen to match `TARGET_OFFSET` (2 GiB) so the direct window
+/// is fully usable before any paging kicks in.
+pub const DIRECT_LIMIT: PageId = 0x8000_0000;
+
+/// Fill fraction at which the direct bump allocator flips to paged mode.
+/// Expressed as numerator/denominator to stay const-evaluable.
+pub const PAGED_MODE_ENTER_NUM: u64 = 8;
+pub const PAGED_MODE_ENTER_DEN: u64 = 10;   // 80%
+
+/// Fill fraction below which paged mode may flip back to direct mode
+/// (only when `global_live == 0`).
+pub const PAGED_MODE_EXIT_NUM: u64 = 5;
+pub const PAGED_MODE_EXIT_DEN: u64 = 10;    // 50%
 
 // ── Shared path / buffer constants ──────────────────────────────────────────
 
@@ -92,8 +131,11 @@ pub const fn rdma_scratch_shm_offset(node_id: usize, peer_id: usize) -> ShmOffse
     RDMA_SCRATCH_OFFSET + ((node_id * MAX_MESH_NODES + peer_id) as ShmOffset) * 8
 }
 
-// Dynamic Hash Map
-pub const BUCKET_COUNT: usize = (PAGE_SIZE / 4) as usize;
+// Dynamic Hash Map — one bucket per `PageId`-sized atomic slot in a single
+// 4 KiB backing page.  After widening bucket slots to `AtomicPageId` this
+// halves from 1024 to 512 buckets; distribution is still ample for the
+// shared-state write workloads.
+pub const BUCKET_COUNT: usize = (PAGE_SIZE as usize) / PAGE_ID_SIZE;
 
 // Shuffle
 pub const PARALLEL_THRESHOLD: usize = 50;
@@ -106,9 +148,11 @@ pub const BARRIER_COUNT: usize = 64;
 // ─── Page data sizing ────────────────────────────────────────────────────────
 
 /// Header bytes consumed by `(next_offset + cursor)` in each [`Page`].
-pub const PAGE_HEADER_SIZE: usize = 2 * SHM_OFFSET_SIZE;
+/// `next_offset` is a [`PageId`] (8 bytes) and `cursor` is a [`ShmOffset`] (4 bytes).
+pub const PAGE_HEADER_SIZE: usize = PAGE_ID_SIZE + SHM_OFFSET_SIZE;
 
 /// Usable data bytes per page (PAGE_SIZE minus header).
+/// wasm32 direct mode: 4096 - 12 = 4084 bytes per page.
 pub const PAGE_DATA_SIZE: usize = PAGE_SIZE as usize - PAGE_HEADER_SIZE;
 
 // ─── Capacity guards ─────────────────────────────────────────────────────────
@@ -118,6 +162,88 @@ pub const BUMP_SOFT_LIMIT: ShmOffset = 0x7FF0_0000;
 
 /// Hard ceiling for `global_capacity` doubling.
 pub const CAPACITY_HARD_LIMIT: ShmOffset = 0x8000_0000;           // 2 GiB
+
+// ─── Extended pool feature flag ───────────────────────────────────────────────
+
+/// Master switch for the extended-pool feature (paged-mode allocation
+/// backed by a host-side overflow file).
+///
+/// When `false`, every `extended_pool::runtime::*` entry point short-
+/// circuits to a no-op as its first statement.  The compiler sees the
+/// `const false` guard and dead-code-eliminates the entire call, so
+/// there is no runtime cost and no singleton is ever initialized.
+/// The `extended_pool` module itself stays compiled — unit tests that
+/// exercise `ExtendedPool`/`GlobalPool`/`ResolutionBuffer` through
+/// their owned-struct API continue to run regardless of this flag.
+///
+/// When `true`, `reclaimer::alloc_page` observes each direct-mode
+/// bump advance through `notify_bump_advance`, which triggers a flip
+/// to paged mode once the 80% threshold is crossed.  See
+/// `docs/extended_pool.md` for the full design.
+pub const EXTENDED_POOL_ENABLED: bool = true;
+
+// ─── RDMA extended pool (Path C — scaffold only) ─────────────────────────────
+
+/// Master switch for the RDMA two-MR extension (Path C).
+///
+/// When `true`, a dedicated `RdmaPool` is lazily created when RDMA
+/// receives are about to exhaust their share of MR1, registered as a
+/// second Memory Region on every mesh peer, and used as a staging
+/// buffer for oversized receives.  After each receive completes, the
+/// host CPU-copies the data from MR2 into freshly-allocated MR1
+/// pages and links those pages into the target slot — so the slot
+/// only ever holds direct-window PageIds and guest consumers remain
+/// fully transparent.
+///
+/// When `false`, every `rdma_pool::runtime::*` entry point short-
+/// circuits at its first statement and the compiler eliminates its
+/// body.  No RdmaPool is ever created, no MR2 is registered, and the
+/// RDMA data plane is identical to pre-Phase-3 behavior.
+///
+/// Independent of `EXTENDED_POOL_ENABLED`: the RdmaPool is its own
+/// storage (separate backing file, separate VA reservation, separate
+/// MR registration).  Either flag can be on or off in any combination.
+///
+/// **Current status**: the `RdmaPool` struct, singleton, and unit
+/// tests are implemented.  The mesh-level pieces
+/// (`ibv_reg_mr`/TCP rkey announce/sender-side rkey branch/
+/// `alloc_and_link` spillover/post-receive memcpy) are **not** yet
+/// wired up.  See `docs/extended_pool.md` §"RDMA integration (Path C)"
+/// for the integration TODO list.
+pub const EXTENDED_RDMA_ENABLED: bool = false;
+
+/// How much of MR1 can be consumed by RDMA receives before MR2
+/// spillover kicks in.  Tracked by a dedicated `rdma_mr1_used` counter
+/// inside `rdma_pool::runtime`, not by `sb.bump_allocator` — so this
+/// budget does not reduce the direct allocator's capacity; it just
+/// caps the RDMA-owned slice of it.  512 MiB is large enough for
+/// typical per-transfer chunks while leaving the rest of the direct
+/// window for guest allocations and general host-side use.
+pub const RDMA_MR1_BUDGET: u64 = 512 * 1024 * 1024;
+
+/// RDMA MR1 usage level at which MR2 is lazily registered.  Set at
+/// 50% of the budget so the pool is ready for spillover BEFORE the
+/// first allocation that would actually need it.  Registering MR2 is
+/// a heavy operation (`ibv_reg_mr` pins physical memory, TCP
+/// announcement to every peer), so we want to pay that cost when
+/// there's time rather than on the critical path of an incoming
+/// transfer.
+pub const RDMA_MR2_REG_THRESHOLD: u64 = 256 * 1024 * 1024;
+
+/// Initial committed size of the RdmaPool backing file (512 MiB).
+/// Doubles on demand up to `RDMA_MR2_HARD_LIMIT`.  Typed as `u64`
+/// so it survives being compiled against the wasm32 guest (where
+/// `usize` is 32-bit) — host code casts to `usize` at use sites.
+pub const RDMA_MR2_INITIAL_SIZE: u64 = 512 * 1024 * 1024;
+
+/// Hard upper bound on total RdmaPool committed size.  Also the
+/// size of the virtual address reservation (reserve-once, commit-
+/// incrementally pattern).  Larger than `GLOBAL_POOL_HARD_LIMIT`
+/// because RDMA bursts can be genuinely large on modern links.
+/// On ConnectX-3 without ODP this pins physical RAM — tune down if
+/// the operator's budget is tighter.  Typed as `u64` for wasm32
+/// compatibility (see [`RDMA_MR2_INITIAL_SIZE`]).
+pub const RDMA_MR2_HARD_LIMIT: u64 = 16 * 1024 * 1024 * 1024;
 
 // ─── Free-list trim policy ────────────────────────────────────────────────────
 
@@ -145,38 +271,75 @@ pub struct Superblock {
     pub registry_lock: AtomicU32,
     pub next_atomic_idx: AtomicU32,
     pub shared_map_base: AtomicShmOffset,
-    /// Sharded page free list (Treiber stacks).
-    pub free_list_heads: [AtomicShmOffset; FREE_LIST_SHARD_COUNT],
-    /// Per-slot head page offsets for the stream area (0..STREAM_SLOT_COUNT).
-    pub writer_heads: [AtomicShmOffset; STREAM_SLOT_COUNT],
-    /// Per-slot tail page offsets for the stream area.
-    pub writer_tails: [AtomicShmOffset; STREAM_SLOT_COUNT],
-    /// Per-slot head page offsets for the dedicated I/O area (0..IO_SLOT_COUNT).
-    pub io_heads: [AtomicShmOffset; IO_SLOT_COUNT],
-    /// Per-slot tail page offsets for the dedicated I/O area.
-    pub io_tails: [AtomicShmOffset; IO_SLOT_COUNT],
+    // 4 bytes of implicit padding here to 8-align the next AtomicU64 array.
+    /// Sharded page free list (Treiber stacks).  Head PageIds are u64 so a
+    /// direct-freelist slot retired during paged mode may host any PageId.
+    pub free_list_heads: [AtomicPageId; FREE_LIST_SHARD_COUNT],
+    /// Per-slot head PageIds for the stream area (0..STREAM_SLOT_COUNT).
+    pub writer_heads: [AtomicPageId; STREAM_SLOT_COUNT],
+    /// Per-slot tail PageIds for the stream area.
+    pub writer_tails: [AtomicPageId; STREAM_SLOT_COUNT],
+    /// Per-slot head PageIds for the dedicated I/O area (0..IO_SLOT_COUNT).
+    pub io_heads: [AtomicPageId; IO_SLOT_COUNT],
+    /// Per-slot tail PageIds for the dedicated I/O area.
+    pub io_tails: [AtomicPageId; IO_SLOT_COUNT],
     /// Intra-wave barrier counters (futex-backed).
     pub barriers: [AtomicU32; BARRIER_COUNT],
 }
 
 #[repr(C, align(4096))]
 pub struct Page {
-    pub next_offset: AtomicShmOffset,
+    /// PageId of the next page in this chain.  Widened to 8 bytes so that
+    /// pages in the host-side extended pool can be referenced by id.  In the
+    /// direct-mode fast path the stored value is always `< DIRECT_LIMIT` and
+    /// resolves to `(TARGET_OFFSET + next_offset) as *mut Page` with no host
+    /// call.  In paged mode, values `>= DIRECT_LIMIT` go through the guest
+    /// resident cache + `host_fetch_page` slow path.
+    pub next_offset: AtomicPageId,
     pub cursor: AtomicShmOffset,
     pub data: [u8; PAGE_DATA_SIZE],
 }
 
-// Compile-time assertion: Page must be exactly PAGE_SIZE bytes.
+// Compile-time assertions: Page must be exactly PAGE_SIZE bytes and the
+// header layout must be { next_offset: u64 @ 0, cursor: u32 @ 8, data @ 12 }.
 const _: () = assert!(core::mem::size_of::<Page>() == PAGE_SIZE as usize);
+const _: () = assert!(PAGE_HEADER_SIZE == 12);
+const _: () = assert!(PAGE_DATA_SIZE == 4084);
+
+// Compile-time assertions for the Superblock layout after widening slot
+// atomics to AtomicPageId (u64).  These offsets are mirrored by the Python
+// guest (`py_guest/python/shm.py`) as literals; if any assert fires, update
+// shm.py in the same commit.
+const _: () = assert!(core::mem::offset_of!(Superblock, bump_allocator)  == 4);
+const _: () = assert!(core::mem::offset_of!(Superblock, free_list_heads) == 32);
+const _: () = assert!(core::mem::offset_of!(Superblock, writer_heads)    == 160);
+const _: () = assert!(core::mem::offset_of!(Superblock, writer_tails)    == 16544);
+const _: () = assert!(core::mem::offset_of!(Superblock, io_heads)        == 32928);
+const _: () = assert!(core::mem::offset_of!(Superblock, io_tails)        == 37024);
+const _: () = assert!(core::mem::offset_of!(Superblock, barriers)        == 41120);
 
 #[repr(C)]
 pub struct ChainNodeHeader {
-    pub next_node: AtomicShmOffset,
+    /// Next entry in the per-bucket conflict list (shared-state write
+    /// contention chain).  Widened to [`PageId`] so overflow entries may
+    /// live in the extended pool.
+    pub next_node: AtomicPageId,
     pub writer_id: u32,
     pub data_len: u32,
     pub registry_index: u32,
-    pub next_payload_page: ShmOffset,
+    // 4 bytes of implicit padding to 8-align `next_payload_page`.
+    /// Next page in this entry's payload chain.  Overflow pages carry a
+    /// bare [`PageId`] at byte 0 as their own next-pointer (see
+    /// `guest/src/api/shared_area.rs`), so widening here must stay in sync
+    /// with the `size_of::<PageId>()` used in that traversal.
+    pub next_payload_page: PageId,
 }
+
+// ChainNodeHeader after widening: next_node u64 @ 0, writer_id @ 8,
+// data_len @ 12, registry_index @ 16, (4 pad), next_payload_page @ 24.
+// Total size = 32 bytes (was 20).
+const _: () = assert!(core::mem::size_of::<ChainNodeHeader>() == 32);
+const _: () = assert!(core::mem::offset_of!(ChainNodeHeader, next_payload_page) == 24);
 
 #[repr(C)]
 pub struct RegistryEntry {

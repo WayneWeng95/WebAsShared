@@ -49,8 +49,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use nix::sys::mman::{madvise, MmapAdvise};
 
-use common::{Page, ShmOffset, Superblock, FREE_LIST_SHARD_COUNT, FREE_LIST_TRIM_ENABLED,
-             FREE_LIST_TRIM_THRESHOLD, PAGE_SIZE};
+use common::{Page, PageId, ShmOffset, Superblock, DIRECT_LIMIT, FREE_LIST_SHARD_COUNT,
+             FREE_LIST_TRIM_ENABLED, FREE_LIST_TRIM_THRESHOLD, PAGE_SIZE};
+
+use crate::runtime::extended_pool;
 
 // ─── Global round-robin shard counter ────────────────────────────────────────
 
@@ -68,8 +70,11 @@ static ALLOC_SHARD: AtomicUsize = AtomicUsize::new(0);
 /// shared-state, or any future area — call this so freed pages are reused
 /// before consuming fresh bump address space.
 ///
-/// Returns the page's **byte offset from `splice_addr`**.
-pub fn alloc_page(splice_addr: usize) -> Result<ShmOffset> {
+/// Returns the page's PageId.  In direct mode that's the byte offset
+/// from `splice_addr` (`< DIRECT_LIMIT`); in paged mode it's a
+/// PageId `>= DIRECT_LIMIT` that must be resolved through
+/// [`extended_pool::runtime::resolve`] before being dereferenced.
+pub fn alloc_page(splice_addr: usize) -> Result<PageId> {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
 
     // ── Sharded free-list pop ─────────────────────────────────────────────────
@@ -78,19 +83,21 @@ pub fn alloc_page(splice_addr: usize) -> Result<ShmOffset> {
     for i in 0..FREE_LIST_SHARD_COUNT {
         let shard = (start + i) % FREE_LIST_SHARD_COUNT;
         loop {
-            let head = sb.free_list_heads[shard].load(Ordering::Acquire);
+            // free_list_heads is AtomicPageId (u64); the direct freelist
+            // only stores direct-mode values (< DIRECT_LIMIT).
+            let head = sb.free_list_heads[shard].load(Ordering::Acquire) as ShmOffset;
             if head == 0 {
                 break; // shard empty — try next
             }
             let page = unsafe { &mut *((splice_addr + head as usize) as *mut Page) };
-            let next = page.next_offset.load(Ordering::Relaxed);
+            let next = page.next_offset.load(Ordering::Relaxed) as ShmOffset;
             match sb.free_list_heads[shard]
-                .compare_exchange(head, next, Ordering::SeqCst, Ordering::SeqCst)
+                .compare_exchange(head as u64, next as u64, Ordering::SeqCst, Ordering::SeqCst)
             {
                 Ok(_) => {
                     page.next_offset.store(0, Ordering::Relaxed);
                     page.cursor.store(0, Ordering::Relaxed);
-                    return Ok(head);
+                    return Ok(head as PageId);
                 }
                 Err(_) => spin_loop(), // another thread won the CAS — retry
             }
@@ -103,6 +110,16 @@ pub fn alloc_page(splice_addr: usize) -> Result<ShmOffset> {
     let offset = sb.bump_allocator.fetch_add(PAGE_SIZE, Ordering::AcqRel);
     let cap = sb.global_capacity.load(Ordering::Acquire);
     if offset + PAGE_SIZE > cap {
+        // Direct-mode bump exhausted.  If paged mode is active, fall
+        // back to the extended pool; the returned PageId will be
+        // `>= DIRECT_LIMIT` and callers must `resolve` it before use.
+        if extended_pool::runtime::current_mode() == extended_pool::Mode::Paged {
+            // Undo the speculative fetch_add so the bump pointer
+            // doesn't march past `cap` for subsequent callers.
+            sb.bump_allocator.fetch_sub(PAGE_SIZE, Ordering::AcqRel);
+            let (id, _ptr) = extended_pool::runtime::alloc_paged_page(false)?;
+            return Ok(id);
+        }
         return Err(anyhow!(
             "SHM capacity exhausted ({} of {} bytes used). \
              Reduce data volume or increase INITIAL_SHM_SIZE.",
@@ -113,7 +130,13 @@ pub fn alloc_page(splice_addr: usize) -> Result<ShmOffset> {
     let page = unsafe { &mut *((splice_addr + offset as usize) as *mut Page) };
     page.next_offset.store(0, Ordering::Relaxed);
     page.cursor.store(0, Ordering::Relaxed);
-    Ok(offset)
+
+    // Extended-pool flip trigger: observe the new bump high-water mark
+    // and transition to paged mode once it crosses the 80% threshold.
+    // Lock-free in the common case (atomic mode check + inequality).
+    extended_pool::runtime::notify_bump_advance(offset + PAGE_SIZE, splice_addr);
+
+    Ok(offset as PageId)
 }
 
 // ─── Slot kind ────────────────────────────────────────────────────────────────
@@ -139,10 +162,24 @@ pub enum SlotKind {
 /// that are being freed.
 ///
 /// Safe to call from multiple threads simultaneously.
-pub fn free_page_chain(splice_addr: usize, head: ShmOffset) {
+pub fn free_page_chain(splice_addr: usize, head: PageId) {
     if head == 0 {
         return;
     }
+
+    // Mixed chains (both direct and paged ids) walk the chain one
+    // page at a time, dispatching each page to the right freelist.
+    // Pure-direct chains (the common case before the mode flip)
+    // splice the whole chain onto one shard with a single CAS — the
+    // optimized fast path below.
+    if extended_pool::runtime::current_mode() == extended_pool::Mode::Paged {
+        free_page_chain_mixed(splice_addr, head);
+        return;
+    }
+
+    // ── Fast path: pure direct-mode chain ─────────────────────────────────────
+    debug_assert!(head < DIRECT_LIMIT);
+    let head = head as ShmOffset;
     let sb = unsafe { &*(splice_addr as *const Superblock) };
 
     // Deterministic shard: same page always returns to the same shard.
@@ -152,7 +189,7 @@ pub fn free_page_chain(splice_addr: usize, head: ShmOffset) {
     let mut tail = head;
     loop {
         let page = unsafe { &*((splice_addr + tail as usize) as *const Page) };
-        let next = page.next_offset.load(Ordering::Acquire);
+        let next = page.next_offset.load(Ordering::Acquire) as ShmOffset;
         if next == 0 {
             break;
         }
@@ -161,18 +198,95 @@ pub fn free_page_chain(splice_addr: usize, head: ShmOffset) {
 
     // Treiber-stack push onto the chosen shard.
     loop {
-        let old_head = sb.free_list_heads[shard].load(Ordering::Acquire);
+        let old_head = sb.free_list_heads[shard].load(Ordering::Acquire) as ShmOffset;
         let tail_page = unsafe { &*((splice_addr + tail as usize) as *const Page) };
-        tail_page.next_offset.store(old_head, Ordering::Relaxed);
+        tail_page.next_offset.store(old_head as u64, Ordering::Relaxed);
 
         match sb.free_list_heads[shard].compare_exchange(
-            old_head,
-            head,
+            old_head as u64,
+            head as u64,
             Ordering::SeqCst,
             Ordering::SeqCst,
         ) {
             Ok(_) => break,
             Err(_) => spin_loop(), // another thread pushed concurrently — retry
+        }
+    }
+}
+
+/// Slow path for paged mode: walk the chain one page at a time,
+/// freeing direct pages into the shard freelist (plus transitioning
+/// their slot into the resolution buffer via `notify_direct_free`) and
+/// paged pages into the extended pool.  Called only when the pool is
+/// in `Paged` mode because mixed chains can only exist after the flip.
+///
+/// # Concurrency
+///
+/// Like the direct-mode fast path above, this function relies on the
+/// **detach-then-walk** protocol: the slot atomic owning this chain
+/// must have already been cleared via `swap(0, …)` before we are
+/// called.  That swap is the single point of contention; whoever wins
+/// it is the sole owner of the chain for its entire lifetime here.
+/// No other thread can walk the chain concurrently because the slot
+/// atomic reads zero for everyone except the swap winner.
+///
+/// Per-page dispatch is locally single-writer even when dispatching
+/// into the shard freelist (CAS-retry push) or the extended pool
+/// (mutex-guarded).  The `next` pointer for each page is read from
+/// `page.next_offset` BEFORE that field is overwritten by
+/// `push_single_direct_page`, so the chain walk never loses its way.
+fn free_page_chain_mixed(splice_addr: usize, head: PageId) {
+    let mut current = head;
+    while current != 0 {
+        // Resolve to a host-side pointer so we can read `next_offset`.
+        // Direct ids resolve by arithmetic; paged ids go through the
+        // resolution buffer under the singleton lock (potentially
+        // re-installing if they were evicted).
+        let page_ptr = match extended_pool::runtime::resolve(current, splice_addr) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[Reclaimer] free_page_chain_mixed: resolve({current:#x}) failed: {e}");
+                return;
+            }
+        };
+        let page = unsafe { &*page_ptr };
+        let next = page.next_offset.load(Ordering::Acquire);
+
+        // Dispose of `current` according to its kind.
+        if current < DIRECT_LIMIT {
+            // Direct page: push onto its deterministic shard via the
+            // single-page helper, then notify the extended pool that
+            // its wasm32 slot can now host residency.  We can't call
+            // `free_page_chain` recursively because we already know
+            // the chain structure is being walked here.
+            push_single_direct_page(splice_addr, current as ShmOffset);
+            extended_pool::runtime::notify_direct_free(current);
+        } else {
+            // Paged page: return it to the global pool.
+            if let Err(e) = extended_pool::runtime::free_paged_page(current) {
+                eprintln!("[Reclaimer] free_paged_page({current:#x}) failed: {e}");
+            }
+        }
+
+        current = next;
+    }
+}
+
+/// Push a single direct page onto its deterministic shard (no chain
+/// walking).  Used by `free_page_chain_mixed` to dispose of direct
+/// pages one at a time when they're interleaved with paged pages.
+fn push_single_direct_page(splice_addr: usize, offset: ShmOffset) {
+    let sb = unsafe { &*(splice_addr as *const Superblock) };
+    let shard = (offset / PAGE_SIZE) as usize % FREE_LIST_SHARD_COUNT;
+    let page = unsafe { &*((splice_addr + offset as usize) as *const Page) };
+    loop {
+        let old_head = sb.free_list_heads[shard].load(Ordering::Acquire);
+        page.next_offset.store(old_head, Ordering::Relaxed);
+        match sb.free_list_heads[shard]
+            .compare_exchange(old_head, offset as u64, Ordering::SeqCst, Ordering::SeqCst)
+        {
+            Ok(_) => break,
+            Err(_) => spin_loop(),
         }
     }
 }
@@ -202,7 +316,7 @@ pub fn clear_stream_slot(splice_addr: usize, slot: usize) {
 /// chain.  For slots that have been routed, use `clear_stream_slot` instead.
 pub fn free_stream_slot(splice_addr: usize, slot: usize) {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
-    let head = sb.writer_heads[slot].swap(0, Ordering::AcqRel);
+    let head: PageId = sb.writer_heads[slot].swap(0, Ordering::AcqRel);
     sb.writer_tails[slot].store(0, Ordering::Release);
     free_page_chain(splice_addr, head);
 }
@@ -215,7 +329,7 @@ pub fn free_stream_slot(splice_addr: usize, slot: usize) {
 /// their pages is always safe.
 pub fn free_io_slot(splice_addr: usize, slot: usize) {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
-    let head = sb.io_heads[slot].swap(0, Ordering::AcqRel);
+    let head: PageId = sb.io_heads[slot].swap(0, Ordering::AcqRel);
     sb.io_tails[slot].store(0, Ordering::Release);
     free_page_chain(splice_addr, head);
 }
@@ -299,11 +413,11 @@ pub fn count_free_list_pages(splice_addr: usize) -> usize {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
     let mut total = 0usize;
     for shard in 0..FREE_LIST_SHARD_COUNT {
-        let mut current = sb.free_list_heads[shard].load(Ordering::Acquire);
+        let mut current = sb.free_list_heads[shard].load(Ordering::Acquire) as ShmOffset;
         while current != 0 {
             total += 1;
             let page = unsafe { &*((splice_addr + current as usize) as *const Page) };
-            current = page.next_offset.load(Ordering::Relaxed);
+            current = page.next_offset.load(Ordering::Relaxed) as ShmOffset;
         }
     }
     total
@@ -315,12 +429,12 @@ fn pop_one_free_page(splice_addr: usize) -> Option<ShmOffset> {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
     for shard in 0..FREE_LIST_SHARD_COUNT {
         loop {
-            let head = sb.free_list_heads[shard].load(Ordering::Acquire);
+            let head = sb.free_list_heads[shard].load(Ordering::Acquire) as ShmOffset;
             if head == 0 { break; }
             let page = unsafe { &*((splice_addr + head as usize) as *const Page) };
-            let next = page.next_offset.load(Ordering::Relaxed);
+            let next = page.next_offset.load(Ordering::Relaxed) as ShmOffset;
             match sb.free_list_heads[shard]
-                .compare_exchange(head, next, Ordering::SeqCst, Ordering::SeqCst)
+                .compare_exchange(head as u64, next as u64, Ordering::SeqCst, Ordering::SeqCst)
             {
                 Ok(_) => return Some(head),
                 Err(_) => spin_loop(),
@@ -336,12 +450,12 @@ fn push_page_to_free_list(splice_addr: usize, offset: ShmOffset) {
     let shard = (offset / PAGE_SIZE) as usize % FREE_LIST_SHARD_COUNT;
     let page = unsafe { &*((splice_addr + offset as usize) as *const Page) };
     loop {
-        let old_head = sb.free_list_heads[shard].load(Ordering::Acquire);
+        let old_head = sb.free_list_heads[shard].load(Ordering::Acquire) as ShmOffset;
         // Writing next_offset after MADV_DONTNEED causes a soft page fault
         // that allocates a fresh zero physical page — this is intentional and correct.
-        page.next_offset.store(old_head, Ordering::Relaxed);
+        page.next_offset.store(old_head as u64, Ordering::Relaxed);
         match sb.free_list_heads[shard]
-            .compare_exchange(old_head, offset, Ordering::SeqCst, Ordering::SeqCst)
+            .compare_exchange(old_head as u64, offset as u64, Ordering::SeqCst, Ordering::SeqCst)
         {
             Ok(_) => break,
             Err(_) => spin_loop(),

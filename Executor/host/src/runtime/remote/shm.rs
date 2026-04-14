@@ -18,9 +18,9 @@ pub(super) fn collect_src_sges(
     slot_kind:   RemoteSlotKind,
 ) -> (Vec<(u64, u32)>, ShmOffset) {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
-    let head = match slot_kind {
-        RemoteSlotKind::Stream => sb.writer_heads[slot].load(Ordering::Acquire),
-        RemoteSlotKind::Io     => sb.io_heads[slot].load(Ordering::Acquire),
+    let head: ShmOffset = match slot_kind {
+        RemoteSlotKind::Stream => sb.writer_heads[slot].load(Ordering::Acquire) as ShmOffset,
+        RemoteSlotKind::Io     => sb.io_heads[slot].load(Ordering::Acquire) as ShmOffset,
     };
     let mut src_sges: Vec<(u64, u32)> = Vec::new();
     let mut total_bytes: ShmOffset = 0;
@@ -33,7 +33,9 @@ pub(super) fn collect_src_sges(
             src_sges.push((data_vaddr, used));
             total_bytes += used as ShmOffset;
         }
-        page_off = page.next_offset.load(Ordering::Acquire);
+        // Page::next_offset is now a PageId (u64); in direct mode every value
+        // fits in ShmOffset (u32), so truncation is a no-op.
+        page_off = page.next_offset.load(Ordering::Acquire) as ShmOffset;
     }
     (src_sges, total_bytes)
 }
@@ -66,7 +68,7 @@ pub(super) fn alloc_and_link(
         let data_in_page = PAGE_DATA.min(total_bytes - i as usize * PAGE_DATA);
         page.cursor.store(data_in_page as ShmOffset, Ordering::Relaxed);
         let next = if i + 1 < n_pages as ShmOffset { dest_off + (i + 1) * PAGE_SIZE } else { 0 };
-        page.next_offset.store(next, Ordering::Relaxed);
+        page.next_offset.store(next as u64, Ordering::Relaxed);
     }
 
     let tail_off = dest_off + (n_pages as ShmOffset - 1) * PAGE_SIZE;
@@ -84,12 +86,12 @@ pub(super) fn link_to_slot(
 ) {
     match kind {
         RemoteSlotKind::Stream => {
-            sb.writer_heads[slot].store(head_off, Ordering::Release);
-            sb.writer_tails[slot].store(tail_off, Ordering::Release);
+            sb.writer_heads[slot].store(head_off as u64, Ordering::Release);
+            sb.writer_tails[slot].store(tail_off as u64, Ordering::Release);
         }
         RemoteSlotKind::Io => {
-            sb.io_heads[slot].store(head_off, Ordering::Release);
-            sb.io_tails[slot].store(tail_off, Ordering::Release);
+            sb.io_heads[slot].store(head_off as u64, Ordering::Release);
+            sb.io_tails[slot].store(tail_off as u64, Ordering::Release);
         }
     }
 }

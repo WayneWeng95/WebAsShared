@@ -27,13 +27,32 @@ Input file
          Output file
 ```
 
+## Documentation
+
+Subsystem design notes live in [`docs/`](docs/):
+
+| Doc | Contents |
+|---|---|
+| [docs/extended_pool.md](docs/extended_pool.md) | Host-side memory extension beyond the 2 GiB wasm32 direct window. Covers the `PageId` type widening (Phase 1), the `GlobalPool` + `ResolutionBuffer` extended-pool mechanism (Phase 2), and the RDMA overflow scaffold (Phase 3). Includes the feature-flag system, concurrency invariants, and the barrier-compatibility discussion. |
+| [docs/barrier.md](docs/barrier.md) | Intra-wave futex barrier: the `ShmApi::barrier_wait` guest API, DAG `barrier_group` JSON syntax, usage examples, and the single-node constraint. |
+| [docs/slots.md](docs/slots.md) | Stream slots and I/O slots — what they are, when to use which, slot lifecycle across DAG waves. |
+| [docs/WASM64.md](docs/WASM64.md) | Investigation into wasm64 (memory64) as an alternative path to larger linear memory, why it compiles but doesn't run practically, and the infrastructure left in place in case wasmtime's JIT performance improves. |
+| [docs/updates.md](docs/updates.md) | Historical change log. |
+
 ## Project Structure
 
 ```
 WebAsShared/
+|-- README.md                       # This file
 |-- build.sh                        # Build all binaries (host, guest, node-agent)
 |-- init-node.sh                    # One-shot new node setup (pull, install, build)
 |-- node-agent                      # NodeAgent binary (entry point)
+|-- docs/                           # Design notes and subsystem documentation
+|   |-- extended_pool.md            # Host-side memory extension past the 2 GiB wasm32 cap
+|   |-- barrier.md                  # Intra-wave futex barrier API, examples, constraints
+|   |-- slots.md                    # Stream / IO slot design and semantics
+|   |-- WASM64.md                   # WASM64 (memory64) investigation and why it was deferred
+|   +-- updates.md                  # Historical change log
 |-- scripts/                        # Setup and utility scripts
 |   |-- start.sh                    # Rust environment setup (source this)
 |   |-- install_wasmtime.sh         # Install wasmtime for Python/WASM execution
@@ -41,6 +60,7 @@ WebAsShared/
 |-- Executor/                       # Execution engine (host + WASM/Python guests)
 |   |-- Cargo.toml                  # Workspace (host, guest, common, connect)
 |   |-- host/src/                   # Orchestrator: DAG runner, WASM executor, routing, I/O, RDMA
+|   |   +-- runtime/extended_pool/  # Host-side memory extension (see docs/extended_pool.md)
 |   |-- guest/src/                  # WASM workloads (word count, FINRA, ML training, TF-IDF, etc.)
 |   |   +-- .cargo/config.toml      # WASM build flags (--import-memory, --shared-memory)
 |   |-- common/src/                 # Shared memory layout definitions (superblock, page, registry)
@@ -411,7 +431,7 @@ Run the barrier test:
 ./node-agent run DAGs/demo_dag/barrier_test.json
 ```
 
-See [barrier.md](barrier.md) for full documentation, guest API examples, and constraints.
+See [docs/barrier.md](docs/barrier.md) for full documentation, guest API examples, and constraints.
 
 #### Cross-Node Barrier Limitations (RDMA)
 

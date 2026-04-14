@@ -4,9 +4,11 @@ use std::sync::atomic::{Ordering};
 use wasmtime::{Memory, Store};
 
 use common::{
-    TARGET_OFFSET, PAGE_SIZE, BUCKET_COUNT, ShmOffset, AtomicShmOffset,
+    TARGET_OFFSET, PAGE_SIZE, BUCKET_COUNT, ShmOffset, PageId, AtomicPageId,
     Superblock, RegistryEntry, ChainNodeHeader,
 };
+#[allow(unused_imports)]
+use common::DIRECT_LIMIT;
 
 pub struct BucketOrganizer<'a> {
     base_ptr: *mut u8,
@@ -38,8 +40,8 @@ impl<'a> BucketOrganizer<'a> {
 
         for i in 0..BUCKET_COUNT {
             let bucket_ptr =
-                self.base_ptr.add(map_base_offset as usize).add(i * std::mem::size_of::<AtomicShmOffset>()) as *const AtomicShmOffset;
-            let list_head: ShmOffset = (*bucket_ptr).swap(0, Ordering::SeqCst);
+                self.base_ptr.add(map_base_offset as usize).add(i * std::mem::size_of::<AtomicPageId>()) as *const AtomicPageId;
+            let list_head: ShmOffset = (*bucket_ptr).swap(0, Ordering::SeqCst) as ShmOffset;
 
             if list_head != 0 {
                 self.process_detached_list(list_head, i, &policy);
@@ -64,7 +66,7 @@ impl<'a> BucketOrganizer<'a> {
             let writer_id = hdr.writer_id;
             let data_len = hdr.data_len;
             let registry_index = hdr.registry_index;
-            let next_offset: ShmOffset = hdr.next_node.load(Ordering::Relaxed);
+            let next_offset: ShmOffset = hdr.next_node.load(Ordering::Relaxed) as ShmOffset;
 
 
             let mut payload = Vec::with_capacity(data_len as usize);
@@ -74,11 +76,14 @@ impl<'a> BucketOrganizer<'a> {
 
             while bytes_read < data_len as usize {
                 let page_ptr = self.base_ptr.add(lob_offset as usize);
+                // Both the head `ChainNodeHeader::next_payload_page` and the
+                // bare overflow-page header at byte 0 are now `PageId` (u64).
+                // Truncate to ShmOffset locally since direct-mode values fit.
                 let (header_size, next_page): (usize, ShmOffset) = if is_head {
                     let hdr = &*(page_ptr as *const ChainNodeHeader);
-                    (std::mem::size_of::<ChainNodeHeader>(), hdr.next_payload_page)
+                    (std::mem::size_of::<ChainNodeHeader>(), hdr.next_payload_page as ShmOffset)
                 } else {
-                    (std::mem::size_of::<ShmOffset>(), *(page_ptr as *const ShmOffset))
+                    (std::mem::size_of::<PageId>(), *(page_ptr as *const PageId) as ShmOffset)
                 };
 
                 let read_len = std::cmp::min(data_len as usize - bytes_read, PAGE_SIZE as usize - header_size);
@@ -103,9 +108,9 @@ impl<'a> BucketOrganizer<'a> {
             while free_offset != 0 {
                 let page_ptr = self.base_ptr.add(free_offset as usize);
                 let next_free: ShmOffset = if is_head {
-                    (*(page_ptr as *const ChainNodeHeader)).next_payload_page
+                    (*(page_ptr as *const ChainNodeHeader)).next_payload_page as ShmOffset
                 } else {
-                    *(page_ptr as *const ShmOffset)
+                    *(page_ptr as *const PageId) as ShmOffset
                 };
                 self.push_to_free_list(free_offset);
                 free_offset = next_free;
@@ -146,10 +151,11 @@ impl<'a> BucketOrganizer<'a> {
         let mut current: ShmOffset = list_head;
         while current != 0 {
             let node_ptr = self.base_ptr.add(current as usize);
-            let next_ptr = &*(node_ptr as *const AtomicShmOffset); // First field of page is next
+            // First field of a ChainNodeHeader is `next_node: AtomicPageId`.
+            let next_ptr = &*(node_ptr as *const AtomicPageId);
 
             // Save next node offset before we modify current node's next
-            let next_node: ShmOffset = next_ptr.load(Ordering::Relaxed);
+            let next_node: ShmOffset = next_ptr.load(Ordering::Relaxed) as ShmOffset;
 
             // Push onto free list
             self.push_to_free_list(current);
@@ -163,6 +169,11 @@ impl<'a> BucketOrganizer<'a> {
     /// spin_loop backoff, and ABA documentation are all in one place.
     unsafe fn push_to_free_list(&self, page_offset: ShmOffset) {
         let splice_addr = self.base_ptr as usize;
-        crate::runtime::mem_operation::reclaimer::free_page_chain(splice_addr, page_offset);
+        // free_page_chain now takes PageId — extend the u32 offset to u64.
+        // Direct-mode page offsets fit in the low half of the PageId space.
+        crate::runtime::mem_operation::reclaimer::free_page_chain(
+            splice_addr,
+            page_offset as PageId,
+        );
     }
 }

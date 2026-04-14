@@ -206,8 +206,19 @@ impl SlotLoader {
     }
 
     fn alloc_page(&self) -> Result<ShmOffset> {
-        reclaimer::alloc_page(self.splice_addr)
-            .map_err(|e| anyhow!("SlotLoader: {}", e))
+        // Phase 2.4c: the reclaimer now returns `PageId`.  SlotLoader
+        // only runs during the Input loading phase (before any guest
+        // code executes and before the bump could cross the 80%
+        // threshold), so we can assert the returned id is still in
+        // the direct window and truncate to ShmOffset.  Phase 2.4d
+        // will widen this helper if loaders ever run past threshold.
+        let id = reclaimer::alloc_page(self.splice_addr)
+            .map_err(|e| anyhow!("SlotLoader: {}", e))?;
+        debug_assert!(
+            id < common::DIRECT_LIMIT,
+            "SlotLoader got paged PageId {id:#x} — not yet supported",
+        );
+        Ok(id as ShmOffset)
     }
 
     fn append_record(&self, slot: u32, payload: &[u8]) -> Result<()> {
@@ -221,11 +232,11 @@ impl SlotLoader {
         let sb = self.sb();
         let s = slot as usize;
 
-        let mut tail: ShmOffset = sb.io_tails[s].load(Ordering::Acquire);
+        let mut tail: ShmOffset = sb.io_tails[s].load(Ordering::Acquire) as ShmOffset;
         if tail == 0 {
             tail = self.alloc_page()?;
-            sb.io_heads[s].store(tail, Ordering::Release);
-            sb.io_tails[s].store(tail, Ordering::Release);
+            sb.io_heads[s].store(tail as u64, Ordering::Release);
+            sb.io_tails[s].store(tail as u64, Ordering::Release);
         }
 
         while !data.is_empty() {
@@ -235,8 +246,8 @@ impl SlotLoader {
 
             if space == 0 {
                 let next = self.alloc_page()?;
-                page.next_offset.store(next, Ordering::Release);
-                sb.io_tails[s].store(next, Ordering::Release);
+                page.next_offset.store(next as u64, Ordering::Release);
+                sb.io_tails[s].store(next as u64, Ordering::Release);
                 tail = next;
                 continue;
             }

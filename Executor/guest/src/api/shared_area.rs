@@ -56,7 +56,7 @@ impl ShmApi {
         // Pointer arithmetic is done via byte pointers to avoid UB.
         let bucket_ptr = unsafe {
             let base_ptr = (SHM_BASE + map_base_offset) as *const u8;
-            base_ptr.add(bucket_idx * core::mem::size_of::<AtomicShmOffset>()) as *const AtomicShmOffset
+            base_ptr.add(bucket_idx * core::mem::size_of::<AtomicPageId>()) as *const AtomicPageId
         };
         let bucket = unsafe { &*bucket_ptr };
 
@@ -71,10 +71,10 @@ impl ShmApi {
         }
 
         let header = unsafe { &*(node_ptr as *const ChainNodeHeader) };
-        let mut old_head = bucket.load(Ordering::Acquire);
+        let mut old_head: PageId = bucket.load(Ordering::Acquire);
         loop {
             header.next_node.store(old_head, Ordering::Relaxed);
-            match bucket.compare_exchange(old_head, node_offset, Ordering::Release, Ordering::Relaxed) {
+            match bucket.compare_exchange(old_head, node_offset as PageId, Ordering::Release, Ordering::Relaxed) {
                 Ok(_)    => break,
                 Err(val) => old_head = val,
             }
@@ -92,10 +92,10 @@ impl ShmApi {
         let bucket_idx = (key_hash as usize) % BUCKET_COUNT;
         let bucket_ptr = unsafe {
             let base_ptr = (SHM_BASE + map_base_offset as usize) as *const u8;
-            base_ptr.add(bucket_idx * core::mem::size_of::<AtomicShmOffset>()) as *const AtomicShmOffset
+            base_ptr.add(bucket_idx * core::mem::size_of::<AtomicPageId>()) as *const AtomicPageId
         };
 
-        let mut current_offset: ShmOffset = unsafe { (*bucket_ptr).load(Ordering::Acquire) };
+        let mut current_offset: ShmOffset = unsafe { (*bucket_ptr).load(Ordering::Acquire) } as ShmOffset;
         let mut results = Vec::new();
 
         while current_offset != 0 {
@@ -116,7 +116,7 @@ impl ShmApi {
                 core::ptr::copy_nonoverlapping(node_ptr.add(core::mem::size_of::<ChainNodeHeader>()), data.as_mut_ptr(), len as usize);
             }
             results.push((header.writer_id, data));
-            current_offset = header.next_node.load(Ordering::Acquire);
+            current_offset = header.next_node.load(Ordering::Acquire) as ShmOffset;
         }
         results
     }
@@ -131,7 +131,7 @@ impl ShmApi {
 
         let bucket_ptr = unsafe {
             let base_ptr = (SHM_BASE + map_base_offset) as *const u8;
-            base_ptr.add(bucket_idx * core::mem::size_of::<AtomicShmOffset>()) as *const AtomicShmOffset
+            base_ptr.add(bucket_idx * core::mem::size_of::<AtomicPageId>()) as *const AtomicPageId
         };
         let bucket = unsafe { &*bucket_ptr };
 
@@ -152,28 +152,33 @@ impl ShmApi {
             core::ptr::copy_nonoverlapping(data.as_ptr(), head_ptr.add(core::mem::size_of::<ChainNodeHeader>()), write_len);
             data_written += write_len;
 
-            let mut prev_next_ptr = &mut (*header).next_payload_page as *mut ShmOffset;
+            // Overflow chain: each continuation page starts with a bare
+            // `PageId` (u64) at byte 0 pointing to the next overflow page.
+            // Kept in sync with `ChainNodeHeader::next_payload_page` width
+            // so `prev_next_ptr` can hop between the head field and the
+            // overflow headers through one pointer type.
+            let mut prev_next_ptr = &mut (*header).next_payload_page as *mut PageId;
             while data_written < total_len {
                 let next_offset = Self::try_allocate_page();
-                *prev_next_ptr = next_offset;
+                *prev_next_ptr = next_offset as PageId;
 
                 let next_ptr = (SHM_BASE + next_offset as usize) as *mut u8;
-                let overflow_header = next_ptr as *mut ShmOffset;
+                let overflow_header = next_ptr as *mut PageId;
                 *overflow_header = 0;
 
-                let overflow_capacity = 4096 - core::mem::size_of::<ShmOffset>();
+                let overflow_capacity = 4096 - core::mem::size_of::<PageId>();
                 let remain = total_len - data_written;
                 let write_len = core::cmp::min(remain, overflow_capacity);
-                core::ptr::copy_nonoverlapping(data.as_ptr().add(data_written), next_ptr.add(core::mem::size_of::<ShmOffset>()), write_len);
+                core::ptr::copy_nonoverlapping(data.as_ptr().add(data_written), next_ptr.add(core::mem::size_of::<PageId>()), write_len);
                 data_written += write_len;
 
                 prev_next_ptr = overflow_header;
             }
 
-            let mut old_head: ShmOffset = bucket.load(Ordering::Acquire);
+            let mut old_head: PageId = bucket.load(Ordering::Acquire);
             loop {
                 (*header).next_node.store(old_head, Ordering::Relaxed);
-                if bucket.compare_exchange(old_head, head_offset, Ordering::Release, Ordering::Relaxed).is_ok() {
+                if bucket.compare_exchange(old_head, head_offset as PageId, Ordering::Release, Ordering::Relaxed).is_ok() {
                     break;
                 } else {
                     old_head = bucket.load(Ordering::Acquire);
@@ -214,12 +219,12 @@ impl ShmApi {
 
         while bytes_read < total_len {
             let page_ptr = (SHM_BASE + current_offset as usize) as *const u8;
-            let (header_size, next_page) = if is_head {
+            let (header_size, next_page): (usize, ShmOffset) = if is_head {
                 let header = unsafe { &*(page_ptr as *const ChainNodeHeader) };
-                (core::mem::size_of::<ChainNodeHeader>(), header.next_payload_page)
+                (core::mem::size_of::<ChainNodeHeader>(), header.next_payload_page as ShmOffset)
             } else {
-                let next = unsafe { *(page_ptr as *const ShmOffset) };
-                (core::mem::size_of::<ShmOffset>(), next)
+                let next = unsafe { *(page_ptr as *const PageId) };
+                (core::mem::size_of::<PageId>(), next as ShmOffset)
             };
 
             let read_len = core::cmp::min(total_len - bytes_read, 4096 - header_size);
@@ -267,12 +272,12 @@ impl ShmApi {
 
         while result_written < length {
             let page_ptr = (SHM_BASE + current_offset as usize) as *const u8;
-            let (header_size, next_page) = if is_head {
+            let (header_size, next_page): (usize, ShmOffset) = if is_head {
                 let header = unsafe { &*(page_ptr as *const ChainNodeHeader) };
-                (core::mem::size_of::<ChainNodeHeader>(), header.next_payload_page)
+                (core::mem::size_of::<ChainNodeHeader>(), header.next_payload_page as ShmOffset)
             } else {
-                let next = unsafe { *(page_ptr as *const ShmOffset) };
-                (core::mem::size_of::<ShmOffset>(), next)
+                let next = unsafe { *(page_ptr as *const PageId) };
+                (core::mem::size_of::<PageId>(), next as ShmOffset)
             };
 
             let page_capacity = 4096 - header_size;

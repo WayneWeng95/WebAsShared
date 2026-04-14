@@ -16,15 +16,15 @@ extern "C" {
 
 /// Append raw bytes into the page chain identified by `(head, tail)` atomics.
 /// Allocates new 4 KiB pages from the bump pool as needed.
-pub(super) fn chain_append_raw(head: &AtomicShmOffset, tail: &AtomicShmOffset, mut data: &[u8]) {
-    let mut tail_offset = tail.load(Ordering::Acquire);
+pub(super) fn chain_append_raw(head: &AtomicPageId, tail: &AtomicPageId, mut data: &[u8]) {
+    let mut tail_offset = tail.load(Ordering::Acquire) as ShmOffset;
     if tail_offset == 0 {
         tail_offset = ShmApi::try_allocate_page();
         let new_page = unsafe { &mut *((SHM_BASE + tail_offset as usize) as *mut Page) };
         new_page.next_offset.store(0, Ordering::Relaxed);
         new_page.cursor.store(0, Ordering::Relaxed);
-        head.store(tail_offset, Ordering::Release);
-        tail.store(tail_offset, Ordering::Release);
+        head.store(tail_offset as u64, Ordering::Release);
+        tail.store(tail_offset as u64, Ordering::Release);
     }
     while !data.is_empty() {
         let tail_page = unsafe { &mut *((SHM_BASE + tail_offset as usize) as *mut Page) };
@@ -35,8 +35,8 @@ pub(super) fn chain_append_raw(head: &AtomicShmOffset, tail: &AtomicShmOffset, m
             let new_page = unsafe { &mut *((SHM_BASE + new_offset as usize) as *mut Page) };
             new_page.next_offset.store(0, Ordering::Relaxed);
             new_page.cursor.store(0, Ordering::Relaxed);
-            tail_page.next_offset.store(new_offset, Ordering::Release);
-            tail.store(new_offset, Ordering::Release);
+            tail_page.next_offset.store(new_offset as u64, Ordering::Release);
+            tail.store(new_offset as u64, Ordering::Release);
             tail_offset = new_offset;
             continue;
         }
@@ -51,7 +51,7 @@ pub(super) fn chain_append_raw(head: &AtomicShmOffset, tail: &AtomicShmOffset, m
 }
 
 /// Write a 4-byte LE length header, 4-byte LE origin, followed by `payload` into `(head, tail)`.
-pub(super) fn chain_append_prefixed(head: &AtomicShmOffset, tail: &AtomicShmOffset, origin: u32, payload: &[u8]) {
+pub(super) fn chain_append_prefixed(head: &AtomicPageId, tail: &AtomicPageId, origin: u32, payload: &[u8]) {
     chain_append_raw(head, tail, &(payload.len() as u32).to_le_bytes());
     chain_append_raw(head, tail, &origin.to_le_bytes());
     chain_append_raw(head, tail, payload);
@@ -80,7 +80,7 @@ pub(super) fn chain_read_latest(head_offset: ShmOffset) -> Option<(u32, Vec<u8>)
             let page_written = page.cursor.load(Ordering::Acquire);
             let available = page_written.saturating_sub(cursor_in_page);
             if available == 0 {
-                current_offset = page.next_offset.load(Ordering::Acquire);
+                current_offset = (page.next_offset.load(Ordering::Acquire) as ShmOffset);
                 cursor_in_page = 0;
                 continue;
             }
@@ -135,7 +135,7 @@ pub(super) fn chain_read_all(head_offset: ShmOffset) -> Vec<(u32, Vec<u8>)> {
             let page_written = page.cursor.load(Ordering::Acquire);
             let available = page_written.saturating_sub(cursor_in_page);
             if available == 0 {
-                current_offset = page.next_offset.load(Ordering::Acquire);
+                current_offset = (page.next_offset.load(Ordering::Acquire) as ShmOffset);
                 cursor_in_page = 0;
                 continue;
             }
@@ -194,13 +194,13 @@ impl ShmApi {
     /// Return the most recent record from stream `target_worker_id`.
     pub fn read_latest_stream_data(target_worker_id: u32) -> Option<(u32, Vec<u8>)> {
         let head = Self::superblock().writer_heads[target_worker_id as usize]
-            .load(Ordering::Acquire);
+            .load(Ordering::Acquire) as ShmOffset;
         chain_read_latest(head)
     }
 
     /// Return every record from stream `id` in order.
     pub fn read_all_stream_records(id: u32) -> Vec<(u32, Vec<u8>)> {
-        let head = Self::superblock().writer_heads[id as usize].load(Ordering::Acquire);
+        let head = Self::superblock().writer_heads[id as usize].load(Ordering::Acquire) as ShmOffset;
         chain_read_all(head)
     }
 
@@ -224,7 +224,7 @@ impl ShmApi {
     pub fn read_stream_range(writer_id: u32, offset: u32, length: usize) -> Option<Vec<u8>> {
         if length == 0 { return Some(Vec::new()); }
         let sb = Self::superblock();
-        let head_offset = sb.writer_heads[writer_id as usize].load(Ordering::Acquire);
+        let head_offset = sb.writer_heads[writer_id as usize].load(Ordering::Acquire) as ShmOffset;
         if head_offset == 0 { return None; }
 
         let mut result: Vec<u8> = Vec::with_capacity(length);
@@ -260,7 +260,7 @@ impl ShmApi {
                 bytes_read += copy_len;
             }
             if logical_end >= end { break; }
-            let next = page.next_offset.load(Ordering::Acquire);
+            let next = (page.next_offset.load(Ordering::Acquire) as ShmOffset);
             if next == 0 { break; }
             logical_start = logical_end;
             current_offset = next;
@@ -277,7 +277,7 @@ impl ShmApi {
     pub fn write_stream_range(writer_id: u32, offset: u32, data: &[u8]) -> bool {
         if data.is_empty() { return true; }
         let sb = Self::superblock();
-        let head_offset = sb.writer_heads[writer_id as usize].load(Ordering::Acquire);
+        let head_offset = sb.writer_heads[writer_id as usize].load(Ordering::Acquire) as ShmOffset;
         if head_offset == 0 { return false; }
 
         let mut bytes_written = 0usize;
@@ -305,7 +305,7 @@ impl ShmApi {
                 bytes_written += copy_len;
             }
             if logical_end >= end { break; }
-            let next = page.next_offset.load(Ordering::Acquire);
+            let next = (page.next_offset.load(Ordering::Acquire) as ShmOffset);
             if next == 0 { break; }
             logical_start = logical_end;
             current_offset = next;
@@ -322,7 +322,7 @@ impl ShmApi {
     /// ```
     pub fn lseek_stream(writer_id: u32, current_pos: u32, whence: SeekFrom) -> Option<u32> {
         let sb = Self::superblock();
-        let head_offset = sb.writer_heads[writer_id as usize].load(Ordering::Acquire);
+        let head_offset = sb.writer_heads[writer_id as usize].load(Ordering::Acquire) as ShmOffset;
         if head_offset == 0 { return None; }
 
         let mut total: ShmOffset = 0;
@@ -330,7 +330,7 @@ impl ShmApi {
         loop {
             let page = unsafe { &*((SHM_BASE + current_offset as usize) as *const Page) };
             total += page.cursor.load(Ordering::Acquire);
-            let next = page.next_offset.load(Ordering::Acquire);
+            let next = (page.next_offset.load(Ordering::Acquire) as ShmOffset);
             if next == 0 { break; }
             current_offset = next;
         }

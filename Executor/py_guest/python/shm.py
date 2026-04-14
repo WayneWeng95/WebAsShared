@@ -38,26 +38,36 @@ FREE_LIST_SHARDS   = 16
 OUTPUT_IO_SLOT     = 1    # common::OUTPUT_IO_SLOT
 INPUT_IO_SLOT      = 0    # common::INPUT_IO_SLOT
 
-# Superblock field byte offsets (all fields are u32 / AtomicU32, repr(C))
-#   magic(0) bump(4) global_cap(8) log_off(12) reg_lock(16)
-#   next_atomic(20) shared_map(24)
-#   free_list_heads[16]  → offset 28, size 64
-#   writer_heads[2048]   → offset 92, size 8192
-#   writer_tails[2048]   → offset 8284, size 8192
-#   io_heads[512]        → offset 16476, size 2048
-#   io_tails[512]        → offset 18524, size 2048
+# Superblock field byte offsets (repr(C)).
+# bump_allocator/global_cap/log_off/registry_lock/next_atomic/shared_map_base
+# are all AtomicU32 (magic @ 0, bump @ 4, ...).  Slot arrays below are
+# AtomicU64 (AtomicPageId) — 8-byte stride.  Layout is asserted from the
+# Rust side in `common/src/lib.rs`; if those asserts fire, update these too.
+#   magic u32 @ 0
+#   bump  u32 @ 4
+#   ... [u32 fields to 28]
+#   (+4 pad to 8-align)
+#   free_list_heads[16]  AtomicU64 @ 32,    size 128
+#   writer_heads[2048]   AtomicU64 @ 160,   size 16384
+#   writer_tails[2048]   AtomicU64 @ 16544, size 16384
+#   io_heads[512]        AtomicU64 @ 32928, size 4096
+#   io_tails[512]        AtomicU64 @ 37024, size 4096
+#   barriers[64]         AtomicU32 @ 41120, size 256
 _SB_BUMP         = 4
-_SB_WRITER_HEADS = 92
-_SB_WRITER_TAILS = 8284
-_SB_IO_HEADS     = 16476
-_SB_IO_TAILS     = 18524
+_SB_WRITER_HEADS = 160
+_SB_WRITER_TAILS = 16544
+_SB_IO_HEADS     = 32928
+_SB_IO_TAILS     = 37024
+_SLOT_STRIDE     = 8       # bytes per slot atomic (was 4 before widening to u64)
 
 # Page layout (repr(C, align(4096))):
-#   next_offset u32 @ 0
-#   cursor      u32 @ 4
-#   data[4088]      @ 8
-_PAGE_DATA_OFFSET = 8
-_PAGE_DATA_SIZE   = 4088   # PAGE_SIZE - 8
+#   next_offset u64 @ 0   (PageId — widened from u32 for extended-pool support)
+#   cursor      u32 @ 8
+#   data[4084]      @ 12
+_PAGE_NEXT_OFF    = 0
+_PAGE_CURSOR_OFF  = 8
+_PAGE_DATA_OFFSET = 12
+_PAGE_DATA_SIZE   = 4084   # PAGE_SIZE - 12
 
 # ── Module state ──────────────────────────────────────────────────────────────
 
@@ -88,6 +98,16 @@ def _wu32(off: int, v: int) -> None:
     _f.write(struct.pack("<I", v))
 
 
+def _ru64(off: int) -> int:
+    _f.seek(off)
+    return struct.unpack("<Q", _f.read(8))[0]
+
+
+def _wu64(off: int, v: int) -> None:
+    _f.seek(off)
+    _f.write(struct.pack("<Q", v))
+
+
 def _read_bytes(off: int, n: int) -> bytes:
     _f.seek(off)
     return _f.read(n)
@@ -114,10 +134,10 @@ def _read_chain(head: int) -> list:
         while len(buf) < n:
             if page_off == 0:
                 return None
-            written = _ru32(page_off + 4)          # page.cursor
+            written = _ru32(page_off + _PAGE_CURSOR_OFF)   # page.cursor (u32 @ 8)
             avail = written - cursor_in_page
             if avail == 0:
-                page_off = _ru32(page_off)         # page.next_offset
+                page_off = _ru64(page_off + _PAGE_NEXT_OFF) # page.next_offset (u64 @ 0)
                 cursor_in_page = 0
                 continue
             take = min(avail, n - len(buf))
@@ -163,9 +183,9 @@ def _count_chain(head: int) -> int:
         while len(buf) < 4:
             if state[0] == 0:
                 return None
-            avail = _ru32(state[0] + 4) - state[1]
+            avail = _ru32(state[0] + _PAGE_CURSOR_OFF) - state[1]
             if avail == 0:
-                nxt = _ru32(state[0])
+                nxt = _ru64(state[0] + _PAGE_NEXT_OFF)
                 if nxt == 0:
                     return None
                 state[0], state[1] = nxt, 0
@@ -181,9 +201,9 @@ def _count_chain(head: int) -> int:
         while rem > 0:
             if state[0] == 0:
                 return False
-            avail = _ru32(state[0] + 4) - state[1]
+            avail = _ru32(state[0] + _PAGE_CURSOR_OFF) - state[1]
             if avail == 0:
-                nxt = _ru32(state[0])
+                nxt = _ru64(state[0] + _PAGE_NEXT_OFF)
                 if nxt == 0:
                     return False
                 state[0], state[1] = nxt, 0
@@ -210,17 +230,21 @@ def _alloc_page() -> int:
     """Bump-allocate one page; returns its byte offset in the SHM."""
     bump = _ru32(_SB_BUMP)
     _wu32(_SB_BUMP, bump + PAGE_SIZE)
-    _wu32(bump,     0)   # next_offset = 0
-    _wu32(bump + 4, 0)   # cursor = 0
+    _wu64(bump + _PAGE_NEXT_OFF,   0)   # next_offset (u64) = 0
+    _wu32(bump + _PAGE_CURSOR_OFF, 0)   # cursor (u32) = 0
     return bump
 
 
 # ── Page-chain writer ─────────────────────────────────────────────────────────
 
 def _append(head_off: int, tail_off: int, origin: int, payload: bytes) -> None:
-    """Append [4-byte len][4-byte origin][payload] to the chain at (head_off, tail_off)."""
-    head = _ru32(head_off)
-    tail = _ru32(tail_off)
+    """Append [4-byte len][4-byte origin][payload] to the chain at (head_off, tail_off).
+
+    `head_off` / `tail_off` point at AtomicPageId (u64) slot atomics inside the
+    Superblock, so reads/writes are 8 bytes wide.
+    """
+    head = _ru64(head_off)
+    tail = _ru64(tail_off)
     record = struct.pack("<II", len(payload), origin) + payload
     rem = memoryview(record)
 
@@ -229,33 +253,33 @@ def _append(head_off: int, tail_off: int, origin: int, payload: bytes) -> None:
             new = _alloc_page()
             head = new
             tail = new
-            _wu32(head_off, head)
-            _wu32(tail_off, tail)
+            _wu64(head_off, head)
+            _wu64(tail_off, tail)
 
-        cursor = _ru32(tail + 4)
+        cursor = _ru32(tail + _PAGE_CURSOR_OFF)
         space  = _PAGE_DATA_SIZE - cursor
         if space == 0:
             new = _alloc_page()
-            _wu32(tail, new)          # chain: current.next_offset = new
+            _wu64(tail + _PAGE_NEXT_OFF, new)   # chain: current.next_offset (u64) = new
             tail = new
-            _wu32(tail_off, tail)
+            _wu64(tail_off, tail)
             continue
 
         take = min(space, len(rem))
         dst = tail + _PAGE_DATA_OFFSET + cursor
         _write_bytes(dst, bytes(rem[:take]))
-        _wu32(tail + 4, cursor + take)
+        _wu32(tail + _PAGE_CURSOR_OFF, cursor + take)
         rem = rem[take:]
 
-    _wu32(head_off, head)
-    _wu32(tail_off, tail)
+    _wu64(head_off, head)
+    _wu64(tail_off, tail)
 
 
 # ── Public API (mirrors shm_module.c / Rust ShmApi) ──────────────────────────
 
 def read_all_stream_records(slot: int) -> list:
     _init()
-    head = _ru32(_SB_WRITER_HEADS + slot * 4)
+    head = _ru64(_SB_WRITER_HEADS + slot * _SLOT_STRIDE)
     return _read_chain(head)
 
 
@@ -265,15 +289,15 @@ def read_all_inputs() -> list:
 
 def read_all_inputs_from(io_slot: int) -> list:
     _init()
-    head = _ru32(_SB_IO_HEADS + io_slot * 4)
+    head = _ru64(_SB_IO_HEADS + io_slot * _SLOT_STRIDE)
     return _read_chain(head)
 
 
 def append_stream_data(slot: int, data: bytes) -> None:
     _init()
     _append(
-        _SB_WRITER_HEADS + slot * 4,
-        _SB_WRITER_TAILS + slot * 4,
+        _SB_WRITER_HEADS + slot * _SLOT_STRIDE,
+        _SB_WRITER_TAILS + slot * _SLOT_STRIDE,
         slot, data,
     )
 
@@ -281,8 +305,8 @@ def append_stream_data(slot: int, data: bytes) -> None:
 def write_output(data: bytes) -> None:
     _init()
     _append(
-        _SB_IO_HEADS + OUTPUT_IO_SLOT * 4,
-        _SB_IO_TAILS + OUTPUT_IO_SLOT * 4,
+        _SB_IO_HEADS + OUTPUT_IO_SLOT * _SLOT_STRIDE,
+        _SB_IO_TAILS + OUTPUT_IO_SLOT * _SLOT_STRIDE,
         OUTPUT_IO_SLOT, data,
     )
 
@@ -295,8 +319,8 @@ def write_io(io_slot: int, data: bytes) -> None:
     """Append `data` to an explicit I/O slot (pipeline-mode counterpart of write_output)."""
     _init()
     _append(
-        _SB_IO_HEADS + io_slot * 4,
-        _SB_IO_TAILS + io_slot * 4,
+        _SB_IO_HEADS + io_slot * _SLOT_STRIDE,
+        _SB_IO_TAILS + io_slot * _SLOT_STRIDE,
         io_slot, data,
     )
 
@@ -306,8 +330,8 @@ def write_fanout(io_slots, data: bytes) -> None:
     _init()
     for slot in io_slots:
         _append(
-            _SB_IO_HEADS + slot * 4,
-            _SB_IO_TAILS + slot * 4,
+            _SB_IO_HEADS + slot * _SLOT_STRIDE,
+            _SB_IO_TAILS + slot * _SLOT_STRIDE,
             slot, data,
         )
 
@@ -319,14 +343,14 @@ def count_stream_records(slot: int) -> int:
     it only reads the 8-byte per-record header and skips the payload bytes.
     """
     _init()
-    head = _ru32(_SB_WRITER_HEADS + slot * 4)
+    head = _ru64(_SB_WRITER_HEADS + slot * _SLOT_STRIDE)
     return _count_chain(head)
 
 
 def count_io_records(io_slot: int) -> int:
     """Count records in an I/O slot without allocating payloads."""
     _init()
-    head = _ru32(_SB_IO_HEADS + io_slot * 4)
+    head = _ru64(_SB_IO_HEADS + io_slot * _SLOT_STRIDE)
     return _count_chain(head)
 
 
@@ -352,7 +376,7 @@ def read_next_io_record(io_slot: int):
     `reset_io_cursor(slot)` at the start of each round before reading.
     """
     _init()
-    head = _ru32(_SB_IO_HEADS + io_slot * 4)
+    head = _ru64(_SB_IO_HEADS + io_slot * _SLOT_STRIDE)
     records = _read_chain(head)
     idx = _io_cursors.get(io_slot, 0)
     if idx < len(records):
@@ -374,7 +398,7 @@ def read_next_stream_record(slot: int):
     `reset_stream_cursor(slot)` at the start of each round before reading.
     """
     _init()
-    head = _ru32(_SB_WRITER_HEADS + slot * 4)
+    head = _ru64(_SB_WRITER_HEADS + slot * _SLOT_STRIDE)
     records = _read_chain(head)
     idx = _stream_cursors.get(slot, 0)
     if idx < len(records):

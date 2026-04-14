@@ -216,12 +216,12 @@ fn take_snapshot(splice_addr: usize, opts: &PersistenceOptions) -> Snapshot {
 
 /// Walks the length-prefixed page chain for stream `slot` and returns every record.
 pub(crate) fn read_stream_records(base: usize, sb: &Superblock, slot: usize) -> Vec<(u32, Vec<u8>)> {
-    read_chain_records(base, sb.writer_heads[slot].load(Ordering::Acquire))
+    read_chain_records(base, sb.writer_heads[slot].load(Ordering::Acquire) as ShmOffset)
 }
 
 /// Walks the length-prefixed page chain for I/O `slot` and returns every record.
 pub(crate) fn read_io_records(base: usize, sb: &Superblock, slot: usize) -> Vec<(u32, Vec<u8>)> {
-    read_chain_records(base, sb.io_heads[slot].load(Ordering::Acquire))
+    read_chain_records(base, sb.io_heads[slot].load(Ordering::Acquire) as ShmOffset)
 }
 
 /// Core page-chain walker: given a `head` offset, returns every length-prefixed record as (origin, payload).
@@ -258,10 +258,10 @@ fn read_shared_payload(base: usize, payload_offset: ShmOffset, total_len: usize)
         let ptr = (base + current as usize) as *const u8;
         let (header_size, next): (usize, ShmOffset) = if is_head {
             let hdr = unsafe { &*(ptr as *const ChainNodeHeader) };
-            (std::mem::size_of::<ChainNodeHeader>(), hdr.next_payload_page)
+            (std::mem::size_of::<ChainNodeHeader>(), hdr.next_payload_page as ShmOffset)
         } else {
-            let next = unsafe { *(ptr as *const ShmOffset) };
-            (std::mem::size_of::<ShmOffset>(), next)
+            let next = unsafe { *(ptr as *const PageId) };
+            (std::mem::size_of::<PageId>(), next as ShmOffset)
         };
         let capacity = PAGE_SIZE as usize - header_size;
         let n = capacity.min(total_len - bytes_read);
@@ -302,7 +302,7 @@ impl PageReader {
             let page_written = page.cursor.load(Ordering::Acquire);
             let available    = page_written.saturating_sub(self.cursor_in_page);
             if available == 0 {
-                self.page_offset    = page.next_offset.load(Ordering::Acquire);
+                self.page_offset    = page.next_offset.load(Ordering::Acquire) as ShmOffset;
                 self.cursor_in_page = 0;
                 continue;
             }

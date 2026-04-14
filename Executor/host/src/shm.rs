@@ -18,16 +18,18 @@ pub fn format_shared_memory(path: &str) -> Result<()> {
     let magic: u32 = 0xDEADBEEF;
     let global_capacity: ShmOffset = INITIAL_SHM_SIZE;
 
-    // Initialize Superblock fields — field widths follow ShmOffset (4 or 8 bytes).
-    file.write_all(&magic.to_le_bytes())?;                       // magic (always u32)
-    file.write_all(&BUMP_ALLOCATOR_START.to_le_bytes())?;        // bump_allocator: ShmOffset
-    file.write_all(&global_capacity.to_le_bytes())?;             // global_capacity: ShmOffset
-    file.write_all(&(0 as ShmOffset).to_le_bytes())?;           // log_offset: ShmOffset
-    file.write_all(&(0u32).to_le_bytes())?;                      // registry_lock: u32
-    file.write_all(&(0u32).to_le_bytes())?;                      // next_atomic_idx: u32
-    file.write_all(&(0 as ShmOffset).to_le_bytes())?;           // shared_map_base: ShmOffset
-    file.write_all(&(0 as ShmOffset).to_le_bytes())?;           // free_list_heads[0]
-    // Remaining superblock fields are zeroed by set_len (file is zero-filled).
+    // Initialize Superblock fields.  Only `magic` and `bump_allocator` need
+    // non-zero starts; every other field (including the widened
+    // `AtomicPageId` slot arrays) is already zero from `set_len`.  Keeping
+    // just the two explicit writes avoids re-encoding the byte layout here
+    // and lets `common::Superblock`'s compile-time offset asserts remain
+    // the single source of truth.
+    file.write_all(&magic.to_le_bytes())?;                       // magic            u32 @ 0
+    file.write_all(&BUMP_ALLOCATOR_START.to_le_bytes())?;        // bump_allocator   u32 @ 4
+    file.write_all(&global_capacity.to_le_bytes())?;             // global_capacity  u32 @ 8
+    // Everything from byte 12 onward is zero from set_len: log_offset,
+    // registry_lock, next_atomic_idx, shared_map_base, free_list_heads,
+    // writer_heads, writer_tails, io_heads, io_tails, barriers.
 
     Ok(())
 }
