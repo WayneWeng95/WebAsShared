@@ -119,21 +119,103 @@ pub(super) fn alloc_and_link(
     Ok(dest_off)
 }
 
-/// Like `alloc_and_link` but also memcpys `src` into the newly-allocated
-/// page-chain data areas.  Used by the MR2 receive path: after RDMA WRITE
-/// has landed bytes in an MR2 region (outside the guest's direct window),
-/// we pull them back into an SHM page chain so the slot can be read normally.
+/// Memcpy `src` into a newly-allocated SHM page chain and link it into
+/// `slot`.  Used by the MR2 receive path: after RDMA WRITE has landed
+/// bytes in an MR2 region (outside the guest's direct window), we pull
+/// them back into an SHM page chain so the slot can be read normally.
 ///
-/// Grows SHM via `mesh.ensure_shm_capacity` first if the needed pages would
-/// overflow the current `global_capacity`.  Then bumps the allocator and
-/// lays down direct-mode pages — never touches the extended-pool paged
-/// path — so the resulting PageIds are always `< DIRECT_LIMIT` and both
-/// Rust and Python workloads can read the slot without paged-mode
-/// resolution.
+/// The allocation strategy depends on `mesh.python_compat()`:
+///
+///   * **false** (Rust-only DAG): allocate via `reclaimer::alloc_page`,
+///     which picks free-list pages first, then direct-mode bump, then
+///     extended-pool paged-mode pages when direct capacity is
+///     exhausted.  Gets free-list reuse and avoids growing SHM.  The
+///     resulting chain may contain paged-mode PageIds, which Rust
+///     guests transparently handle through `ResolutionBuffer`.
+///
+///   * **true** (DAG contains `PyFunc` / `PyPipeline`): grow SHM via
+///     `mesh.ensure_shm_capacity` first if needed, then bump-allocate
+///     direct-mode pages only.  Guarantees every PageId is
+///     `< DIRECT_LIMIT`, readable by Python's paged-mode-unaware
+///     `shm.py`.  Bypasses free-list reuse but keeps slot contents
+///     accessible across the FFI boundary.
 ///
 /// Returns the head byte-offset of the new chain (also installed into the
-/// slot's `writer_heads` / `io_heads` atomic by `link_to_slot`).
+/// slot's `writer_heads` / `io_heads` atomic).
 pub(super) fn alloc_and_link_from_buf(
+    splice_addr: usize,
+    slot:        usize,
+    slot_kind:   RemoteSlotKind,
+    src:         &[u8],
+    mesh:        &MeshNode,
+) -> Result<common::PageId> {
+    let total_bytes = src.len();
+    let n_pages     = (total_bytes + PAGE_DATA - 1) / PAGE_DATA;
+    if n_pages == 0 { return Ok(0); }
+
+    if mesh.python_compat() {
+        alloc_and_link_from_buf_direct(splice_addr, slot, slot_kind, src, mesh)
+            .map(|off| off as common::PageId)
+    } else {
+        alloc_and_link_from_buf_reclaimer(splice_addr, slot, slot_kind, src)
+    }
+}
+
+/// Rust-only path: uses `reclaimer::alloc_page` (free-list → direct bump →
+/// paged-mode fallback).  Chain may contain paged-mode PageIds; Rust
+/// guests handle them via `ResolutionBuffer`.
+fn alloc_and_link_from_buf_reclaimer(
+    splice_addr: usize,
+    slot:        usize,
+    slot_kind:   RemoteSlotKind,
+    src:         &[u8],
+) -> Result<common::PageId> {
+    let total_bytes = src.len();
+    let n_pages     = (total_bytes + PAGE_DATA - 1) / PAGE_DATA;
+    let sb          = unsafe { &*(splice_addr as *const Superblock) };
+
+    let mut head_id: common::PageId = 0;
+    let mut prev_page_ptr: Option<*mut Page> = None;
+    let mut tail_id: common::PageId = 0;
+
+    for i in 0..n_pages {
+        let id = crate::runtime::mem_operation::reclaimer::alloc_page(splice_addr)
+            .map_err(|e| anyhow!("MR2 memcpy-back: alloc_page: {}", e))?;
+        let page_ptr = crate::runtime::extended_pool::runtime::resolve(id, splice_addr)
+            .map_err(|e| anyhow!("MR2 memcpy-back: resolve {:#x}: {}", id, e))?;
+
+        let src_start    = i * PAGE_DATA;
+        let data_in_page = PAGE_DATA.min(total_bytes - src_start);
+
+        unsafe {
+            let page = &mut *page_ptr;
+            std::ptr::copy_nonoverlapping(
+                src.as_ptr().add(src_start),
+                page.data.as_mut_ptr(),
+                data_in_page,
+            );
+            page.cursor.store(data_in_page as ShmOffset, Ordering::Relaxed);
+            page.next_offset.store(0, Ordering::Relaxed);
+        }
+
+        if i == 0 {
+            head_id = id;
+        } else if let Some(prev) = prev_page_ptr {
+            unsafe {
+                (*prev).next_offset.store(id as u64, Ordering::Release);
+            }
+        }
+        prev_page_ptr = Some(page_ptr);
+        tail_id = id;
+    }
+
+    link_to_slot_pageid(sb, slot, slot_kind, head_id, tail_id);
+    Ok(head_id)
+}
+
+/// Python-safe path: grows SHM if necessary and bump-allocates direct-
+/// mode pages only.  Every PageId stays < `DIRECT_LIMIT`.
+fn alloc_and_link_from_buf_direct(
     splice_addr: usize,
     slot:        usize,
     slot_kind:   RemoteSlotKind,
@@ -142,7 +224,6 @@ pub(super) fn alloc_and_link_from_buf(
 ) -> Result<ShmOffset> {
     let total_bytes    = src.len();
     let n_pages        = (total_bytes + PAGE_DATA - 1) / PAGE_DATA;
-    if n_pages == 0 { return Ok(0); }
     let bytes_to_alloc = (n_pages as ShmOffset) * PAGE_SIZE;
 
     let sb = unsafe { &*(splice_addr as *const Superblock) };
@@ -155,13 +236,10 @@ pub(super) fn alloc_and_link_from_buf(
         if candidate + bytes_to_alloc <= cap {
             break candidate;
         }
-        // Roll back and expand.
         sb.bump_allocator.fetch_sub(bytes_to_alloc, Ordering::AcqRel);
         let required = (candidate + bytes_to_alloc) as usize;
         mesh.ensure_shm_capacity(splice_addr, required)
             .map_err(|e| anyhow!("MR2 memcpy-back: expand SHM to {}: {}", required, e))?;
-        // Loop: re-contend for the bump; another thread may have allocated
-        // in between, but after the expansion there is room for both.
     };
 
     for i in 0..n_pages {

@@ -187,11 +187,12 @@ impl MeshNode {
             ctx,
             mr,
             peers,
-            mr2:       std::sync::Mutex::new(None),
-            src_ext:   std::sync::Mutex::new(None),
-            src_stage: std::sync::Mutex::new(None),
-            shm_file:  std::sync::Mutex::new(None),
-            shm_base:  std::sync::Mutex::new(0),
+            mr2:           std::sync::Mutex::new(None),
+            src_ext:       std::sync::Mutex::new(None),
+            src_stage:     std::sync::Mutex::new(None),
+            shm_file:      std::sync::Mutex::new(None),
+            shm_base:      std::sync::Mutex::new(0),
+            python_compat: std::sync::atomic::AtomicBool::new(false),
         })
     }
 }

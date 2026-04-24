@@ -292,7 +292,20 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 Some(dag.shm_path.as_str()),
             )
         }.map_err(|e| anyhow!("RDMA mesh setup failed: {}", e))?;
-        println!("[DAG] RDMA mesh ready (node {} of {})", rdma.node_id, rdma.total);
+
+        // If any workload in this DAG is Python, the MR2 memcpy-back path
+        // must produce direct-mode PageIds only (Python's shm.py cannot
+        // follow paged-mode chains).  Otherwise leave the efficient
+        // `reclaimer`-based path with free-list reuse and paged-mode
+        // fallback intact.
+        let has_python = dag.nodes.iter().any(|n| matches!(n.kind,
+            NodeKind::PyFunc(_) | NodeKind::PyPipeline(_)
+        ));
+        node.set_python_compat(has_python);
+        println!(
+            "[DAG] RDMA mesh ready (node {} of {}), python_compat={}",
+            rdma.node_id, rdma.total, has_python
+        );
         Some(std::sync::Arc::new(node))
     } else {
         None

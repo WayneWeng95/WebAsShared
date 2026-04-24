@@ -19,6 +19,7 @@ use std::collections::HashMap;
 use std::net::TcpStream;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Context, Result};
 
@@ -138,6 +139,17 @@ pub struct MeshNode {
     /// alongside `shm_file` because `ensure_shm_capacity`'s `MAP_FIXED`
     /// remap needs this address at call time.
     pub(in crate::mesh) shm_base: Mutex<usize>,
+    /// True iff the local DAG contains Python workloads (PyFunc /
+    /// PyPipeline).  Controls the receiver-side MR2 memcpy-back
+    /// allocation strategy:
+    ///   false → `reclaimer::alloc_page` with free-list reuse and
+    ///           paged-mode fallback (efficient; Rust-only).
+    ///   true  → direct bump + `ensure_shm_capacity` growth
+    ///           (guarantees direct-mode PageIds so Python's
+    ///           paged-mode-unaware `shm.py` can read them).
+    /// Set once at DAG startup via `set_python_compat`; atomic only so
+    /// the recv threads can read without locking.
+    pub(in crate::mesh) python_compat: AtomicBool,
 }
 
 // ── Channel handle accessors ──────────────────────────────────────────────────
@@ -422,6 +434,23 @@ impl MeshNode {
         }
     }
 
+    // ── Python-compat toggle for MR2 memcpy-back ────────────────────────────
+
+    /// Declare whether the local DAG includes Python workloads whose slot
+    /// readers can only follow direct-mode PageIds (< `DIRECT_LIMIT`).
+    /// Callers typically compute this by scanning the DAG for `PyFunc` /
+    /// `PyPipeline` nodes.  Flag is sticky and only needs to be set once.
+    pub fn set_python_compat(&self, on: bool) {
+        self.python_compat.store(on, Ordering::Release);
+    }
+
+    /// Check the current Python-compat setting.  Used by the MR2
+    /// memcpy-back allocator to pick between the efficient
+    /// `reclaimer::alloc_page` path and the Python-safe direct-bump path.
+    pub fn python_compat(&self) -> bool {
+        self.python_compat.load(Ordering::Acquire)
+    }
+
     // ── SHM capacity growth ─────────────────────────────────────────────────
 
     /// Ensure the SHM direct window covers `required` bytes.  If the current
@@ -460,11 +489,20 @@ impl MeshNode {
             return Ok(());
         }
 
-        let hard_limit = common::CAPACITY_HARD_LIMIT as usize;
+        // Python DAGs access SHM via file I/O (see py_guest/python/shm.py),
+        // not through a wasm32 linear memory, so they are not bound to
+        // `DIRECT_LIMIT = 2 GiB`.  Give them the higher `ShmOffset = u32`
+        // ceiling.  Rust DAGs stay at 2 GiB.
+        let hard_limit = if self.python_compat.load(std::sync::atomic::Ordering::Acquire) {
+            common::CAPACITY_HARD_LIMIT_PYTHON as usize
+        } else {
+            common::CAPACITY_HARD_LIMIT as usize
+        };
         if required > hard_limit {
             return Err(anyhow::anyhow!(
-                "ensure_shm_capacity: required {} exceeds CAPACITY_HARD_LIMIT {}",
+                "ensure_shm_capacity: required {} exceeds hard limit {} (python_compat={})",
                 required, hard_limit,
+                self.python_compat.load(std::sync::atomic::Ordering::Acquire),
             ));
         }
 

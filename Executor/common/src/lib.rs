@@ -160,8 +160,26 @@ pub const PAGE_DATA_SIZE: usize = PAGE_SIZE as usize - PAGE_HEADER_SIZE;
 /// Soft upper bound for bump allocation.
 pub const BUMP_SOFT_LIMIT: ShmOffset = 0x7FF0_0000;
 
-/// Hard ceiling for `global_capacity` doubling.
+/// Hard ceiling for `global_capacity` doubling (Rust workloads).
+///
+/// Bound to `DIRECT_LIMIT` because a wasm32 Rust guest can only address
+/// `TARGET_OFFSET .. TARGET_OFFSET + 2 GiB` as direct memory; pages past
+/// that must go through the extended-pool paged-mode resolver.
 pub const CAPACITY_HARD_LIMIT: ShmOffset = 0x8000_0000;           // 2 GiB
+
+/// Hard ceiling for `global_capacity` growth when the DAG contains
+/// Python workloads.
+///
+/// Python accesses SHM through `open(path, "r+b") + seek/read` (see
+/// `py_guest/python/shm.py`), so it is not bound by the wasm32 2 GiB
+/// direct window — it is bound only by the tmpfs file size and by
+/// `ShmOffset = u32` arithmetic.  We stop a page short of `u32::MAX`
+/// to keep bump-allocator arithmetic safely below overflow.
+///
+/// Raising this above 4 GiB would require widening `ShmOffset` (and
+/// every slot-head / bump-allocator / cursor field derived from it) to
+/// `u64`.  That is a sizeable refactor; defer until a workload needs it.
+pub const CAPACITY_HARD_LIMIT_PYTHON: ShmOffset = 0xFFFF_F000;    // ≈ 4 GiB - PAGE_SIZE
 
 // ─── Extended pool feature flag ───────────────────────────────────────────────
 
