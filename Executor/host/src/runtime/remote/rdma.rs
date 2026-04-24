@@ -16,7 +16,7 @@
 use anyhow::Result;
 use connect::SendChannel;
 use connect::ffi::ibv_sge;
-use connect::rdma::queue_pair::MAX_SEND_SGE;
+use connect::rdma::queue_pair::{MAX_SEND_SGE, SIGNAL_BATCH};
 use common::{PAGE_SIZE, ShmOffset};
 
 use super::PAGE_DATA;
@@ -77,7 +77,16 @@ pub(super) fn rdma_write_page_chain(
             to_fill    -= take;
         }
 
-        qp.post_rdma_write_sge_list(&mut sges, remote_addr, remote_rkey, is_last)?;
+        // Chunk the submission: every `SIGNAL_BATCH` WRs we issue a signaled
+        // WR and poll its completion.  RC QPs drain in order, so the poll
+        // implicitly acks every unsignaled WR in the batch, freeing queue
+        // slots before the next batch fills them.
+        let batch_boundary = ((dest_idx + 1) as usize) % SIGNAL_BATCH == 0;
+        let signal         = is_last || batch_boundary;
+        qp.post_rdma_write_sge_list(&mut sges, remote_addr, remote_rkey, signal)?;
+        if signal && !is_last {
+            qp.poll_one_blocking()?;
+        }
     }
     qp.poll_one_blocking()?;
     println!("[remote] RDMA page-chain write {} bytes done", total_bytes);
@@ -120,7 +129,12 @@ pub(super) fn rdma_write_flat_to(
             s.lkey   = lkey;
             s
         }).collect();
-        qp.post_rdma_write_sge_list(&mut sges, remote_cursor, remote_rkey, is_last)?;
+        let batch_boundary = (i + 1) % SIGNAL_BATCH == 0;
+        let signal         = is_last || batch_boundary;
+        qp.post_rdma_write_sge_list(&mut sges, remote_cursor, remote_rkey, signal)?;
+        if signal && !is_last {
+            qp.poll_one_blocking()?;
+        }
         remote_cursor += chunk.iter().map(|&(_, l, _)| l as u64).sum::<u64>();
     }
     qp.poll_one_blocking()?;

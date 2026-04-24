@@ -13,6 +13,21 @@ use super::memory_region::MemoryRegion;
 /// Most modern HCAs support ≥ 16; we request exactly this many at QP creation.
 pub const MAX_SEND_SGE: usize = 16;
 
+/// Maximum outstanding RDMA WRITE WRs per QP's send queue.  Transfers larger
+/// than this × `PAGE_DATA_SIZE` must be posted in batches separated by a
+/// signaled WR + `poll_one_blocking` so the queue doesn't overflow (see
+/// `runtime/remote/rdma.rs::rdma_write_page_chain`).  Chosen to comfortably
+/// fit typical RDMA transfers (a few MiB at 4088 B/page = ~1000 WRs) while
+/// staying well under ConnectX-3's `max_qp_wr = 16351`.
+pub const MAX_SEND_WR:  usize = 1024;
+
+/// How many WRs to post between signaled completions inside a single
+/// `rdma_write_page_chain` / `rdma_write_flat_to` call.  Must be strictly
+/// less than `MAX_SEND_WR` so that even if a batch is mid-flight the queue
+/// can still accept the next unsignaled WR.  Halving gives plenty of room
+/// for the earlier batch to drain after we poll.
+pub const SIGNAL_BATCH: usize = 512;
+
 pub struct QueuePair {
     pub qp: NonNull<ibv_qp>,
     /// Dedicated completion queue for this QP — not shared with any other QP.
@@ -28,7 +43,7 @@ impl QueuePair {
         // Each QP owns its CQ so concurrent transfers to different peers
         // never steal each other's completions.
         let cq_ptr = unsafe {
-            ibv_create_cq(ctx.ctx.as_ptr(), 16,
+            ibv_create_cq(ctx.ctx.as_ptr(), MAX_SEND_WR as i32 + 16,
                           std::ptr::null_mut(), std::ptr::null_mut(), 0)
         };
         let cq = NonNull::new(cq_ptr)
@@ -39,7 +54,7 @@ impl QueuePair {
         init_attr.recv_cq    = cq_ptr;
         init_attr.qp_type    = IBV_QPT_RC;
         init_attr.sq_sig_all = 0;
-        init_attr.cap.max_send_wr  = 16;
+        init_attr.cap.max_send_wr  = MAX_SEND_WR as u32;
         init_attr.cap.max_recv_wr  = 16;
         init_attr.cap.max_send_sge = MAX_SEND_SGE as u32;
         init_attr.cap.max_recv_sge = 1;
