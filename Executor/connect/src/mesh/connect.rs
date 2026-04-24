@@ -14,7 +14,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 
 use crate::rdma::context::RdmaContext;
 use crate::rdma::exchange::{self, QpInfo};
@@ -33,14 +33,31 @@ impl MeshNode {
     }
 
     /// Like `connect_all` but registers an externally-owned SHM buffer as the MR.
+    ///
+    /// `shm_path` is the filesystem path of the SHM backing file — used by
+    /// `ensure_shm_capacity` to grow the mapping past the initial MR1
+    /// footprint when the receiver's memcpy-back needs more direct-mode
+    /// room.  If `None`, capacity expansion is disabled (callers that
+    /// never overflow MR1 don't need it).
     pub unsafe fn connect_all_on_shm(
-        node_id: usize,
-        total:   usize,
-        ips:     &[&str],
-        shm_ptr: *mut u8,
-        shm_len: usize,
+        node_id:  usize,
+        total:    usize,
+        ips:      &[&str],
+        shm_ptr:  *mut u8,
+        shm_len:  usize,
+        shm_path: Option<&str>,
     ) -> Result<Self> {
-        Self::connect_all_with_buf(node_id, total, ips, Some((shm_ptr, shm_len)), shm_len)
+        let mut node = Self::connect_all_with_buf(
+            node_id, total, ips, Some((shm_ptr, shm_len)), shm_len,
+        )?;
+        if let Some(path) = shm_path {
+            let file = std::fs::OpenOptions::new()
+                .read(true).write(true).open(path)
+                .with_context(|| format!("open shm file {}", path))?;
+            *node.shm_file.lock().expect("shm_file mutex poisoned") = Some(file);
+            *node.shm_base.lock().expect("shm_base mutex poisoned") = shm_ptr as usize;
+        }
+        Ok(node)
     }
 
     fn connect_all_with_buf(
@@ -173,6 +190,8 @@ impl MeshNode {
             mr2:       std::sync::Mutex::new(None),
             src_ext:   std::sync::Mutex::new(None),
             src_stage: std::sync::Mutex::new(None),
+            shm_file:  std::sync::Mutex::new(None),
+            shm_base:  std::sync::Mutex::new(0),
         })
     }
 }

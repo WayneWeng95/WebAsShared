@@ -289,6 +289,7 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 &ip_refs,
                 splice_addr as *mut u8,
                 common::INITIAL_SHM_SIZE as usize,
+                Some(dag.shm_path.as_str()),
             )
         }.map_err(|e| anyhow!("RDMA mesh setup failed: {}", e))?;
         println!("[DAG] RDMA mesh ready (node {} of {})", rdma.node_id, rdma.total);

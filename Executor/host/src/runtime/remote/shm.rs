@@ -122,67 +122,72 @@ pub(super) fn alloc_and_link(
 /// Like `alloc_and_link` but also memcpys `src` into the newly-allocated
 /// page-chain data areas.  Used by the MR2 receive path: after RDMA WRITE
 /// has landed bytes in an MR2 region (outside the guest's direct window),
-/// we pull them back into a page chain so the slot can be read normally.
+/// we pull them back into an SHM page chain so the slot can be read normally.
 ///
-/// Pages are allocated via `reclaimer::alloc_page`, which picks direct-mode
-/// pages while the bump allocator has room and transparently falls back to
-/// paged-mode pages in the extended pool's `GlobalPool` once direct capacity
-/// is exhausted.  The receiving guest walks the chain through the standard
-/// API, which already handles PageIds >= `DIRECT_LIMIT` via the resolution
-/// buffer — so MR2-triggered transfers that land partially or wholly in
-/// paged-mode pages are still transparent to workload code.
+/// Grows SHM via `mesh.ensure_shm_capacity` first if the needed pages would
+/// overflow the current `global_capacity`.  Then bumps the allocator and
+/// lays down direct-mode pages — never touches the extended-pool paged
+/// path — so the resulting PageIds are always `< DIRECT_LIMIT` and both
+/// Rust and Python workloads can read the slot without paged-mode
+/// resolution.
 ///
-/// Returns the head `PageId` of the new chain (encoded in the slot's
-/// `writer_heads` / `io_heads` atomic by `link_to_slot`).
+/// Returns the head byte-offset of the new chain (also installed into the
+/// slot's `writer_heads` / `io_heads` atomic by `link_to_slot`).
 pub(super) fn alloc_and_link_from_buf(
     splice_addr: usize,
     slot:        usize,
     slot_kind:   RemoteSlotKind,
     src:         &[u8],
-) -> Result<common::PageId> {
-    let total_bytes = src.len();
-    let n_pages     = (total_bytes + PAGE_DATA - 1) / PAGE_DATA;
+    mesh:        &MeshNode,
+) -> Result<ShmOffset> {
+    let total_bytes    = src.len();
+    let n_pages        = (total_bytes + PAGE_DATA - 1) / PAGE_DATA;
     if n_pages == 0 { return Ok(0); }
+    let bytes_to_alloc = (n_pages as ShmOffset) * PAGE_SIZE;
 
     let sb = unsafe { &*(splice_addr as *const Superblock) };
 
-    let mut head_id: common::PageId = 0;
-    let mut prev_page_ptr: Option<*mut Page> = None;
-    let mut tail_id: common::PageId = 0;
+    // Reserve the bump range atomically.  If we'd exceed global_capacity,
+    // grow SHM first and retry.
+    let dest_off = loop {
+        let candidate = sb.bump_allocator.fetch_add(bytes_to_alloc, Ordering::AcqRel);
+        let cap       = sb.global_capacity.load(Ordering::Acquire);
+        if candidate + bytes_to_alloc <= cap {
+            break candidate;
+        }
+        // Roll back and expand.
+        sb.bump_allocator.fetch_sub(bytes_to_alloc, Ordering::AcqRel);
+        let required = (candidate + bytes_to_alloc) as usize;
+        mesh.ensure_shm_capacity(splice_addr, required)
+            .map_err(|e| anyhow!("MR2 memcpy-back: expand SHM to {}: {}", required, e))?;
+        // Loop: re-contend for the bump; another thread may have allocated
+        // in between, but after the expansion there is room for both.
+    };
 
     for i in 0..n_pages {
-        let id = crate::runtime::mem_operation::reclaimer::alloc_page(splice_addr)
-            .map_err(|e| anyhow!("MR2 memcpy-back: alloc_page: {}", e))?;
-        let page_ptr = crate::runtime::extended_pool::runtime::resolve(id, splice_addr)
-            .map_err(|e| anyhow!("MR2 memcpy-back: resolve {:#x}: {}", id, e))?;
-
+        let page_off     = dest_off + i as ShmOffset * PAGE_SIZE;
+        let page         = unsafe { &mut *((splice_addr + page_off as usize) as *mut Page) };
         let src_start    = i * PAGE_DATA;
         let data_in_page = PAGE_DATA.min(total_bytes - src_start);
 
         unsafe {
-            let page = &mut *page_ptr;
             std::ptr::copy_nonoverlapping(
                 src.as_ptr().add(src_start),
                 page.data.as_mut_ptr(),
                 data_in_page,
             );
-            page.cursor.store(data_in_page as ShmOffset, Ordering::Relaxed);
-            page.next_offset.store(0, Ordering::Relaxed);
         }
 
-        if i == 0 {
-            head_id = id;
-        } else if let Some(prev) = prev_page_ptr {
-            unsafe {
-                (*prev).next_offset.store(id as u64, Ordering::Release);
-            }
-        }
-        prev_page_ptr = Some(page_ptr);
-        tail_id = id;
+        page.cursor.store(data_in_page as ShmOffset, Ordering::Relaxed);
+        let next = if i + 1 < n_pages {
+            dest_off + (i + 1) as ShmOffset * PAGE_SIZE
+        } else { 0 };
+        page.next_offset.store(next as u64, Ordering::Relaxed);
     }
 
-    link_to_slot_pageid(sb, slot, slot_kind, head_id, tail_id);
-    Ok(head_id)
+    let tail_off = dest_off + (n_pages as ShmOffset - 1) * PAGE_SIZE;
+    link_to_slot(sb, slot, slot_kind, dest_off, tail_off);
+    Ok(dest_off)
 }
 
 /// Store `head_off` and `tail_off` into the head/tail atomics for `slot`.

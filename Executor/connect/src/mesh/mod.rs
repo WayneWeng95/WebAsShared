@@ -128,6 +128,16 @@ pub struct MeshNode {
     /// source bytes (which live in `GlobalPool`, outside SHM) are
     /// memcpy'd here first so they can be referenced by a registered lkey.
     pub(in crate::mesh) src_stage: Mutex<Option<src_mr::SrcStageStorage>>,
+    /// SHM backing file (opened by `connect_all_on_shm` when `shm_path`
+    /// is supplied) — enables `ensure_shm_capacity` to grow the direct
+    /// window past `INITIAL_SHM_SIZE` for the receiver-side memcpy-back.
+    /// `None` means "no capacity growth available" (e.g., `connect_all`
+    /// mode with an internally-allocated buffer).
+    pub(in crate::mesh) shm_file: Mutex<Option<std::fs::File>>,
+    /// VA base of the SHM mapping (same as `mr.addr()` when set).  Kept
+    /// alongside `shm_file` because `ensure_shm_capacity`'s `MAP_FIXED`
+    /// remap needs this address at call time.
+    pub(in crate::mesh) shm_base: Mutex<usize>,
 }
 
 // ── Channel handle accessors ──────────────────────────────────────────────────
@@ -410,6 +420,91 @@ impl MeshNode {
         if should_drop {
             *guard = None;
         }
+    }
+
+    // ── SHM capacity growth ─────────────────────────────────────────────────
+
+    /// Ensure the SHM direct window covers `required` bytes.  If the current
+    /// `global_capacity` is smaller, `ftruncate`'s the backing file and
+    /// `MAP_FIXED`-remaps at the same VA, then bumps the capacity atom.
+    ///
+    /// This is used by the receiver-side MR2 memcpy-back path: when the
+    /// memcpy destination would exceed the current direct window, we grow
+    /// SHM first so the destination pages land at direct-mode PageIds
+    /// (readable by both Rust and Python workloads without paged-mode
+    /// resolution).
+    ///
+    /// `splice_addr` is the guest's view of SHM base; we use it to access
+    /// the `Superblock`'s `global_capacity` atomic.  The actual `MAP_FIXED`
+    /// uses the stored `shm_base`, which matches `splice_addr` at the host.
+    ///
+    /// Returns an error if no `shm_path` was provided at `connect_all_on_shm`
+    /// time (capacity growth is disabled in that case), or if `required`
+    /// exceeds `CAPACITY_HARD_LIMIT`.
+    pub fn ensure_shm_capacity(&self, splice_addr: usize, required: usize) -> Result<()> {
+        let sb = unsafe { &*(splice_addr as *const common::Superblock) };
+        let current = sb.global_capacity.load(std::sync::atomic::Ordering::Acquire) as usize;
+        if current >= required {
+            return Ok(());
+        }
+
+        let mut file_guard = self.shm_file.lock().expect("shm_file mutex poisoned");
+        let file = file_guard.as_mut().ok_or_else(||
+            anyhow::anyhow!("ensure_shm_capacity: shm_file not initialized — \
+                             pass shm_path to connect_all_on_shm")
+        )?;
+
+        // Re-check under lock.
+        let current = sb.global_capacity.load(std::sync::atomic::Ordering::Acquire) as usize;
+        if current >= required {
+            return Ok(());
+        }
+
+        let hard_limit = common::CAPACITY_HARD_LIMIT as usize;
+        if required > hard_limit {
+            return Err(anyhow::anyhow!(
+                "ensure_shm_capacity: required {} exceeds CAPACITY_HARD_LIMIT {}",
+                required, hard_limit,
+            ));
+        }
+
+        // Grow geometrically to keep the amortized cost low.
+        let new_size = (current.saturating_mul(2)).max(required).min(hard_limit);
+        file.set_len(new_size as u64)
+            .with_context(|| format!("set_len SHM to {}", new_size))?;
+
+        let base = *self.shm_base.lock().expect("shm_base mutex poisoned");
+        if base == 0 {
+            return Err(anyhow::anyhow!("ensure_shm_capacity: shm_base not set"));
+        }
+
+        use std::os::fd::AsRawFd;
+        let mapped = unsafe {
+            libc::mmap(
+                base as *mut libc::c_void,
+                new_size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                libc::MAP_SHARED | libc::MAP_FIXED,
+                file.as_raw_fd(),
+                0,
+            )
+        };
+        if mapped == libc::MAP_FAILED {
+            return Err(anyhow::anyhow!(
+                "ensure_shm_capacity: MAP_FIXED mmap failed: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+
+        sb.global_capacity.store(
+            new_size as common::ShmOffset,
+            std::sync::atomic::Ordering::Release,
+        );
+        eprintln!(
+            "[SHM] expanded {} MiB → {} MiB (for receiver memcpy-back)",
+            current / (1024 * 1024), new_size / (1024 * 1024),
+        );
+        Ok(())
     }
 }
 

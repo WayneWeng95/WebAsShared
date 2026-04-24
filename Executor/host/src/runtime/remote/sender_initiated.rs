@@ -149,11 +149,13 @@ pub(super) fn recv_si(
 
     exchange::wait_done(&mut *ch.ctrl.lock().unwrap())?;
 
-    // Bytes are sitting in MR2.  Memcpy out to a fresh MR1 page chain and
-    // link that chain into the target slot so guest consumers see the data
-    // through the normal page-chain API.
+    // Bytes are sitting in MR2.  Memcpy out into a freshly-bump-allocated
+    // SHM page chain (growing SHM via `ensure_shm_capacity` if needed) so
+    // the slot is readable through the normal page-chain API.  Always
+    // lands in direct-mode pages — Python workloads read them without
+    // paged-mode resolution.
     let src_slice = unsafe { reservation.as_slice() };
-    alloc_and_link_from_buf(splice_addr, slot, slot_kind, src_slice)?;
+    alloc_and_link_from_buf(splice_addr, slot, slot_kind, src_slice, mesh)?;
     mesh.mr2_touch();
 
     Ok(())
