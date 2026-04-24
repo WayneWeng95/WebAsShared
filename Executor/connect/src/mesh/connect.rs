@@ -164,6 +164,15 @@ impl MeshNode {
         }
 
         println!("[mesh] node {} connected to {} peers", node_id, peers.len());
-        Ok(MeshNode { id: node_id, total, ctx, mr, peers })
+        Ok(MeshNode {
+            id: node_id,
+            total,
+            ctx,
+            mr,
+            peers,
+            mr2:       std::sync::Mutex::new(None),
+            src_ext:   std::sync::Mutex::new(None),
+            src_stage: std::sync::Mutex::new(None),
+        })
     }
 }

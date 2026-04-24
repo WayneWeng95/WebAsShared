@@ -132,6 +132,7 @@ dependencies = [
  "anyhow",
  "cc",
  "common",
+ "libc",
 ]
 
 [[package]]

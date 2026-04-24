@@ -90,7 +90,7 @@ pub(super) fn execute_stream_pipeline(
     shm_path:    &str,
     wasm_path:   &str,
     splice_addr: usize,
-    mesh:        Option<&connect::MeshNode>,
+    mesh:        Option<&std::sync::Arc<connect::MeshNode>>,
 ) -> Result<()> {
     let rounds = params.rounds as usize;
     let depth  = params.stages.len();
@@ -138,7 +138,7 @@ pub(super) fn execute_stream_pipeline(
                 if tick == 0 {
                     println!("    [{}] tick {} waiting for rdma_recv round 0 ...", node_id, tick);
                     let ch = m.recv_channel(rdma.peer);
-                    execute_remote_recv(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol)
+                    execute_remote_recv(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol, m)
                         .map_err(|e| anyhow!("[{}] rdma_recv tick 0: {}", node_id, e))?;
                     println!("    [{}] rdma_recv round 0 into slot {} done  (+{}ms)", node_id, rdma.slot, ts());
                 } else {
@@ -223,14 +223,15 @@ pub(super) fn execute_stream_pipeline(
                     let slot   = buf_slot.unwrap(); // set above when free_after
                     let sk     = rdma.slot_kind;
                     let proto  = rdma.protocol;
-                    let ch     = m.send_channel(rdma.peer);
-                    let node_s = node_id.to_string();
-                    let tid    = tick;
+                    let ch        = m.send_channel(rdma.peer);
+                    let mesh_arc  = m.clone();
+                    let node_s    = node_id.to_string();
+                    let tid       = tick;
 
                     println!("    [{}] tick {} spawning background rdma_send round {} from slot {} ...",
                              node_id, tick, round, slot);
                     pending_send = Some(std::thread::spawn(move || {
-                        execute_remote_send(splice_addr, slot, sk, &ch, proto)
+                        execute_remote_send(splice_addr, slot, sk, &ch, proto, &mesh_arc)
                             .map_err(|e| anyhow!("[{}] rdma_send tick {}: {}", node_s, tid, e))?;
                         // Free the buffer slot so the next use of this slot
                         // (two rounds later) starts with an empty chain.
@@ -245,7 +246,7 @@ pub(super) fn execute_stream_pipeline(
                     // across rounds; background send would race with stages).
                     println!("    [{}] tick {} sending rdma_send round {} ...", node_id, tick, round);
                     let ch = m.send_channel(rdma.peer);
-                    execute_remote_send(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol)
+                    execute_remote_send(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol, m)
                         .map_err(|e| anyhow!("[{}] rdma_send tick {}: {}", node_id, tick, e))?;
                     println!("    [{}] rdma_send round {} from slot {} done  (+{}ms)",
                              node_id, round, rdma.slot, ts());
@@ -270,14 +271,15 @@ pub(super) fn execute_stream_pipeline(
                 let slot   = rdma.slot;
                 let sk     = rdma.slot_kind;
                 let proto  = rdma.protocol;
-                let ch     = m.recv_channel(rdma.peer);
-                let node_s = node_id.to_string();
-                let nr     = next_round;
+                let ch        = m.recv_channel(rdma.peer);
+                let mesh_arc  = m.clone();
+                let node_s    = node_id.to_string();
+                let nr        = next_round;
 
                 println!("    [{}] tick {} pre-fetching rdma_recv round {} in background ...",
                          node_id, tick, next_round);
                 pending_recv = Some(std::thread::spawn(move || {
-                    execute_remote_recv(splice_addr, slot, sk, &ch, proto)
+                    execute_remote_recv(splice_addr, slot, sk, &ch, proto, &mesh_arc)
                         .map_err(|e| anyhow!("[{}] rdma_recv prefetch round {}: {}", node_s, nr, e))
                 }));
             }
@@ -346,7 +348,7 @@ pub(super) fn execute_py_pipeline(
     python_script: &str,
     python_wasm:   Option<&str>,
     splice_addr:   usize,
-    mesh:          Option<&connect::MeshNode>,
+    mesh:          Option<&std::sync::Arc<connect::MeshNode>>,
 ) -> Result<()> {
     let rounds = params.rounds as usize;
     let depth  = params.stages.len();
@@ -385,7 +387,7 @@ pub(super) fn execute_py_pipeline(
                 if tick == 0 {
                     println!("    [{}] tick {} waiting for rdma_recv round 0 ...", node_id, tick);
                     let ch = m.recv_channel(rdma.peer);
-                    execute_remote_recv(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol)
+                    execute_remote_recv(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol, m)
                         .map_err(|e| anyhow!("[{}] rdma_recv tick 0: {}", node_id, e))?;
                     println!("    [{}] rdma_recv round 0 into slot {} done  (+{}ms)", node_id, rdma.slot, ts());
                 } else {
@@ -462,14 +464,15 @@ pub(super) fn execute_py_pipeline(
                     let slot   = buf_slot.unwrap();
                     let sk     = rdma.slot_kind;
                     let proto  = rdma.protocol;
-                    let ch     = m.send_channel(rdma.peer);
-                    let node_s = node_id.to_string();
-                    let tid    = tick;
+                    let ch        = m.send_channel(rdma.peer);
+                    let mesh_arc  = m.clone();
+                    let node_s    = node_id.to_string();
+                    let tid       = tick;
 
                     println!("    [{}] tick {} spawning background rdma_send round {} from slot {} ...",
                              node_id, tick, round, slot);
                     pending_send = Some(std::thread::spawn(move || {
-                        execute_remote_send(splice_addr, slot, sk, &ch, proto)
+                        execute_remote_send(splice_addr, slot, sk, &ch, proto, &mesh_arc)
                             .map_err(|e| anyhow!("[{}] rdma_send tick {}: {}", node_s, tid, e))?;
                         match sk {
                             RemoteSlotKind::Stream => reclaimer::free_stream_slot(splice_addr, slot),
@@ -481,7 +484,7 @@ pub(super) fn execute_py_pipeline(
                     // Synchronous send (free_after=false).
                     println!("    [{}] tick {} sending rdma_send round {} ...", node_id, tick, round);
                     let ch = m.send_channel(rdma.peer);
-                    execute_remote_send(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol)
+                    execute_remote_send(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol, m)
                         .map_err(|e| anyhow!("[{}] rdma_send tick {}: {}", node_id, tick, e))?;
                     println!("    [{}] rdma_send round {} from slot {} done  (+{}ms)",
                              node_id, round, rdma.slot, ts());
@@ -502,14 +505,15 @@ pub(super) fn execute_py_pipeline(
                 let slot   = rdma.slot;
                 let sk     = rdma.slot_kind;
                 let proto  = rdma.protocol;
-                let ch     = m.recv_channel(rdma.peer);
-                let node_s = node_id.to_string();
-                let nr     = next_round;
+                let ch        = m.recv_channel(rdma.peer);
+                let mesh_arc  = m.clone();
+                let node_s    = node_id.to_string();
+                let nr        = next_round;
 
                 println!("    [{}] tick {} pre-fetching rdma_recv round {} in background ...",
                          node_id, tick, next_round);
                 pending_recv = Some(std::thread::spawn(move || {
-                    execute_remote_recv(splice_addr, slot, sk, &ch, proto)
+                    execute_remote_recv(splice_addr, slot, sk, &ch, proto, &mesh_arc)
                         .map_err(|e| anyhow!("[{}] rdma_recv prefetch round {}: {}", node_s, nr, e))
                 }));
             }

@@ -3,8 +3,15 @@
 // Two write modes:
 //   page_chain — SI protocol: writes directly into a pre-structured page chain,
 //                splitting source data across 4088-byte dest page boundaries.
-//   flat       — RI protocol: writes contiguous raw bytes into a flat buffer;
-//                the receiver structures the page chain in-place afterward.
+//   flat       — RI protocol / MR2 destination: writes contiguous raw bytes
+//                into a flat buffer; the receiver structures the page chain
+//                in-place (RI) or memcpys into MR1 pages afterward (MR2).
+//
+// Each source SGE carries its own lkey so a single WR can reference any mix of
+// MR1, MR-src-ext, and MR-src-stage on the sender side.  The destination side
+// always targets a single MR per WR (single remote rkey) — that's an ibverbs
+// invariant we respect by ensuring MR1 destinations and MR2 destinations are
+// chosen whole-transfer, not per-SGE.
 
 use anyhow::Result;
 use connect::SendChannel;
@@ -13,15 +20,18 @@ use connect::rdma::queue_pair::MAX_SEND_SGE;
 use common::{PAGE_SIZE, ShmOffset};
 
 use super::PAGE_DATA;
+use super::shm::SrcSge;
 
 /// RDMA WRITE source SGEs into a pre-structured remote page chain (SI).
 ///
 /// The source data is sliced to respect 4088-byte dest page boundaries and
 /// the 8-byte per-page header offset.  Uses a `Vec<ibv_sge>` per dest page
-/// so any number of source page fragments are handled correctly.
+/// so any number of source page fragments are handled correctly.  Each
+/// source SGE carries its own lkey, allowing the source to span MR1 and
+/// the sender-side extension / staging MRs.
 pub(super) fn rdma_write_page_chain(
     ch:              &SendChannel,
-    src_sges:        &[(u64, u32)],
+    src_sges:        &[SrcSge],
     remote_dest_off: u64,
     total_bytes:     ShmOffset,
 ) -> Result<()> {
@@ -31,12 +41,12 @@ pub(super) fn rdma_write_page_chain(
 
     let n_dest_pages = (total_bytes + page_data_shm - 1) / page_data_shm;
     let remote_rkey  = ch.remote_rkey;
-    let lkey         = ch.lkey;
 
     let mut src_iter   = src_sges.iter();
     let mut src_addr   = 0u64;
     let mut src_remain = 0u32;
-    if let Some(&(a, l)) = src_iter.next() { src_addr = a; src_remain = l; }
+    let mut src_lkey   = 0u32;
+    if let Some(&(a, l, k)) = src_iter.next() { src_addr = a; src_remain = l; src_lkey = k; }
 
     let qp = ch.qp.lock().unwrap();
     for dest_idx in 0..n_dest_pages {
@@ -52,14 +62,15 @@ pub(super) fn rdma_write_page_chain(
 
         while to_fill > 0 {
             if src_remain == 0 {
-                if let Some(&(a, l)) = src_iter.next() { src_addr = a; src_remain = l; }
-                else { break; }
+                if let Some(&(a, l, k)) = src_iter.next() {
+                    src_addr = a; src_remain = l; src_lkey = k;
+                } else { break; }
             }
             let take = to_fill.min(src_remain);
             let mut sge: ibv_sge = unsafe { std::mem::zeroed() };
             sge.addr   = src_addr;
             sge.length = take;
-            sge.lkey   = lkey;
+            sge.lkey   = src_lkey;
             sges.push(sge);
             src_addr   += take as u64;
             src_remain -= take;
@@ -73,29 +84,36 @@ pub(super) fn rdma_write_page_chain(
     Ok(())
 }
 
-/// RDMA WRITE source SGEs into a flat remote buffer (RI).
-///
-/// Chunks the SGE list into `MAX_SEND_SGE`-sized batches and advances the
-/// remote cursor after each batch.  The receiver structures the page chain
-/// in-place once it receives the `total_bytes` done signal.
+/// RDMA WRITE source SGEs into a flat remote buffer at
+/// `(remote_mr_base + remote_dest_off, remote_rkey)` (MR1 destination).
 pub(super) fn rdma_write_flat(
     ch:              &SendChannel,
-    src_sges:        &[(u64, u32)],
+    src_sges:        &[SrcSge],
     remote_dest_off: u64,
     total_bytes:     ShmOffset,
 ) -> Result<()> {
-    let remote_rkey   = ch.remote_rkey;
-    let lkey          = ch.lkey;
-    let remote_base   = ch.remote_mr_base + remote_dest_off;
+    let remote_base = ch.remote_mr_base + remote_dest_off;
+    rdma_write_flat_to(ch, src_sges, remote_base, ch.remote_rkey, total_bytes as u64)
+}
 
-    let chunks: Vec<&[(u64, u32)]> = src_sges.chunks(MAX_SEND_SGE).collect();
-    let n_chunks      = chunks.len();
-    let mut remote_cursor = remote_base;
+/// RDMA WRITE source SGEs into a flat remote buffer at an explicit
+/// `(remote_base_addr, remote_rkey)` target.  Used by the MR2 receive
+/// path (peer's MR2 has a different rkey than its MR1) and by RI.
+pub(super) fn rdma_write_flat_to(
+    ch:               &SendChannel,
+    src_sges:         &[SrcSge],
+    remote_base_addr: u64,
+    remote_rkey:      u32,
+    total_bytes:      u64,
+) -> Result<()> {
+    let chunks: Vec<&[SrcSge]> = src_sges.chunks(MAX_SEND_SGE).collect();
+    let n_chunks          = chunks.len();
+    let mut remote_cursor = remote_base_addr;
 
     let qp = ch.qp.lock().unwrap();
     for (i, chunk) in chunks.iter().enumerate() {
         let is_last = i == n_chunks - 1;
-        let mut sges: Vec<ibv_sge> = chunk.iter().map(|&(addr, len)| {
+        let mut sges: Vec<ibv_sge> = chunk.iter().map(|&(addr, len, lkey)| {
             let mut s: ibv_sge = unsafe { std::mem::zeroed() };
             s.addr   = addr;
             s.length = len;
@@ -103,9 +121,9 @@ pub(super) fn rdma_write_flat(
             s
         }).collect();
         qp.post_rdma_write_sge_list(&mut sges, remote_cursor, remote_rkey, is_last)?;
-        remote_cursor += chunk.iter().map(|&(_, l)| l as u64).sum::<u64>();
+        remote_cursor += chunk.iter().map(|&(_, l, _)| l as u64).sum::<u64>();
     }
     qp.poll_one_blocking()?;
-    println!("[remote] RDMA flat write {} bytes done", total_bytes);
+    println!("[remote] RDMA flat write {} bytes done → {:#x}", total_bytes, remote_base_addr);
     Ok(())
 }

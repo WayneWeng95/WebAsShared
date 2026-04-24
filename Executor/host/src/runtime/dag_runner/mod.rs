@@ -266,7 +266,7 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
     // initial SHM states (format_shared_memory), so the staging page offsets
     // are byte-for-byte identical on every machine — enabling the receiver to
     // read data that the sender RDMA-WROTEinto the same SHM offset.
-    let mut mesh: Option<connect::MeshNode> = if let Some(ref rdma) = dag.rdma {
+    let mesh: Option<std::sync::Arc<connect::MeshNode>> = if let Some(ref rdma) = dag.rdma {
         let splice_addr = store.data().splice_addr;
 
         // Reserve staging pages only when RDMA data transfer is enabled.
@@ -292,7 +292,7 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
             )
         }.map_err(|e| anyhow!("RDMA mesh setup failed: {}", e))?;
         println!("[DAG] RDMA mesh ready (node {} of {})", rdma.node_id, rdma.total);
-        Some(node)
+        Some(std::sync::Arc::new(node))
     } else {
         None
     };
@@ -445,27 +445,27 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                         let id = node.id.clone();
                         let handle: std::thread::JoinHandle<Result<()>> = match &node.kind {
                             NodeKind::RemoteSend(p) => {
-                                let mesh = mesh.as_ref().ok_or_else(|| anyhow!(
+                                let mesh_arc = mesh.as_ref().ok_or_else(|| anyhow!(
                                     "[{}] RemoteSend requires dag.rdma to be configured", id
-                                ))?;
-                                let ch       = mesh.send_channel(p.peer);
+                                ))?.clone();
+                                let ch       = mesh_arc.send_channel(p.peer);
                                 let slot     = p.slot;
                                 let kind     = p.slot_kind;
                                 let protocol = p.protocol;
                                 std::thread::spawn(move || {
-                                    execute_remote_send(splice_addr, slot, kind, &ch, protocol)
+                                    execute_remote_send(splice_addr, slot, kind, &ch, protocol, &mesh_arc)
                                 })
                             }
                             NodeKind::RemoteRecv(p) => {
-                                let mesh = mesh.as_ref().ok_or_else(|| anyhow!(
+                                let mesh_arc = mesh.as_ref().ok_or_else(|| anyhow!(
                                     "[{}] RemoteRecv requires dag.rdma to be configured", id
-                                ))?;
-                                let ch       = mesh.recv_channel(p.peer);
+                                ))?.clone();
+                                let ch       = mesh_arc.recv_channel(p.peer);
                                 let slot     = p.slot;
                                 let kind     = p.slot_kind;
                                 let protocol = p.protocol;
                                 std::thread::spawn(move || {
-                                    execute_remote_recv(splice_addr, slot, kind, &ch, protocol)
+                                    execute_remote_recv(splice_addr, slot, kind, &ch, protocol, &mesh_arc)
                                 })
                             }
                             NodeKind::RemoteAtomicFetchAdd(p) => {

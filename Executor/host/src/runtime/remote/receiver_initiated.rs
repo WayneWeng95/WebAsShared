@@ -15,7 +15,7 @@
 use std::sync::atomic::Ordering;
 
 use anyhow::{anyhow, Result};
-use connect::{SendChannel, RecvChannel};
+use connect::{MeshNode, SendChannel, RecvChannel};
 use connect::rdma::exchange;
 use common::{PAGE_SIZE, Page, ShmOffset, Superblock};
 
@@ -30,8 +30,12 @@ pub(super) fn send_ri(
     slot:        usize,
     slot_kind:   RemoteSlotKind,
     ch:          &SendChannel,
+    mesh:        &MeshNode,
 ) -> Result<()> {
-    let (src_sges, total_bytes) = collect_src_sges(splice_addr, slot, slot_kind);
+    mesh.src_ext_try_shrink_idle();
+    mesh.src_stage_try_shrink_idle();
+
+    let (src_sges, total_bytes) = collect_src_sges(splice_addr, slot, slot_kind, mesh)?;
     println!(
         "[RemoteSend-RI] slot {} ({:?}): {} pages / {} bytes",
         slot, slot_kind, src_sges.len(), total_bytes
@@ -51,6 +55,7 @@ pub(super) fn send_ri(
     if total_bytes == 0 {
         // Receiver is waiting for our total_bytes signal.
         exchange::send_shm_offset(&mut *ch.ctrl.lock().unwrap(), 0)?;
+        mesh.src_stage_reset();
         return Ok(());
     }
 
@@ -61,6 +66,7 @@ pub(super) fn send_ri(
     // Phase 3: send total_bytes as the done signal
     exchange::send_shm_offset(&mut *ch.ctrl.lock().unwrap(), total_bytes)?;
 
+    mesh.src_stage_reset();
     Ok(())
 }
 

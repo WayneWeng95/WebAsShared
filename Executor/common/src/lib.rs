@@ -77,7 +77,7 @@ pub const TARGET_OFFSET: usize = 0x8000_0000;   // 2 GiB
 pub const KIB: ShmOffset = 1024;
 pub const MIB: ShmOffset = 1024 * 1024;
 
-pub const INITIAL_SHM_SIZE: ShmOffset = 36 * MIB;
+pub const INITIAL_SHM_SIZE: ShmOffset = 64 * MIB;
 
 pub const PAGE_SIZE: ShmOffset = 4 * KIB;
 
@@ -182,35 +182,32 @@ pub const CAPACITY_HARD_LIMIT: ShmOffset = 0x8000_0000;           // 2 GiB
 /// `docs/extended_pool.md` for the full design.
 pub const EXTENDED_POOL_ENABLED: bool = true;
 
-// ─── RDMA extended pool (Path C — scaffold only) ─────────────────────────────
+// ─── RDMA extended pool (Path C — dynamic overflow) ──────────────────────────
 
 /// Master switch for the RDMA two-MR extension (Path C).
 ///
-/// When `true`, a dedicated `RdmaPool` is lazily created when RDMA
-/// receives are about to exhaust their share of MR1, registered as a
-/// second Memory Region on every mesh peer, and used as a staging
-/// buffer for oversized receives.  After each receive completes, the
-/// host CPU-copies the data from MR2 into freshly-allocated MR1
-/// pages and links those pages into the target slot — so the slot
-/// only ever holds direct-window PageIds and guest consumers remain
-/// fully transparent.
+/// Dynamic overflow design: when a receiver's `recv_si` sees a
+/// `total_bytes` announcement larger than the remaining MR1 bump budget,
+/// it lazily registers (or grows) a host-side MR2 backing file, replies
+/// to the sender with `DestReply::UseMr2 { addr, rkey, dest_off }`, and
+/// the sender RDMA-WRITEs into MR2 instead of MR1.  After the transfer
+/// completes, the receiver's host CPU-copies the data from MR2 into a
+/// fresh MR1 page chain and links that chain into the target slot — so
+/// the guest consumer only ever sees direct-window PageIds and is
+/// unaware MR2 exists.
+///
+/// The rkey piggybacks on the existing SI Phase-2 reply; no persistent
+/// peer-wide rkey announcement is needed.
 ///
 /// When `false`, every `rdma_pool::runtime::*` entry point short-
 /// circuits at its first statement and the compiler eliminates its
 /// body.  No RdmaPool is ever created, no MR2 is registered, and the
-/// RDMA data plane is identical to pre-Phase-3 behavior.
+/// RDMA data plane is strictly the pre-Path-C MR1-only behavior.
 ///
 /// Independent of `EXTENDED_POOL_ENABLED`: the RdmaPool is its own
 /// storage (separate backing file, separate VA reservation, separate
 /// MR registration).  Either flag can be on or off in any combination.
-///
-/// **Current status**: the `RdmaPool` struct, singleton, and unit
-/// tests are implemented.  The mesh-level pieces
-/// (`ibv_reg_mr`/TCP rkey announce/sender-side rkey branch/
-/// `alloc_and_link` spillover/post-receive memcpy) are **not** yet
-/// wired up.  See `docs/extended_pool.md` §"RDMA integration (Path C)"
-/// for the integration TODO list.
-pub const EXTENDED_RDMA_ENABLED: bool = false;
+pub const EXTENDED_RDMA_ENABLED: bool = true;
 
 /// How much of MR1 can be consumed by RDMA receives before MR2
 /// spillover kicks in.  Tracked by a dedicated `rdma_mr1_used` counter
@@ -244,6 +241,13 @@ pub const RDMA_MR2_INITIAL_SIZE: u64 = 512 * 1024 * 1024;
 /// the operator's budget is tighter.  Typed as `u64` for wasm32
 /// compatibility (see [`RDMA_MR2_INITIAL_SIZE`]).
 pub const RDMA_MR2_HARD_LIMIT: u64 = 16 * 1024 * 1024 * 1024;
+
+/// Idle timeout after which an MR2 (or sender-side extension MR) is
+/// torn down to return pinned memory.  Checked lazily at the top of
+/// `recv_si` / `send_si`; no background thread.  Typed as `u64` for
+/// wasm32 compatibility; the host reads it as `Duration` via
+/// `Duration::from_nanos(MR2_IDLE_TIMEOUT_NANOS)`.
+pub const MR2_IDLE_TIMEOUT_NANOS: u64 = 5_000_000_000; // 5s
 
 // ─── Free-list trim policy ────────────────────────────────────────────────────
 

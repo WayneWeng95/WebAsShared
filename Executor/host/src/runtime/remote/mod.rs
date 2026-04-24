@@ -13,7 +13,7 @@
 // receives to the same peer never interleave their messages.
 
 use anyhow::Result;
-use connect::{SendChannel, RecvChannel};
+use connect::{MeshNode, SendChannel, RecvChannel};
 
 use crate::runtime::dag_runner::{RemoteSlotKind, RemoteProtocol};
 
@@ -44,32 +44,41 @@ pub fn pre_alloc_staging(_splice_addr: usize, _total: usize) -> Result<()> {
 ///
 /// Uses `ch.ctrl` (ctrl_as_sender) for all TCP control messages — this stream
 /// is exclusive to this sender direction and safe to use from a thread.
+///
+/// `mesh` is needed so the sender can target a peer's MR2 (handed back in the
+/// Phase-2 reply when the peer's receive overflowed MR1) or, on the sender
+/// side, reach into a local sender-side extension MR when sending > MR1
+/// worth of local data.
 pub fn execute_remote_send(
     splice_addr: usize,
     slot:        usize,
     slot_kind:   RemoteSlotKind,
     ch:          &SendChannel,
     protocol:    RemoteProtocol,
+    mesh:        &MeshNode,
 ) -> Result<()> {
     match protocol {
-        RemoteProtocol::SenderInit   => sender_initiated::send_si(splice_addr, slot, slot_kind, ch),
-        RemoteProtocol::ReceiverInit => receiver_initiated::send_ri(splice_addr, slot, slot_kind, ch),
+        RemoteProtocol::SenderInit   => sender_initiated::send_si(splice_addr, slot, slot_kind, ch, mesh),
+        RemoteProtocol::ReceiverInit => receiver_initiated::send_ri(splice_addr, slot, slot_kind, ch, mesh),
     }
 }
 
 /// Receive slot data from a remote peer, populate a local SHM slot.
 ///
 /// Uses `ch.ctrl` (ctrl_as_receiver) for all TCP control messages — exclusive
-/// to this receive direction.
+/// to this receive direction.  `mesh` is needed to manage MR2 (lazy
+/// registration and per-transfer reservation) when incoming data exceeds
+/// MR1's remaining bump capacity.
 pub fn execute_remote_recv(
     splice_addr: usize,
     slot:        usize,
     slot_kind:   RemoteSlotKind,
     ch:          &RecvChannel,
     protocol:    RemoteProtocol,
+    mesh:        &MeshNode,
 ) -> Result<()> {
     match protocol {
-        RemoteProtocol::SenderInit   => sender_initiated::recv_si(splice_addr, slot, slot_kind, ch),
+        RemoteProtocol::SenderInit   => sender_initiated::recv_si(splice_addr, slot, slot_kind, ch, mesh),
         RemoteProtocol::ReceiverInit => receiver_initiated::recv_ri(splice_addr, slot, slot_kind, ch),
     }
 }

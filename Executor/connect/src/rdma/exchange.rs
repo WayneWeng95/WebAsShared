@@ -157,6 +157,68 @@ pub fn recv_shm_offset(stream: &mut TcpStream) -> Result<common::ShmOffset> {
     Ok(common::ShmOffset::from_le_bytes(b))
 }
 
+// ── Phase-2 SI handshake reply ───────────────────────────────────────────────
+//
+// The receiver tells the sender where the RDMA WRITE should land:
+//
+//   SingleMr — page chain allocated inside the existing shared MR (MR1).
+//              Sender uses the peer's MR1 rkey (known from QpInfo exchange).
+//
+//   UseMr2   — region allocated inside a separately-registered host-side
+//              MR2 backing file.  Sender must target (addr, rkey) from this
+//              reply; the peer's MR1 rkey does not cover MR2.  After the
+//              RDMA WRITE completes, the receiver's host memcpys the data
+//              out of MR2 into a fresh MR1 page chain before the guest
+//              reads the slot.
+
+#[derive(Clone, Copy, Debug)]
+pub enum DestReply {
+    SingleMr { dest_off: common::ShmOffset },
+    UseMr2   { dest_off: u64, addr: u64, rkey: u32 },
+}
+
+const DEST_TAG_SINGLE_MR: u8 = 0;
+const DEST_TAG_USE_MR2:   u8 = 1;
+
+pub fn send_dest_reply(stream: &mut TcpStream, reply: &DestReply) -> Result<()> {
+    match *reply {
+        DestReply::SingleMr { dest_off } => {
+            stream.write_all(&[DEST_TAG_SINGLE_MR])?;
+            stream.write_all(&dest_off.to_le_bytes())?;
+        }
+        DestReply::UseMr2 { dest_off, addr, rkey } => {
+            stream.write_all(&[DEST_TAG_USE_MR2])?;
+            stream.write_all(&dest_off.to_le_bytes())?;
+            stream.write_all(&addr.to_le_bytes())?;
+            stream.write_all(&rkey.to_le_bytes())?;
+        }
+    }
+    Ok(stream.flush()?)
+}
+
+pub fn recv_dest_reply(stream: &mut TcpStream) -> Result<DestReply> {
+    let mut tag = [0u8; 1];
+    stream.read_exact(&mut tag)?;
+    match tag[0] {
+        DEST_TAG_SINGLE_MR => {
+            let mut b = [0u8; core::mem::size_of::<common::ShmOffset>()];
+            stream.read_exact(&mut b)?;
+            Ok(DestReply::SingleMr { dest_off: common::ShmOffset::from_le_bytes(b) })
+        }
+        DEST_TAG_USE_MR2 => {
+            let mut off = [0u8; 8]; stream.read_exact(&mut off)?;
+            let mut a   = [0u8; 8]; stream.read_exact(&mut a)?;
+            let mut r   = [0u8; 4]; stream.read_exact(&mut r)?;
+            Ok(DestReply::UseMr2 {
+                dest_off: u64::from_le_bytes(off),
+                addr:     u64::from_le_bytes(a),
+                rkey:     u32::from_le_bytes(r),
+            })
+        }
+        other => Err(anyhow!("recv_dest_reply: unknown tag {}", other)),
+    }
+}
+
 /// Server side: listen on `tcp_port`, accept one connection, return the stream.
 ///
 /// Used for the reverse-direction control channel where no QP metadata

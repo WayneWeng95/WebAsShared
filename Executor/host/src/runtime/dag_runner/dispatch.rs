@@ -76,7 +76,7 @@ pub(super) fn execute_node(
     python_script: &str,
     python_wasm: Option<&str>,
     wasm_path: &str,
-    mesh: Option<&connect::MeshNode>,
+    mesh: Option<&std::sync::Arc<connect::MeshNode>>,
 ) -> Result<()> {
     let splice_addr = store.data().splice_addr;
     let base_ptr = memory.data_ptr(&*store);
@@ -421,7 +421,7 @@ pub(super) fn execute_node(
             ))?;
             log(&format!("remote send slot {} ({:?}) → peer {}", p.slot, p.slot_kind, p.peer));
             let ch = mesh.send_channel(p.peer);
-            execute_remote_send(store.data().splice_addr, p.slot, p.slot_kind, &ch, p.protocol)?;
+            execute_remote_send(store.data().splice_addr, p.slot, p.slot_kind, &ch, p.protocol, mesh)?;
             log(&format!("remote send slot {} done", p.slot));
         }
 
@@ -432,7 +432,7 @@ pub(super) fn execute_node(
             ))?;
             log(&format!("remote recv slot {} ({:?}) ← peer {}", p.slot, p.slot_kind, p.peer));
             let ch = mesh.recv_channel(p.peer);
-            execute_remote_recv(store.data().splice_addr, p.slot, p.slot_kind, &ch, p.protocol)?;
+            execute_remote_recv(store.data().splice_addr, p.slot, p.slot_kind, &ch, p.protocol, mesh)?;
             log(&format!("remote recv slot {} done", p.slot));
         }
 
