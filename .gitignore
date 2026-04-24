@@ -10,5 +10,4 @@ __pycache__/
 
 # Regenerable test corpora — create via scripts/gen_corpora.sh.
 # Only the small corpus.txt seed is tracked.
-Executor/data/corpus_medium.txt
 Executor/data/corpus_large.txt
