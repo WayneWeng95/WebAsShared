@@ -1,4 +1,14 @@
 NodeAgent/target/
+Executor/target/
 node-agent
 Executor/.claude/
 .claude/
+
+# Build artifacts
+__pycache__/
+*.pyc
+
+# Regenerable test corpora — create via scripts/gen_corpora.sh.
+# Only the small corpus.txt seed is tracked.
+Executor/data/corpus_medium.txt
+Executor/data/corpus_large.txt

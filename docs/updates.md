@@ -461,3 +461,53 @@ Added RDMA performance testing section to README documenting:
   - Loopback: 0.75 usec latency, 35.97 Gb/s write bandwidth
   - Two-node: 1.67 usec latency, 9.14 Gb/s write bandwidth (~10GbE line rate)
 - Tuning notes (MTU, CPU governor, multiple QPs)
+
+---
+
+## 28. Path C (dynamic RDMA overflow) — MR2, sender-side extension MRs, Python compat
+
+**Files:**
+`common/src/lib.rs`,
+`connect/src/mesh/mod.rs`, `connect/src/mesh/mr2.rs` (new), `connect/src/mesh/src_mr.rs` (new), `connect/src/mesh/connect.rs`,
+`connect/src/rdma/exchange.rs`,
+`host/src/runtime/remote/sender_initiated.rs`, `host/src/runtime/remote/receiver_initiated.rs`, `host/src/runtime/remote/shm.rs`, `host/src/runtime/remote/rdma.rs`, `host/src/runtime/remote/mod.rs`,
+`host/src/runtime/dag_runner/mod.rs`, `host/src/runtime/dag_runner/dispatch.rs`, `host/src/runtime/dag_runner/pipeline.rs`,
+`README.md`, `docs/extended_pool.md`, `Partitioner/` (new placeholder)
+
+Previously transfers > `INITIAL_SHM_SIZE - bump` failed with "SHM capacity exhausted". Path C (the MR2 scaffold that shipped in earlier work) is now live as a simpler, dynamic design — the trigger is size-based per-transfer rather than declared up-front.
+
+### Headline changes
+
+- **`INITIAL_SHM_SIZE`: 36 MiB → 64 MiB.**
+- **`EXTENDED_RDMA_ENABLED = true`** — was scaffold-only; now the full data-plane integration is wired up.
+- **`DestReply { SingleMr \| UseMr2 }`** wire format in the SI Phase-2 reply. No persistent mesh-wide rkey announcement — rkey piggybacks on each transfer that uses MR2.
+- **Receiver-side MR2** (`Mr2Storage` in `connect/src/mesh/mr2.rs`): lazily registered host-side file at `/dev/shm/webs-rdma-mr2-<pid>`. Grown on demand via dereg + reg; dropped at DAG end or by idle-timeout.
+- **Sender-side extension MRs** (`SrcExtStorage` + `SrcStageStorage` in `connect/src/mesh/src_mr.rs`). `collect_src_sges` picks per-page lkey:
+  - SHM offset < 64 MiB → MR1 lkey (zero-copy)
+  - SHM offset ≥ 64 MiB → `MR-src-ext` lkey (zero-copy; local-only MR over the SHM extension, re-registered on growth)
+  - Paged-mode source (`PageId ≥ DIRECT_LIMIT`) → memcpy into `MR-src-stage`, SGE points into the staging region. Bump reset after each transfer.
+- **Idle-timeout shrink** (`common::MR2_IDLE_TIMEOUT_NANOS = 5s`, lazy check at top of `recv_si` / `send_si` — no background thread).
+
+### Receiver memcpy-back and Python compat
+
+After `wait_done` the receiver CPU-copies MR2 → a fresh SHM page chain linked to the target slot. The allocator branches on `MeshNode::python_compat()`, set once at DAG load by scanning for `PyFunc` / `PyPipeline` nodes:
+
+- **Rust-only DAG** → `reclaimer::alloc_page` (free-list + direct bump + paged-mode fallback — full memory efficiency). Chain may contain paged-mode PageIds; Rust guests transparently handle them via the existing `ResolutionBuffer`.
+- **DAG with Python nodes** → direct bump + new `MeshNode::ensure_shm_capacity` (ftruncate + MAP_FIXED remap + bump `global_capacity`). Always lands in direct-mode PageIds so `py_guest/python/shm.py`'s `seek + read` path works without paged-mode awareness.
+
+New constants:
+- `CAPACITY_HARD_LIMIT = 2 GiB` (Rust ceiling — wasm32 direct window)
+- `CAPACITY_HARD_LIMIT_PYTHON ≈ 4 GiB - PAGE_SIZE` (Python DAGs can grow further since they aren't bound by the wasm32 window; capped by `ShmOffset = u32` arithmetic).
+
+### Plumbing
+
+`MeshNode` is now owned as `Arc<MeshNode>` in the DAG runner so RDMA threads can clone the handle into their closures. `execute_remote_send` / `execute_remote_recv` take a `&MeshNode` parameter. `connect_all_on_shm` now accepts `shm_path: Option<&str>` — used by `ensure_shm_capacity` to reopen the backing file for growth.
+
+### Not in scope
+
+- RI protocol receiver (`recv_ri`) still fails on MR1 overflow rather than routing to MR2. RI has an `avail_cap` handshake that lets the sender abort cleanly, so no silent breakage.
+- Expanding past 4 GiB even for Python would require widening `ShmOffset` from u32 to u64 across the superblock, guest API, and Python bindings — deferred.
+
+### `Partitioner/` placeholder
+
+New top-level directory at `Partitioner/` (alongside `Executor/` and `NodeAgent/`) with a placeholder README sketching a future subsystem that takes a symbolic, location-agnostic DAG and auto-partitions it into per-node DAGs (inserting `RemoteSend` / `RemoteRecv` pairs, allocating slot IDs, optionally sizing MR2 reservations from edge annotations). No implementation — design notes only.

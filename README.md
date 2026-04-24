@@ -33,10 +33,11 @@ Subsystem design notes live in [`docs/`](docs/):
 
 | Doc | Contents |
 |---|---|
-| [docs/extended_pool.md](docs/extended_pool.md) | Host-side memory extension beyond the 2 GiB wasm32 direct window. Covers the `PageId` type widening (Phase 1), the `GlobalPool` + `ResolutionBuffer` extended-pool mechanism (Phase 2), and the RDMA overflow scaffold (Phase 3). Includes the feature-flag system, concurrency invariants, and the barrier-compatibility discussion. |
+| [docs/extended_pool.md](docs/extended_pool.md) | Host-side memory extension beyond the 2 GiB wasm32 direct window. Covers the `PageId` type widening (Phase 1), the `GlobalPool` + `ResolutionBuffer` extended-pool mechanism (Phase 2), and the RDMA overflow integration (Phase 3, live — dynamic receiver-triggered MR2 + sender-side extension MRs). Includes the feature-flag system, concurrency invariants, and the barrier-compatibility discussion. |
 | [docs/barrier.md](docs/barrier.md) | Intra-wave futex barrier: the `ShmApi::barrier_wait` guest API, DAG `barrier_group` JSON syntax, usage examples, and the single-node constraint. |
 | [docs/slots.md](docs/slots.md) | Stream slots and I/O slots — what they are, when to use which, slot lifecycle across DAG waves. |
 | [docs/WASM64.md](docs/WASM64.md) | Investigation into wasm64 (memory64) as an alternative path to larger linear memory, why it compiles but doesn't run practically, and the infrastructure left in place in case wasmtime's JIT performance improves. |
+| [Partitioner/README.md](Partitioner/README.md) | Placeholder design notes for a future subsystem that takes a symbolic / location-agnostic DAG and auto-partitions it into per-node DAGs (inserting `RemoteSend` / `RemoteRecv` pairs). Not implemented yet. |
 | [docs/updates.md](docs/updates.md) | Historical change log. |
 
 ## Project Structure
@@ -73,6 +74,8 @@ WebAsShared/
 |   |-- scheduler/src/              # SCX sched_ext integration (stats client, cluster view, advisor)
 |   |-- agent_coordinator.toml      # Coordinator config (IPs, ports, paths, timeouts, SCX)
 |   +-- agent_worker.toml           # Worker config
+|-- Partitioner/                    # Placeholder for future symbolic-DAG auto-partitioner
+|   +-- README.md                   # Design notes for the auto-partitioning idea
 +-- DAGs/                           # All DAG JSON specifications
     |-- demo_dag/                   # Single-node demos (word count, image pipeline)
     |-- workload_dag/               # Single-node workloads (FINRA, ML training, TF-IDF)
@@ -356,11 +359,11 @@ cargo test -p scheduler -- --nocapture
 
 ### Shared Memory Layout
 
-The host creates a SHM file and maps it at a fixed offset (`0x80000000`) in each WASM guest's 4 GB address space. Guests access it via ordinary pointer arithmetic -- no syscalls needed for data reads/writes. When RDMA is enabled, the same SHM is registered as an RDMA Memory Region so peer nodes can write directly into it.
+The host creates a SHM file and maps it at a fixed offset (`0x80000000`) in each WASM guest's 4 GB address space. Guests access it via ordinary pointer arithmetic -- no syscalls needed for data reads/writes. When RDMA is enabled, the same SHM is registered as an RDMA Memory Region (MR1) so peer nodes can write directly into it.
 
 ```
 0x80000000  +--------------------------------+
-            | Superblock (24 KiB)            |
+            | Superblock                     |
             |  atomic counters, bump ptr     |
             |  stream heads/tails [2048]     |
             |  I/O heads/tails   [512]       |
@@ -369,21 +372,34 @@ The host creates a SHM file and maps it at a fixed offset (`0x80000000`) in each
             | Registry Arena (1 MiB)         |
             |  name -> atomic index mapping  |
             +--------------------------------+
+            | RDMA Scratch (8 KiB)           |
+            |  one u64 per (node, peer) pair |
+            |  — results of one-sided atomic |
+            |    FAA / CAS land here         |
+            +--------------------------------+
             | Atomic Arena (1 MiB)           |
             |  CAS values for named vars     |
             +--------------------------------+
             | Log Arena (16 MiB)             |
             |  guest diagnostic output       |
             +--------------------------------+
-            | RDMA Staging Area              |
-            |  N x 1 MiB per peer direction  |
-            |  (pre-allocated when RDMA on)  |
-            +--------------------------------+
             | Stream Pages (bump-allocated)  |
             |  4 KiB pages, linked lists     |
             |  freed via Treiber-stack       |
             +--------------------------------+
 ```
+
+Starting SHM size is `INITIAL_SHM_SIZE = 64 MiB` (`common/src/lib.rs`), which is also the length registered as MR1 with the NIC. The bump region grows on demand via `host_remap` (local) or via `MeshNode::ensure_shm_capacity` (host-side, used by the MR2 memcpy-back described below). No per-peer RDMA staging region is pre-reserved — receives allocate from the common page pool on demand.
+
+### Host-side overflow MRs (Path C)
+
+When an incoming RDMA transfer wouldn't fit in MR1's remaining bump budget, the receiver routes it through a separately-registered host-side buffer (**MR2**), then CPU-copies the bytes into a fresh page chain so the target slot is readable via the normal page-chain API. Three overflow MRs are lazily created and torn down via idle-timeout (default 5s):
+
+- **MR2** (receiver) — host-only file at `/dev/shm/webs-rdma-mr2-<pid>`, target of oversized `RemoteSend` writes. Grown monotonically; peers learn the fresh `(addr, rkey)` on the next SI `DestReply::UseMr2` handshake.
+- **MR-src-ext** (sender) — covers SHM addresses past MR1 when the local bump has grown beyond 64 MiB. Zero-copy: the SGE just uses a different lkey.
+- **MR-src-stage** (sender) — host-only file for memcpying paged-mode source pages (pages that live in the extended pool's `GlobalPool` outside SHM) before referencing them in an RDMA SGE.
+
+See [`docs/extended_pool.md`](docs/extended_pool.md) §"Phase 3 — RDMA integration" for the full design.
 
 ### Routing Primitives
 
@@ -478,14 +494,18 @@ This keeps the subprocess API unchanged (`barrier_wait`) and pushes cross-node l
 
 ## Multi-machine Execution (RDMA)
 
-When the DAG JSON includes an `rdma` block, the host establishes a full RC QP mesh across all nodes and registers the SHM as an RDMA Memory Region. `RemoteSend` / `RemoteRecv` node pairs transfer slot data between machines with no TCP data copy.
+When the DAG JSON includes an `rdma` block, the host establishes a full RC QP mesh across all nodes and registers the SHM (first 64 MiB) as the primary RDMA Memory Region (**MR1**). `RemoteSend` / `RemoteRecv` node pairs transfer slot data between machines with no TCP data copy of the payload.
 
-### Transfer Protocol
+### Transfer Protocol (Sender-Initiated)
 
-1. Sender walks the source slot's page chain and builds an SGE list pointing directly at the page data fields.
-2. A single RDMA WRITE (scatter-gather, chunked across multiple WRs if needed) DMAs the data into the peer's staging area -- **no CPU copy** of the payload.
-3. An RDMA Fetch-and-Add on the peer's staging ready-counter (hardware atomic) signals completion; a TCP byte is sent as a fallback.
-4. Receiver spin-polls the counter (100 ms), then falls back to the TCP signal. Appends the raw bytes directly into the target slot.
+1. **Phase 1**: sender walks the source slot's page chain, builds a per-SGE list (each SGE carries its own lkey — MR1 for pages inside the 64 MiB register, MR-src-ext for SHM-extension pages, MR-src-stage for paged-mode pages that had to be memcpy-staged), and TCP-announces `total_bytes`.
+2. **Phase 2**: receiver checks whether `total_bytes` fits in MR1's remaining bump budget. If yes, it allocates an MR1 page chain and replies with `DestReply::SingleMr { dest_off }`. If no (**MR2 overflow**), it lazily registers MR2, reserves a region, and replies with `DestReply::UseMr2 { addr, rkey, dest_off }`. The rkey piggybacks on this reply — no persistent mesh-wide rkey announcement is needed.
+3. **Phase 3**: sender RDMA-WRITEs. `SingleMr` → scatter-gather into the pre-structured page chain. `UseMr2` → contiguous write to `(addr, rkey)`.
+4. **Phase 4**: sender signals done over TCP. The receiver:
+   - For `SingleMr`: nothing more; the slot is already linked.
+   - For `UseMr2`: CPU-copies from MR2 into a fresh page chain linked to the slot (the allocator picks between `reclaimer::alloc_page` for Rust-only DAGs and direct bump + `ensure_shm_capacity` for DAGs containing `PyFunc` / `PyPipeline`, auto-detected at DAG load).
+
+RDMA atomics (`RemoteAtomicFetchAdd`, `RemoteAtomicCmpSwap`) are unchanged by Path C — they target named atoms in the MR1 atomic arena and land results in the MR1 RDMA Scratch region.
 
 ### ClusterDag Format
 

@@ -431,23 +431,59 @@ direct mode and is unchanged from Phase 1.
 
 ---
 
-## Phase 3 — RDMA integration (Path C, scaffold only)
+## Phase 3 — RDMA integration (Path C, live)
 
 Phase 3 extends the two-tier storage principle to the RDMA data path.
 Where Phase 2 gave host-side allocators an overflow tier via the
-`GlobalPool`, Phase 3 gives the RDMA receiver an overflow staging
-tier via a separate `RdmaPool`.  The design uses **copy-to-MR1 on
+`GlobalPool`, Phase 3 gives the RDMA receiver an overflow tier via a
+separately-registered host-side MR (**MR2**), and the sender a pair
+of extension MRs that let a single transfer span MR1, SHM past MR1,
+and paged-mode source pages.  The design uses **copy-to-MR1 on
 receive completion** so the guest consumer remains transparent:
-received data transits MR2 briefly during the RDMA DMA, then CPU-
-copies into freshly-allocated MR1 direct pages before the chain is
-linked into any slot.
+received data transits MR2 during the RDMA DMA, then CPU-copies into
+freshly-allocated MR1 (or grown-SHM) pages before the chain is linked
+into the target slot.
 
-**Current status**: the host-side storage (pool, singleton, unit
-tests, feature flag) is implemented.  The mesh integration (MR2
-registration, wire-protocol extension, receiver spillover logic,
-post-receive copy) is **not yet wired up**.  Phase 3 ships as
-scaffolding: the machinery is in place so a future commit can
-complete the integration without any preceding refactor.
+**Current status (landed):**
+
+- `EXTENDED_RDMA_ENABLED = true` (`common/src/lib.rs`)
+- Wire-format extension: `DestReply { SingleMr | UseMr2 }` carried in
+  the SI Phase-2 reply (`connect/src/rdma/exchange.rs`).  No
+  persistent mesh-wide rkey announcement — rkey piggybacks on each
+  transfer's handshake.
+- Receiver-side trigger in `recv_si`: when `total_bytes` exceeds
+  MR1's remaining bump budget, lazily register/grow MR2
+  (`/dev/shm/webs-rdma-mr2-<pid>`), reserve a region, reply
+  `UseMr2`, then memcpy MR2 → MR1 page chain after `wait_done`
+  (`host/src/runtime/remote/sender_initiated.rs`,
+  `host/src/runtime/remote/shm.rs::alloc_and_link_from_buf`).
+- Sender-side multi-MR SGE construction in `collect_src_sges`: per-
+  page lkey selection picks MR1, MR-src-ext (SHM past
+  `INITIAL_SHM_SIZE`), or MR-src-stage (paged-mode memcpy
+  staging).  Each lives in `connect/src/mesh/src_mr.rs`.
+- Idle-timeout shrink at the top of every `recv_si` / `send_si`:
+  MR2, MR-src-ext, and MR-src-stage are dropped after
+  `MR2_IDLE_TIMEOUT_NANOS` (default 5s) of no use, returning pinned
+  memory without a background thread.
+- Python-compat toggle: at DAG load the runtime scans for
+  `PyFunc` / `PyPipeline` nodes and calls
+  `MeshNode::set_python_compat(...)`.  The MR2 memcpy-back branches
+  on this flag:
+  - **Rust-only DAGs** → `reclaimer::alloc_page` (free-list +
+    direct bump + paged-mode fallback — most efficient).  Chain may
+    contain paged-mode PageIds, transparently handled by
+    `ResolutionBuffer`.
+  - **Python DAGs** → direct bump + `ensure_shm_capacity` (grows
+    SHM via `MAP_FIXED` remap, bumps `global_capacity`).  Always
+    lands in direct-mode PageIds so `shm.py`'s offset-based file
+    reads succeed.
+
+**Ceilings:**
+
+| Knob | Rust DAGs | Python DAGs |
+|---|---|---|
+| Receive-side SHM growth (`ensure_shm_capacity`) | capped at `CAPACITY_HARD_LIMIT = 2 GiB` (wasm32 direct window) | capped at `CAPACITY_HARD_LIMIT_PYTHON ≈ 4 GiB - PAGE_SIZE` (ShmOffset u32 arithmetic) |
+| MR2 backing pool hard limit | `RDMA_MR2_HARD_LIMIT = 16 GiB` (virtual reservation) — actual commit doubles from `RDMA_MR2_INITIAL_SIZE = 512 MiB` |
 
 ### Why copy-to-MR1 instead of direct MR2 consumption
 
