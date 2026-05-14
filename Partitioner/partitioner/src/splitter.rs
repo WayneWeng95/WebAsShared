@@ -4,6 +4,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::placer::{assign_nodes, PlacementHints};
 use crate::slot::{collect_slots, output_slot};
+use crate::slot_assigner::assign_slots;
 use crate::symbolic_dag::{SymbolicDag, SymbolicNode};
 
 struct CrossEdge {
@@ -33,6 +34,9 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         hints.unwrap_or(&empty_hints),
         dag.max_colocation,
     );
+
+    // ── 0b. Slot assignment ───────────────────────────────────────────────────
+    assign_slots(&mut nodes)?;
 
     // ── 1. Validate ──────────────────────────────────────────────────────────
 
@@ -167,6 +171,7 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
             &id_to_slot,
             &cross_edges,
         )?;
+        let kind = resolve_output_kind(&kind, &sym_node.deps, sym_machine, &cross_edges);
         let kind = translate_func_kind(kind);
 
         let mut obj = serde_json::Map::new();
@@ -234,6 +239,31 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
     out.insert("node_dags".into(), Value::Object(node_dags));
 
     Ok(Value::Object(out))
+}
+
+/// Rewrite `Output { slot }` to use the RecvSlot when the dep is on another machine.
+///
+/// After `assign_slots`, Output nodes carry `slot: dep_output_slot`.  If that dep
+/// ended up on a different machine, a RemoteRecv was injected and the data arrives
+/// in `edge.recv_slot`, not the original dep slot.  This function patches the kind
+/// so the executor reads from the right slot.
+fn resolve_output_kind(
+    kind: &Value,
+    node_deps: &[String],
+    machine_id: u32,
+    cross_edges: &HashMap<(String, u32), CrossEdge>,
+) -> Value {
+    let Some(out_obj) = kind.get("Output").and_then(|v| v.as_object()) else {
+        return kind.clone();
+    };
+    for dep_id in node_deps {
+        if let Some(edge) = cross_edges.get(&(dep_id.clone(), machine_id)) {
+            let mut new_out = out_obj.clone();
+            new_out.insert("slot".into(), json!(edge.recv_slot));
+            return json!({ "Output": Value::Object(new_out) });
+        }
+    }
+    kind.clone()
 }
 
 /// Translate `{ "Func": { "func": F, "arg": A, "arg2": B } }` to

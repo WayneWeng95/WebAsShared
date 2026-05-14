@@ -1,4 +1,5 @@
 mod slot;
+mod slot_assigner;
 mod splitter;
 pub mod placer;
 pub mod symbolic_dag;

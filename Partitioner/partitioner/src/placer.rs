@@ -199,7 +199,7 @@ fn compute_quotas(
 
 // ── Topological sort (Kahn's algorithm) ──────────────────────────────────────
 
-fn topo_order(nodes: &[SymbolicNode]) -> Vec<usize> {
+pub(crate) fn topo_order(nodes: &[SymbolicNode]) -> Vec<usize> {
     let id_to_idx: HashMap<&str, usize> =
         nodes.iter().enumerate().map(|(i, n)| (n.id.as_str(), i)).collect();
 
