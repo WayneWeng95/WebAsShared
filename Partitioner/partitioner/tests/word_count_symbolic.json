@@ -4,16 +4,16 @@
   "transfer": true,
   "total_nodes": 2,
   "shared_inputs": [
-    { "path": "Executor/data/corpus.txt", "source_node": 0 }
+    { "path": "TestData/corpus.txt", "source_node": 0 }
   ],
   "nodes": [
     {
       "id": "load_0", "node_id": 0, "deps": [],
-      "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "TestData/corpus.txt", "slot": 0, "prefetch": true } }
     },
     {
       "id": "load_1", "node_id": 1, "deps": [],
-      "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "TestData/corpus.txt", "slot": 0, "prefetch": true } }
     },
     {
       "id": "distribute_0", "node_id": 0, "deps": ["load_0"],

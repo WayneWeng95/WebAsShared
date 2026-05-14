@@ -12,7 +12,7 @@
   "nodes": [
 
     { "id": "load", "deps": [],
-      "kind": { "Input": { "path": "Executor/data/mnist_features.csv", "slot": 0, "prefetch": true } } },
+      "kind": { "Input": { "path": "TestData/mnist_features.csv", "slot": 0, "prefetch": true } } },
 
     { "id": "partition", "deps": ["load"],
       "kind": { "WasmVoid": { "func": "ml_partition", "arg": 2 } } },

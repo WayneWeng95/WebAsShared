@@ -20,9 +20,9 @@
       "deps": [],
       "kind": { "Input": {
         "paths": [
-          "Executor/data/img_gradient.ppm",
-          "Executor/data/img_checkerboard.ppm",
-          "Executor/data/img_rings.ppm"
+          "TestData/img_gradient.ppm",
+          "TestData/img_checkerboard.ppm",
+          "TestData/img_rings.ppm"
         ],
         "slot": 10,
         "binary": true

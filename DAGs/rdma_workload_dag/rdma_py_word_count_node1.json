@@ -20,7 +20,7 @@
       "_comment": "─── Stage 1: load corpus into I/O slot 0 ───────────────────────────────────",
       "id": "load",
       "deps": [],
-      "kind": { "Input": { "path": "Executor/data/corpus.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "TestData/corpus.txt", "slot": 0, "prefetch": true } }
     },
 
     {

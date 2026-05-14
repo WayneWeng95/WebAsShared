@@ -4,6 +4,7 @@ node-agent
 Executor/.claude/
 .claude/
 Partitioner/target/
+TestData/
 
 # Build artifacts
 __pycache__/

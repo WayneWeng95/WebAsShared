@@ -37,7 +37,7 @@ Subsystem design notes live in [`docs/`](docs/):
 | [docs/barrier.md](docs/barrier.md) | Intra-wave futex barrier: the `ShmApi::barrier_wait` guest API, DAG `barrier_group` JSON syntax, usage examples, and the single-node constraint. |
 | [docs/slots.md](docs/slots.md) | Stream slots and I/O slots — what they are, when to use which, slot lifecycle across DAG waves. |
 | [docs/WASM64.md](docs/WASM64.md) | Investigation into wasm64 (memory64) as an alternative path to larger linear memory, why it compiles but doesn't run practically, and the infrastructure left in place in case wasmtime's JIT performance improves. |
-| [Partitioner/README.md](Partitioner/README.md) | Placeholder design notes for a future subsystem that takes a symbolic / location-agnostic DAG and auto-partitions it into per-node DAGs (inserting `RemoteSend` / `RemoteRecv` pairs). Not implemented yet. |
+| [Partitioner/README.md](Partitioner/README.md) | Auto-partitioner: takes a flat `SymbolicDag` (all nodes in one list, each tagged with `node_id`) and produces a `ClusterDag` with `RemoteSend`/`RemoteRecv` pairs and slot assignments generated automatically. Invoked transparently by `node-agent submit` when the input JSON contains `"total_nodes"`. |
 | [docs/updates.md](docs/updates.md) | Historical change log. |
 
 ## Project Structure
@@ -67,21 +67,24 @@ WebAsShared/
 |   |-- common/src/                 # Shared memory layout definitions (superblock, page, registry)
 |   |-- connect/src/                # RDMA full-mesh: libibverbs FFI, MeshNode, atomic ops
 |   |-- py_guest/python/            # Python workloads (runner.py, shm.py, workload modules)
-|   +-- data/                       # Test datasets (corpus, trades, MNIST, images)
+|   +-- (data/ moved to TestData/)
 |-- NodeAgent/                      # Multi-machine deployment agent
 |   |-- common/src/lib.rs           # All tunable constants (network, timeouts, metrics, SCX, advisor)
 |   |-- agent/src/                  # Coordinator/worker daemon, executor interface, metrics
 |   |-- scheduler/src/              # SCX sched_ext integration (stats client, cluster view, advisor)
 |   |-- agent_coordinator.toml      # Coordinator config (IPs, ports, paths, timeouts, SCX)
 |   +-- agent_worker.toml           # Worker config
-|-- Partitioner/                    # Placeholder for future symbolic-DAG auto-partitioner
-|   +-- README.md                   # Design notes for the auto-partitioning idea
+|-- Partitioner/                    # Symbolic-DAG auto-partitioner
+|   |-- partitioner/src/            # Crate: partition(), SymbolicDag, slot helpers
+|   +-- README.md                   # Design notes and upgrade paths
 +-- DAGs/                           # All DAG JSON specifications
     |-- demo_dag/                   # Single-node demos (word count, image pipeline)
     |-- workload_dag/               # Single-node workloads (FINRA, ML training, TF-IDF)
-    |-- cluster_dag/                # ClusterDag definitions for distributed execution
+    |-- cluster_dag/                # ClusterDag definitions for distributed execution (hand-authored)
+    |-- symbolic_dag/               # SymbolicDag definitions (auto-partitioned by Partitioner)
     |-- rdma_demo_dag/              # Multi-node RDMA demo pairs (node0 + node1)
     +-- rdma_workload_dag/          # Multi-node RDMA workload pairs (node0 + node1)
++-- TestData/                       # Test datasets (corpus, trades, MNIST, images)
 ```
 
 ## Quick Start
@@ -165,20 +168,26 @@ Start the coordinator and worker daemons, then submit jobs:
 
 # Submit distributed jobs (from any machine with coordinator access):
 
-# Rust/WASM
+# SymbolicDag (auto-partitioned) — no manual RemoteSend/RemoteRecv needed
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/symbolic_dag/word_count.json
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/symbolic_dag/word_count.json --python
+
+# ClusterDag (hand-authored) — explicit per-node split with RemoteSend/RemoteRecv
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/word_count.json
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/ml_training.json
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/pipeline_routing.json
 
-# Python
+# Python mode
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/word_count.json --python
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json --python
-./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/ml_training.json --python
-./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/pipeline_routing.json --python
-
-# Python with AOT
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json --python --aot
+```
+
+**SymbolicDag** files are detected automatically (by the presence of `"total_nodes"`): the Partitioner generates `RemoteSend`/`RemoteRecv` pairs, assigns slot IDs, and stages any `shared_inputs` files to workers before execution starts. To preview the generated ClusterDag JSON without running a job:
+
+```bash
+./Partitioner/target/release/partition DAGs/symbolic_dag/word_count.json
 ```
 
 ClusterDag files use unified `Func` nodes that are automatically transformed to `WasmVoid` (Rust) or `PyFunc` (Python) based on the `--python` flag.

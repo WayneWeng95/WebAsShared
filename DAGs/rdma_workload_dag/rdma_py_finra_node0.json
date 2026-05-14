@@ -18,7 +18,7 @@
     {
       "id": "load_trades",
       "deps": [],
-      "kind": { "Input": { "path": "Executor/data/trades.csv", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "TestData/trades.csv", "slot": 0, "prefetch": true } }
     },
 
     {

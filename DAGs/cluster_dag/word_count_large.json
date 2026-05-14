@@ -15,7 +15,7 @@
     "0": [
       {
         "id": "load", "deps": [],
-        "kind": { "Input": { "path": "Executor/data/corpus_large.txt", "slot": 0, "prefetch": true } }
+        "kind": { "Input": { "path": "TestData/corpus_large.txt", "slot": 0, "prefetch": true } }
       },
       {
         "id": "distribute", "deps": ["load"],
@@ -43,7 +43,7 @@
     "1": [
       {
         "id": "load", "deps": [],
-        "kind": { "Input": { "path": "Executor/data/corpus_large.txt", "slot": 0, "prefetch": true } }
+        "kind": { "Input": { "path": "TestData/corpus_large.txt", "slot": 0, "prefetch": true } }
       },
       {
         "id": "distribute", "deps": ["load"],

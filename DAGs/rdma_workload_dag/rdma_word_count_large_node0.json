@@ -19,7 +19,7 @@
       "_comment": "─── Stage 1: load 50 MiB corpus into I/O slot 0 ────────────────────────────",
       "id": "load",
       "deps": [],
-      "kind": { "Input": { "path": "Executor/data/corpus_large.txt", "slot": 0, "prefetch": true } }
+      "kind": { "Input": { "path": "TestData/corpus_large.txt", "slot": 0, "prefetch": true } }
     },
 
     {

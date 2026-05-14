@@ -4,13 +4,13 @@
 # and DAGs/cluster_dag/word_count_medium.json, and similarly _large).
 #
 # These files are deliberately not tracked in git — they are large and
-# deterministic (just tiled copies of Executor/data/corpus.txt).  Run this
+# deterministic (just tiled copies of TestData/corpus.txt).  Run this
 # once after cloning to produce them.
 
 set -e
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-DATA_DIR="$ROOT/Executor/data"
+DATA_DIR="$ROOT/TestData"
 SEED="$DATA_DIR/corpus.txt"
 
 if [ ! -f "$SEED" ]; then
