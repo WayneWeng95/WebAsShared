@@ -60,6 +60,11 @@ cd "$ROOT/Executor/guest"
 cargo +nightly build --release $FEATURES
 
 echo ""
+echo "=== Building Partitioner ==="
+cd "$ROOT/Partitioner"
+cargo build --release
+
+echo ""
 echo "=== Building NodeAgent ==="
 cd "$ROOT/NodeAgent"
 cargo build --release
@@ -69,4 +74,5 @@ echo ""
 echo "=== Build complete ==="
 echo "  host:       $ROOT/Executor/target/release/host"
 echo "  guest.wasm: $ROOT/Executor/target/$WASM_TARGET/release/guest.wasm"
+echo "  partitioner:$ROOT/Partitioner/target/release/partition"
 echo "  node-agent: $ROOT/node-agent"
