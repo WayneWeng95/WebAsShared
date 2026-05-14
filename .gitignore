@@ -3,6 +3,7 @@ Executor/target/
 node-agent
 Executor/.claude/
 .claude/
+Partitioner/target/
 
 # Build artifacts
 __pycache__/
