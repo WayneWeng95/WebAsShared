@@ -374,7 +374,8 @@ fn recv_rdma_input_share(
     qp.to_rtr(&coord_info, RDMA_PORT, GID_IDX)?;
     qp.to_rts(psn)?;
 
-    // Send InputShareAccept.
+    // Send InputShareAccept with our QP info + receive-buffer MR info so the
+    // coordinator can RDMA-WRITE the file data directly into our buffer.
     let accept = InputShareAcceptPayload {
         job_id: offer.job_id.clone(),
         worker_id: node_id,
@@ -382,10 +383,13 @@ fn recv_rdma_input_share(
         psn,
         gid: gid.raw.to_vec(),
         lid: port_attr.lid,
+        rkey: recv_mr.rkey(),
+        addr: recv_mr.addr(),
     };
     send_message(stream, &make_message(MessageKind::InputShareAccept, &accept)?)?;
 
-    // Wait for InputShareGo (coordinator's QP is now RTR/RTS).
+    // Wait for InputShareGo — coordinator has completed the RDMA WRITE,
+    // so our receive buffer now contains the file data.
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;
     loop {
         match recv_message(stream) {
@@ -394,10 +398,6 @@ fn recv_rdma_input_share(
             Err(e) => return Err(e.context("waiting for InputShareGo")),
         }
     }
-
-    // RDMA READ: pull coordinator's flat buffer into our local MR.
-    qp.post_rdma_read(&recv_mr, total as u32, offer.addr, offer.rkey)?;
-    qp.poll_one_blocking()?;
 
     // Write individual files to disk.
     let buf = recv_mr.as_bytes();

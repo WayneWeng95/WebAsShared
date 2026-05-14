@@ -181,8 +181,8 @@ pub struct InputShareOfferPayload {
     pub files: Vec<InputFileEntry>,
 }
 
-/// Worker → Coordinator: reply with the worker's QP info so the coordinator
-/// can complete its QP handshake (INIT → RTR → RTS).
+/// Worker → Coordinator: reply with the worker's QP info and receive-buffer
+/// MR so the coordinator can RDMA-WRITE the file data into the worker's buffer.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InputShareAcceptPayload {
     pub job_id: String,
@@ -191,6 +191,10 @@ pub struct InputShareAcceptPayload {
     pub psn: u32,
     pub gid: Vec<u8>,
     pub lid: u16,
+    /// Remote key of the worker's receive buffer MR (coordinator writes here).
+    pub rkey: u32,
+    /// Base virtual address of the worker's receive buffer MR.
+    pub addr: u64,
 }
 
 /// Base64 serde shim so file bytes survive JSON transit without escaping issues.

@@ -686,7 +686,8 @@ fn stage_shared_inputs_rdma(
         }
     }
 
-    // Transition each coordinator QP to RTR → RTS using the worker's QP info.
+    // Transition each coordinator QP to RTR → RTS, then RDMA-WRITE the file
+    // data directly into each worker's receive buffer.
     for &id in &remote_ids {
         let accept = &accepts[&id];
         let mut peer_gid = [0u8; 16];
@@ -695,9 +696,16 @@ fn stage_shared_inputs_rdma(
         let (qp, psn) = qps.get_mut(&id).unwrap();
         qp.to_rtr(&peer_info, RDMA_PORT, GID_IDX)?;
         qp.to_rts(*psn)?;
+
+        // RDMA WRITE: push file data into the worker's receive buffer.
+        println!("[coordinator] RDMA WRITE → worker {} ({} bytes)", id, buf.len());
+        qp.post_rdma_write(&mr, buf.len() as u32, accept.addr, accept.rkey)?;
+        qp.poll_one_blocking()
+            .with_context(|| format!("RDMA WRITE to worker {} failed", id))?;
+        println!("[coordinator] RDMA WRITE to worker {} complete", id);
     }
 
-    // Signal all workers to proceed with RDMA READ.
+    // Signal all workers that their buffers are ready.
     for &id in &remote_ids {
         if let Some(w) = workers.get_mut(&id) {
             send_message(
