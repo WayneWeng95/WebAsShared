@@ -19,6 +19,8 @@ pub struct NodeStatus {
     pub executor_running: bool,
     /// Job ID currently running (if any).
     pub current_job_id: Option<String>,
+    /// Logical CPU count reported by the node (0 = unknown).
+    pub cpu_cores: u32,
 }
 
 /// Cluster-wide view of all node statuses.
@@ -45,6 +47,7 @@ impl ScxClusterView {
         executor_running: bool,
         current_job_id: Option<String>,
         timestamp_ms: u64,
+        cpu_cores: u32,
     ) {
         self.snapshots.insert(
             node_id,
@@ -54,6 +57,7 @@ impl ScxClusterView {
                 rss_bytes,
                 executor_running,
                 current_job_id,
+                cpu_cores,
             },
         );
         self.updated_at.insert(node_id, timestamp_ms);
@@ -98,7 +102,7 @@ mod tests {
             ..Default::default()
         };
 
-        view.update(1, Some(snap), 0.0, 1024 * 1024 * 512, false, None, 1000);
+        view.update(1, Some(snap), 0.0, 1024 * 1024 * 512, false, None, 1000, 0);
         assert!(view.has_node(1));
         assert!(!view.has_node(2));
         assert_eq!(view.node_count(), 1);
@@ -108,7 +112,7 @@ mod tests {
     #[test]
     fn test_staleness() {
         let mut view = ScxClusterView::new();
-        view.update(0, None, 0.0, 0, false, None, 1000);
+        view.update(0, None, 0.0, 0, false, None, 1000, 0);
 
         assert!(!view.is_stale(0, 2000, 5000)); // 1s old, threshold 5s
         assert!(view.is_stale(0, 7000, 5000));  // 6s old, threshold 5s
@@ -118,9 +122,9 @@ mod tests {
     #[test]
     fn test_busy_count() {
         let mut view = ScxClusterView::new();
-        view.update(0, None, 0.0, 0, true, Some("job_1".into()), 1000);
-        view.update(1, None, 0.0, 0, false, None, 1000);
-        view.update(2, None, 0.0, 0, true, Some("job_2".into()), 1000);
+        view.update(0, None, 0.0, 0, true, Some("job_1".into()), 1000, 0);
+        view.update(1, None, 0.0, 0, false, None, 1000, 0);
+        view.update(2, None, 0.0, 0, true, Some("job_2".into()), 1000, 0);
         assert_eq!(view.busy_node_count(), 2);
     }
 }

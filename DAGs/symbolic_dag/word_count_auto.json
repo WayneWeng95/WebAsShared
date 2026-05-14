@@ -1,0 +1,79 @@
+{
+  "_comment": "SymbolicDag: word count with auto-assigned reduction phase.",
+  "_comment2": "Input, distribute, and map nodes are pinned to their host (multi-output",
+  "_comment3": "Func nodes cannot be auto-placed without an explicit output_slot per slot).",
+  "_comment4": "The aggregation, reduce, and save nodes have node_id omitted — the placer",
+  "_comment5": "assigns them based on live CPU-core headroom from sched_ext.",
+  "shm_path_prefix": "/dev/shm/rdma_wc_auto",
+  "log_level": "info",
+  "transfer": true,
+  "total_nodes": 2,
+  "shared_inputs": [
+    { "path": "TestData/corpus_large.txt", "source_node": 0 }
+  ],
+  "nodes": [
+    {
+      "id": "load_0", "node_id": 0, "deps": [],
+      "kind": { "Input": { "path": "TestData/corpus_large.txt", "slot": 0, "prefetch": true } }
+    },
+    {
+      "id": "load_1", "node_id": 1, "deps": [],
+      "kind": { "Input": { "path": "TestData/corpus_large.txt", "slot": 0, "prefetch": true } }
+    },
+    {
+      "id": "distribute_0", "node_id": 0, "deps": ["load_0"],
+      "kind": { "Func": { "func": "wc_distribute", "arg": 10, "arg2": 10 } }
+    },
+    {
+      "id": "distribute_1", "node_id": 1, "deps": ["load_1"],
+      "kind": { "Func": { "func": "wc_distribute", "arg": 10, "arg2": 10 } }
+    },
+    { "id": "map_0_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 10, "arg2": 110 } } },
+    { "id": "map_1_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 11, "arg2": 111 } } },
+    { "id": "map_2_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 12, "arg2": 112 } } },
+    { "id": "map_3_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 13, "arg2": 113 } } },
+    { "id": "map_4_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 14, "arg2": 114 } } },
+    { "id": "map_5_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 15, "arg2": 115 } } },
+    { "id": "map_6_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 16, "arg2": 116 } } },
+    { "id": "map_7_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 17, "arg2": 117 } } },
+    { "id": "map_8_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 18, "arg2": 118 } } },
+    { "id": "map_9_n0", "node_id": 0, "deps": ["distribute_0"], "kind": { "Func": { "func": "wc_map", "arg": 19, "arg2": 119 } } },
+    { "id": "map_0_n1", "node_id": 1, "output_slot": 110, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 10, "arg2": 110 } } },
+    { "id": "map_1_n1", "node_id": 1, "output_slot": 111, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 11, "arg2": 111 } } },
+    { "id": "map_2_n1", "node_id": 1, "output_slot": 112, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 12, "arg2": 112 } } },
+    { "id": "map_3_n1", "node_id": 1, "output_slot": 113, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 13, "arg2": 113 } } },
+    { "id": "map_4_n1", "node_id": 1, "output_slot": 114, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 14, "arg2": 114 } } },
+    { "id": "map_5_n1", "node_id": 1, "output_slot": 115, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 15, "arg2": 115 } } },
+    { "id": "map_6_n1", "node_id": 1, "output_slot": 116, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 16, "arg2": 116 } } },
+    { "id": "map_7_n1", "node_id": 1, "output_slot": 117, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 17, "arg2": 117 } } },
+    { "id": "map_8_n1", "node_id": 1, "output_slot": 118, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 18, "arg2": 118 } } },
+    { "id": "map_9_n1", "node_id": 1, "output_slot": 119, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "arg": 19, "arg2": 119 } } },
+    {
+      "id": "aggregate",
+      "output_slot": 200,
+      "deps": ["map_0_n0","map_1_n0","map_2_n0","map_3_n0","map_4_n0",
+               "map_5_n0","map_6_n0","map_7_n0","map_8_n0","map_9_n0"],
+      "kind": { "Aggregate": { "upstream": [110,111,112,113,114,115,116,117,118,119], "downstream": 200 } }
+    },
+    {
+      "id": "aggregate_local",
+      "output_slot": 200,
+      "deps": ["map_0_n1","map_1_n1","map_2_n1","map_3_n1","map_4_n1",
+               "map_5_n1","map_6_n1","map_7_n1","map_8_n1","map_9_n1"],
+      "kind": { "Aggregate": { "upstream": [110,111,112,113,114,115,116,117,118,119], "downstream": 200 } }
+    },
+    {
+      "id": "aggregate_global",
+      "deps": ["aggregate", "aggregate_local"],
+      "kind": { "Aggregate": { "upstream_nodes": ["aggregate", "aggregate_local"], "downstream": 300 } }
+    },
+    {
+      "id": "reduce", "output_slot": 400, "deps": ["aggregate_global"],
+      "kind": { "Func": { "func": "wc_reduce", "arg": 300 } }
+    },
+    {
+      "id": "save", "deps": ["reduce"],
+      "kind": { "Output": { "path": "TestOutput/rdma_word_count_auto_result.txt" } }
+    }
+  ]
+}

@@ -19,6 +19,11 @@ pub struct SymbolicDag {
     #[serde(default = "default_true")]
     pub transfer: bool,
     pub total_nodes: usize,
+    /// Optional hard cap on sandboxes per host.  `None` (default) means the
+    /// placer uses the auto-derived limit from CPU cores and busy %.
+    /// Set to `Some(n)` to override and cap at n regardless of core count.
+    #[serde(default)]
+    pub max_colocation: Option<usize>,
     #[serde(default)]
     pub shared_inputs: Vec<SharedInput>,
     pub nodes: Vec<SymbolicNode>,
@@ -27,6 +32,7 @@ pub struct SymbolicDag {
 fn default_true() -> bool {
     true
 }
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SharedInput {
@@ -45,7 +51,10 @@ pub struct SymbolicNode {
     pub id: String,
     #[serde(default)]
     pub deps: Vec<String>,
-    pub node_id: u32,
+    /// Target host. `None` means the placer auto-assigns based on cluster capacity.
+    /// Explicit `Some(id)` pins this node to that host (existing behaviour).
+    #[serde(default)]
+    pub node_id: Option<u32>,
     /// Required on Func/WasmVoid nodes that have cross-node consumers,
     /// since the Partitioner cannot auto-detect the output slot for those kinds.
     #[serde(default)]

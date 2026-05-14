@@ -19,6 +19,8 @@ pub struct NodeMetrics {
     pub executor_running: bool,
     pub current_job_id: Option<String>,
     pub job_elapsed_ms: Option<u64>,
+    /// Logical CPU count visible to this process (respects cgroup quotas).
+    pub cpu_cores: u32,
     /// SCX sched_ext scheduler stats (None if SCX is not running or disabled).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scx: Option<ScxNodeSnapshot>,
@@ -73,6 +75,10 @@ impl MetricsCollector {
 
         let scx = self.scx_client.as_ref().and_then(|c| c.fetch());
 
+        let cpu_cores = std::thread::available_parallelism()
+            .map(|n| n.get() as u32)
+            .unwrap_or(0);
+
         NodeMetrics {
             node_id: self.node_id,
             timestamp_ms,
@@ -82,6 +88,7 @@ impl MetricsCollector {
             executor_running,
             current_job_id: current_job_id.map(|s| s.to_string()),
             job_elapsed_ms,
+            cpu_cores,
             scx,
         }
     }

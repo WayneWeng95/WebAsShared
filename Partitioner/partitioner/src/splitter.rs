@@ -2,6 +2,7 @@ use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use crate::placer::{assign_nodes, PlacementHints};
 use crate::slot::{collect_slots, output_slot};
 use crate::symbolic_dag::{SymbolicDag, SymbolicNode};
 
@@ -14,19 +15,37 @@ struct CrossEdge {
 
 /// Partition a SymbolicDag into a ClusterDag-compatible JSON value.
 ///
+/// `hints` provides optional per-host capacity weights (from `cluster_capacity`)
+/// for auto-assigning nodes whose `node_id` is `None`.  Pass `None` to use
+/// uniform distribution across all hosts.
+///
 /// The output has the same shape as a ClusterDag (shm_path_prefix, transfer,
 /// node_dags, shared_inputs, …) and can be fed directly to
 /// `dag_transform::transform_cluster_dag` and `ClusterDag::from_json`.
-pub fn partition(dag: &SymbolicDag) -> Result<Value> {
+pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Value> {
+    // ── 0. Auto-assign node_ids for nodes that don't have one ─────────────────
+    // Clone so we don't mutate the caller's SymbolicDag.
+    let mut nodes: Vec<SymbolicNode> = dag.nodes.clone();
+    let empty_hints = PlacementHints::default();
+    assign_nodes(
+        &mut nodes,
+        dag.total_nodes,
+        hints.unwrap_or(&empty_hints),
+        dag.max_colocation,
+    );
+
     // ── 1. Validate ──────────────────────────────────────────────────────────
 
-    let id_set: HashSet<&str> = dag.nodes.iter().map(|n| n.id.as_str()).collect();
+    let id_set: HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
 
-    for node in &dag.nodes {
-        if node.node_id as usize >= dag.total_nodes {
+    for node in &nodes {
+        let nid = node.node_id.ok_or_else(|| {
+            anyhow!("node '{}' was not assigned a node_id (placer bug)", node.id)
+        })?;
+        if nid as usize >= dag.total_nodes {
             bail!(
                 "node '{}' has node_id {} but total_nodes is {}",
-                node.id, node.node_id, dag.total_nodes
+                node.id, nid, dag.total_nodes
             );
         }
         for dep in &node.deps {
@@ -39,10 +58,10 @@ pub fn partition(dag: &SymbolicDag) -> Result<Value> {
     // ── 2. Build id → node and id → output-slot maps ─────────────────────────
 
     let id_to_node: HashMap<&str, &SymbolicNode> =
-        dag.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+        nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
     let mut id_to_slot: HashMap<&str, u32> = HashMap::new();
-    for node in &dag.nodes {
+    for node in &nodes {
         let slot = node.output_slot.or_else(|| output_slot(&node.kind));
         if let Some(s) = slot {
             id_to_slot.insert(node.id.as_str(), s);
@@ -52,7 +71,7 @@ pub fn partition(dag: &SymbolicDag) -> Result<Value> {
     // ── 3. Global slot scan → next free slot ─────────────────────────────────
 
     let mut all_slots: BTreeSet<u32> = BTreeSet::new();
-    for node in &dag.nodes {
+    for node in &nodes {
         collect_slots(&node.kind, &mut all_slots);
     }
     let mut next_slot: u32 = all_slots.iter().last().copied().unwrap_or(0) + 1;
@@ -62,14 +81,16 @@ pub fn partition(dag: &SymbolicDag) -> Result<Value> {
 
     let mut cross_edges: HashMap<(String, u32), CrossEdge> = HashMap::new();
 
-    for node in &dag.nodes {
+    for node in &nodes {
+        let node_machine = node.node_id.unwrap(); // guaranteed by placer
         for dep_id in &node.deps {
             let dep_node = id_to_node[dep_id.as_str()];
-            if dep_node.node_id == node.node_id {
+            let dep_machine = dep_node.node_id.unwrap();
+            if dep_machine == node_machine {
                 continue; // same machine
             }
 
-            let key = (dep_id.clone(), node.node_id);
+            let key = (dep_id.clone(), node_machine);
             if cross_edges.contains_key(&key) {
                 continue;
             }
@@ -97,9 +118,9 @@ pub fn partition(dag: &SymbolicDag) -> Result<Value> {
             cross_edges.insert(
                 key,
                 CrossEdge {
-                    src_machine: dep_node.node_id,
+                    src_machine: dep_machine,
                     src_slot,
-                    dest_machine: node.node_id,
+                    dest_machine: node_machine,
                     recv_slot,
                 },
             );
@@ -125,14 +146,15 @@ pub fn partition(dag: &SymbolicDag) -> Result<Value> {
     }
 
     // 5b. Original symbolic nodes — rewrite cross-node deps and resolve upstream_nodes.
-    for sym_node in &dag.nodes {
+    for sym_node in &nodes {
+        let sym_machine = sym_node.node_id.unwrap();
         let rewritten_deps: Vec<String> = sym_node
             .deps
             .iter()
             .map(|dep_id| {
                 let dep_node = id_to_node[dep_id.as_str()];
-                if dep_node.node_id != sym_node.node_id {
-                    format!("rr_{}_from_{}", dep_id, dep_node.node_id)
+                if dep_node.node_id.unwrap() != sym_machine {
+                    format!("rr_{}_from_{}", dep_id, dep_node.node_id.unwrap())
                 } else {
                     dep_id.clone()
                 }
@@ -141,10 +163,11 @@ pub fn partition(dag: &SymbolicDag) -> Result<Value> {
 
         let kind = resolve_upstream_nodes(
             &sym_node.kind,
-            sym_node.node_id,
+            sym_machine,
             &id_to_slot,
             &cross_edges,
         )?;
+        let kind = translate_func_kind(kind);
 
         let mut obj = serde_json::Map::new();
         obj.insert("id".into(), json!(sym_node.id));
@@ -155,7 +178,7 @@ pub fn partition(dag: &SymbolicDag) -> Result<Value> {
         }
 
         machine_nodes
-            .get_mut(&sym_node.node_id)
+            .get_mut(&sym_machine)
             .unwrap()
             .push(Value::Object(obj));
     }
@@ -211,6 +234,21 @@ pub fn partition(dag: &SymbolicDag) -> Result<Value> {
     out.insert("node_dags".into(), Value::Object(node_dags));
 
     Ok(Value::Object(out))
+}
+
+/// Translate `{ "Func": { "func": F, "arg": A, "arg2": B } }` to
+/// `{ "WasmVoid": { "func": F, "arg": A } }`.
+///
+/// `arg2` in the SymbolicDag is the output slot used only for cross-node
+/// routing during partitioning. The executor does not know about it.
+/// All other kind variants are returned unchanged.
+fn translate_func_kind(kind: Value) -> Value {
+    let Some(func_obj) = kind.get("Func").and_then(|v| v.as_object()) else {
+        return kind;
+    };
+    let func = func_obj.get("func").cloned().unwrap_or(Value::Null);
+    let arg  = func_obj.get("arg").cloned().unwrap_or(Value::Null);
+    json!({ "WasmVoid": { "func": func, "arg": arg } })
 }
 
 /// Rewrite `upstream_nodes: ["A", "B"]` inside routing-node kind JSON to
@@ -294,7 +332,7 @@ mod tests {
     #[test]
     fn partition_word_count() {
         let dag = SymbolicDag::from_json(WORD_COUNT_SYMBOLIC).expect("parse");
-        let out = partition(&dag).expect("partition");
+        let out = partition(&dag, None).expect("partition");
 
         // Both machines must be present.
         let node_dags = out["node_dags"].as_object().unwrap();

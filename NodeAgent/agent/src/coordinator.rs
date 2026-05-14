@@ -12,6 +12,7 @@ use connect::rdma::exchange::QpInfo;
 use connect::rdma::memory_region::MemoryRegion;
 use connect::rdma::queue_pair::QueuePair;
 use scheduler::ScxClusterView;
+use partitioner::{PlacementHints, SymbolicDag};
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::{TcpListener, TcpStream};
@@ -103,6 +104,7 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
                     m.executor_running,
                     m.current_job_id.clone(),
                     m.timestamp_ms,
+                    m.cpu_cores,
                 );
             }
         }
@@ -193,7 +195,16 @@ fn handle_submit(
     let payload: SubmitJobPayload =
         serde_json::from_value(msg.payload).context("parse SubmitJob payload")?;
 
-    let cluster_dag = ClusterDag::from_json(&payload.cluster_dag_json)?;
+    // Snapshot capacity before acquiring any further locks.
+    let placement_hints: PlacementHints = {
+        let s = state.lock().unwrap();
+        PlacementHints {
+            capacity: scheduler::cluster_capacity(&s.scx_view),
+            host_limit: scheduler::host_limits(&s.scx_view),
+        }
+    };
+
+    let cluster_dag = resolve_dag(&payload.cluster_dag_json, &placement_hints)?;
 
     let job_id = format!("job_{}", chrono_simple_id());
 
@@ -411,6 +422,7 @@ fn collect_worker_results(
                                     m.executor_running,
                                     m.current_job_id.clone(),
                                     m.timestamp_ms,
+                                    m.cpu_cores,
                                 );
                                 let _ = metrics::append_metrics_log(&config.metrics.log_path, &m);
                             }
@@ -550,6 +562,34 @@ fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMe
     }
 }
 
+/// Accept either a pre-partitioned ClusterDag or a raw SymbolicDag.
+///
+/// Detection is by key presence:
+/// - `node_dags` present → already a ClusterDag, use as-is.
+/// - `nodes` present     → SymbolicDag; partition it server-side using live
+///                         capacity hints so the placer can colocate sandboxes
+///                         on the least-loaded hosts.
+fn resolve_dag(dag_json: &str, capacity: &PlacementHints) -> Result<ClusterDag> {
+    let probe: serde_json::Value =
+        serde_json::from_str(dag_json).context("parse submitted DAG JSON")?;
+
+    if probe.get("node_dags").is_some() {
+        // Already partitioned.
+        return ClusterDag::from_json(dag_json);
+    }
+
+    if probe.get("nodes").is_some() {
+        let symbolic = SymbolicDag::from_json(dag_json)?;
+        let hints = if capacity.capacity.is_empty() { None } else { Some(capacity) };
+        let cluster_value = partitioner::partition(&symbolic, hints)
+            .context("partition SymbolicDag")?;
+        let cluster_json = serde_json::to_string(&cluster_value)?;
+        return ClusterDag::from_json(&cluster_json);
+    }
+
+    bail!("submitted JSON is neither a ClusterDag (has node_dags) nor a SymbolicDag (has nodes)")
+}
+
 // ── RDMA port / GID constants (same as the Executor mesh) ────────────────────
 const RDMA_PORT: u8 = 2;
 const GID_IDX:   u8 = 2;
@@ -686,8 +726,8 @@ fn stage_shared_inputs_rdma(
         }
     }
 
-    // Transition each coordinator QP to RTR → RTS, then RDMA-WRITE the file
-    // data directly into each worker's receive buffer.
+    // Transition each coordinator QP to RTR → RTS, then post all RDMA WRITEs
+    // before polling — the HCA executes them concurrently across workers.
     for &id in &remote_ids {
         let accept = &accepts[&id];
         let mut peer_gid = [0u8; 16];
@@ -696,10 +736,13 @@ fn stage_shared_inputs_rdma(
         let (qp, psn) = qps.get_mut(&id).unwrap();
         qp.to_rtr(&peer_info, RDMA_PORT, GID_IDX)?;
         qp.to_rts(*psn)?;
-
-        // RDMA WRITE: push file data into the worker's receive buffer.
         println!("[coordinator] RDMA WRITE → worker {} ({} bytes)", id, buf.len());
         qp.post_rdma_write(&mr, buf.len() as u32, accept.addr, accept.rkey)?;
+    }
+
+    // Poll completions — all writes are in flight simultaneously.
+    for &id in &remote_ids {
+        let (qp, _) = &qps[&id];
         qp.poll_one_blocking()
             .with_context(|| format!("RDMA WRITE to worker {} failed", id))?;
         println!("[coordinator] RDMA WRITE to worker {} complete", id);

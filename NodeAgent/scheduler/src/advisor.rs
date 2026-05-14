@@ -5,6 +5,7 @@
 
 use crate::scx_cluster::ScxClusterView;
 use node_agent_common as common;
+use std::collections::HashMap;
 
 /// Score all nodes in the cluster view.
 /// Returns a list of (node_id, score) sorted by score ascending (best first).
@@ -77,6 +78,51 @@ pub fn score_nodes(view: &ScxClusterView) -> Vec<(u32, f64)> {
     scores
 }
 
+/// Return per-host sandbox colocation limits derived from CPU core headroom.
+///
+/// Formula: `max(1, floor(cpu_cores × (1 − cpu_busy / 100)))`.
+/// Uses the more precise SCX `cpu_busy` when available, falls back to the
+/// /proc-based `cpu_usage_pct`. Returns 1 when core count is unknown.
+pub fn host_limits(view: &ScxClusterView) -> HashMap<u32, usize> {
+    view.snapshots
+        .iter()
+        .map(|(&id, status)| {
+            let cores = status.cpu_cores as f64;
+            if cores == 0.0 {
+                return (id, 1usize);
+            }
+            let busy_pct = status
+                .scx
+                .as_ref()
+                .map(|s| s.cpu_busy)
+                .unwrap_or(status.cpu_usage_pct as f64);
+            let free = (1.0 - busy_pct / 100.0).clamp(0.0, 1.0);
+            let limit = (cores * free).floor() as usize;
+            (id, limit.max(1))
+        })
+        .collect()
+}
+
+/// Return per-host capacity weights normalized so they sum to 1.0.
+///
+/// Capacity is `1.0 - load_score`, so 1.0 means fully idle and 0.0 means
+/// maxed out. A small floor (0.05) ensures even a loaded host gets some weight
+/// so the placer can still spill to it if necessary.
+///
+/// Returns an empty map when the cluster view has no data.
+pub fn cluster_capacity(view: &ScxClusterView) -> HashMap<u32, f64> {
+    let scores = score_nodes(view);
+    if scores.is_empty() {
+        return HashMap::new();
+    }
+    let raw: Vec<(u32, f64)> = scores
+        .iter()
+        .map(|&(id, score)| (id, (1.0 - score).max(0.05)))
+        .collect();
+    let total: f64 = raw.iter().map(|(_, c)| c).sum();
+    raw.into_iter().map(|(id, c)| (id, c / total)).collect()
+}
+
 /// Select the best N node IDs for placement (least loaded first).
 pub fn best_nodes(view: &ScxClusterView, n: usize) -> Vec<u32> {
     score_nodes(view)
@@ -109,13 +155,13 @@ mod tests {
                 ..Default::default()
             }),
             0.0,
-            8 * 1024 * 1024 * 1024, // 8 GiB
+            8 * 1024 * 1024 * 1024,
             true,
             Some("job_123".into()),
             1000,
+            0,
         );
 
-        // Node 1: lightly loaded, idle, low memory
         let mut numa1 = BTreeMap::new();
         numa1.insert(0, ScxNumaStats { load: 20.0, imbal: 1.0 });
         view.update(
@@ -128,10 +174,11 @@ mod tests {
                 ..Default::default()
             }),
             0.0,
-            512 * 1024 * 1024, // 512 MiB
+            512 * 1024 * 1024,
             false,
             None,
             1000,
+            0,
         );
 
         let scores = score_nodes(&view);
@@ -146,8 +193,8 @@ mod tests {
         let mut view = ScxClusterView::new();
 
         // Both nodes have identical CPU/memory, but node 0 is running a job.
-        view.update(0, None, 0.0, 1024 * 1024 * 100, true, Some("job_1".into()), 1000);
-        view.update(1, None, 0.0, 1024 * 1024 * 100, false, None, 1000);
+        view.update(0, None, 0.0, 1024 * 1024 * 100, true, Some("job_1".into()), 1000, 0);
+        view.update(1, None, 0.0, 1024 * 1024 * 100, false, None, 1000, 0);
 
         let scores = score_nodes(&view);
         assert_eq!(scores[0].0, 1, "idle node should be preferred");
@@ -162,9 +209,8 @@ mod tests {
         let mut view = ScxClusterView::new();
 
         // Node 0: high memory usage
-        view.update(0, None, 0.0, 16 * 1024 * 1024 * 1024, false, None, 1000);
-        // Node 1: low memory usage
-        view.update(1, None, 0.0, 1 * 1024 * 1024 * 1024, false, None, 1000);
+        view.update(0, None, 0.0, 16 * 1024 * 1024 * 1024, false, None, 1000, 0);
+        view.update(1, None, 0.0, 1 * 1024 * 1024 * 1024, false, None, 1000, 0);
 
         let scores = score_nodes(&view);
         assert_eq!(scores[0].0, 1, "low-memory node preferred");
@@ -174,9 +220,9 @@ mod tests {
     #[test]
     fn test_best_nodes() {
         let mut view = ScxClusterView::new();
-        view.update(0, Some(ScxNodeSnapshot { cpu_busy: 90.0, ..Default::default() }), 0.0, 4_000_000_000, true, Some("j".into()), 1000);
-        view.update(1, Some(ScxNodeSnapshot { cpu_busy: 10.0, ..Default::default() }), 0.0, 500_000_000, false, None, 1000);
-        view.update(2, Some(ScxNodeSnapshot { cpu_busy: 50.0, ..Default::default() }), 0.0, 2_000_000_000, false, None, 1000);
+        view.update(0, Some(ScxNodeSnapshot { cpu_busy: 90.0, ..Default::default() }), 0.0, 4_000_000_000, true, Some("j".into()), 1000, 0);
+        view.update(1, Some(ScxNodeSnapshot { cpu_busy: 10.0, ..Default::default() }), 0.0, 500_000_000, false, None, 1000, 0);
+        view.update(2, Some(ScxNodeSnapshot { cpu_busy: 50.0, ..Default::default() }), 0.0, 2_000_000_000, false, None, 1000, 0);
 
         let best = best_nodes(&view, 2);
         assert_eq!(best.len(), 2);
@@ -193,12 +239,134 @@ mod tests {
 
     #[test]
     fn test_no_scx_still_scores() {
-        // Even without SCX data, memory and job state should be scored.
         let mut view = ScxClusterView::new();
-        view.update(0, None, 0.0, 8_000_000_000, true, Some("job".into()), 1000);
-        view.update(1, None, 0.0, 1_000_000_000, false, None, 1000);
+        view.update(0, None, 0.0, 8_000_000_000, true, Some("job".into()), 1000, 0);
+        view.update(1, None, 0.0, 1_000_000_000, false, None, 1000, 0);
 
         let scores = score_nodes(&view);
         assert_eq!(scores[0].0, 1, "idle low-memory node preferred even without SCX");
+    }
+
+    // ── host_limits tests ──────────────────────────────────────────────────────
+
+    #[test]
+    fn test_host_limits_scx_cpu_busy() {
+        // Uses SCX cpu_busy when available.
+        // Node 0: 8 cores, 25 % busy → floor(8 × 0.75) = 6
+        // Node 1: 4 cores, 80 % busy → floor(4 × 0.20) = 0 → clamped to 1
+        let mut view = ScxClusterView::new();
+        view.update(
+            0,
+            Some(ScxNodeSnapshot { cpu_busy: 25.0, ..Default::default() }),
+            0.0, 0, false, None, 1000, 8,
+        );
+        view.update(
+            1,
+            Some(ScxNodeSnapshot { cpu_busy: 80.0, ..Default::default() }),
+            0.0, 0, false, None, 1000, 4,
+        );
+
+        let limits = host_limits(&view);
+        assert_eq!(limits[&0], 6, "8 cores @ 25% busy → 6 free");
+        assert_eq!(limits[&1], 1, "4 cores @ 80% busy → 0 free, clamped to 1");
+    }
+
+    #[test]
+    fn test_host_limits_falls_back_to_proc_cpu() {
+        // No SCX → uses cpu_usage_pct.
+        // 16 cores, 50 % → floor(16 × 0.5) = 8
+        let mut view = ScxClusterView::new();
+        view.update(0, None, 50.0, 0, false, None, 1000, 16);
+
+        let limits = host_limits(&view);
+        assert_eq!(limits[&0], 8, "16 cores @ 50% proc-cpu → 8 free");
+    }
+
+    #[test]
+    fn test_host_limits_unknown_cores_returns_one() {
+        // cpu_cores = 0 (e.g. worker hasn't reported yet) → conservative limit of 1.
+        let mut view = ScxClusterView::new();
+        view.update(
+            0,
+            Some(ScxNodeSnapshot { cpu_busy: 10.0, ..Default::default() }),
+            0.0, 0, false, None, 1000, 0,
+        );
+
+        let limits = host_limits(&view);
+        assert_eq!(limits[&0], 1, "unknown core count → safe limit of 1");
+    }
+
+    #[test]
+    fn test_host_limits_fully_idle() {
+        // 0 % busy — all cores available.
+        let mut view = ScxClusterView::new();
+        view.update(
+            0,
+            Some(ScxNodeSnapshot { cpu_busy: 0.0, ..Default::default() }),
+            0.0, 0, false, None, 1000, 12,
+        );
+
+        let limits = host_limits(&view);
+        assert_eq!(limits[&0], 12, "12 cores @ 0% busy → all 12 available");
+    }
+
+    #[test]
+    fn test_host_limits_fully_saturated() {
+        // 100 % busy → 0 free cores → clamped to 1 (never block all placement).
+        let mut view = ScxClusterView::new();
+        view.update(
+            0,
+            Some(ScxNodeSnapshot { cpu_busy: 100.0, ..Default::default() }),
+            0.0, 0, false, None, 1000, 8,
+        );
+
+        let limits = host_limits(&view);
+        assert_eq!(limits[&0], 1, "saturated host still gets limit=1");
+    }
+
+    #[test]
+    fn test_host_limits_drives_placement() {
+        // Integration: build PlacementHints from advisor functions and feed to the
+        // partitioner's assign_nodes — verify that the idle host absorbs more work.
+        //
+        // Node 0: 8 cores, 10 % busy → limit 7
+        // Node 1: 4 cores, 90 % busy → limit 0, clamped to 1
+        let mut view = ScxClusterView::new();
+        view.update(
+            0,
+            Some(ScxNodeSnapshot { cpu_busy: 10.0, ..Default::default() }),
+            0.0, 500_000_000, false, None, 1000, 8,
+        );
+        view.update(
+            1,
+            Some(ScxNodeSnapshot { cpu_busy: 90.0, ..Default::default() }),
+            0.0, 4_000_000_000, false, None, 1000, 4,
+        );
+
+        let hints = partitioner::PlacementHints {
+            capacity: cluster_capacity(&view),
+            host_limit: host_limits(&view),
+        };
+
+        // 5 auto-nodes; host 0 can take up to 7, host 1 up to 1.
+        let mut nodes: Vec<partitioner::SymbolicNode> = (0..5)
+            .map(|i| partitioner::SymbolicNode {
+                id: format!("n{}", i),
+                deps: vec![],
+                node_id: None,
+                output_slot: None,
+                barrier_group: None,
+                kind: serde_json::json!({"Func": {"slot": i}}),
+            })
+            .collect();
+
+        partitioner::placer::assign_nodes(&mut nodes, 2, &hints, None);
+
+        let on_0 = nodes.iter().filter(|n| n.node_id == Some(0)).count();
+        let on_1 = nodes.iter().filter(|n| n.node_id == Some(1)).count();
+
+        assert_eq!(on_0 + on_1, 5, "all nodes must be assigned");
+        assert!(on_1 <= 1, "busy host (limit=1) must not exceed its limit, got {}", on_1);
+        assert!(on_0 >= 4, "idle host should absorb most nodes, got {}", on_0);
     }
 }

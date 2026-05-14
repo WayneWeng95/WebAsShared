@@ -219,7 +219,7 @@ fn cmd_submit(args: &[String]) -> Result<()> {
     let cluster_dag_raw = if raw_json.contains("\"total_nodes\"") {
         println!("[submit] detected SymbolicDag — running Partitioner");
         let sym = partitioner::SymbolicDag::from_json(&raw_json)?;
-        let partitioned = partitioner::partition(&sym)?;
+        let partitioned = partitioner::partition(&sym, None)?;
         serde_json::to_string(&partitioned).context("serialize partitioned DAG")?
     } else {
         raw_json
