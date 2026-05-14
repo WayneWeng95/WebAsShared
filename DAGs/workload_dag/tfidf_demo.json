@@ -47,7 +47,7 @@
     {
       "id": "save",
       "deps": ["reduce"],
-      "kind": { "Output": { "path": "/tmp/tfidf_result.txt" } }
+      "kind": { "Output": { "path": "TestOutput/tfidf_result.txt" } }
     }
 
   ]

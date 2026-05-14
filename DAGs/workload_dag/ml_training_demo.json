@@ -44,7 +44,7 @@
       "kind": { "Func": { "func": "ml_validate", "arg": 300 } } },
 
     { "id": "save", "deps": ["validate"],
-      "kind": { "Output": { "path": "/tmp/ml_training_result.txt" } } }
+      "kind": { "Output": { "path": "TestOutput/ml_training_result.txt" } } }
 
   ]
 }

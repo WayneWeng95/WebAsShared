@@ -73,7 +73,7 @@
       },
       {
         "id": "save", "deps": ["reduce"],
-        "kind": { "Output": { "path": "/tmp/rdma_word_count_medium_result.txt" } }
+        "kind": { "Output": { "path": "TestOutput/rdma_word_count_medium_result.txt" } }
       }
     ]
   }

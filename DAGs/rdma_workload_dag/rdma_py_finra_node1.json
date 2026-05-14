@@ -77,7 +77,7 @@
     {
       "id": "save",
       "deps": ["merge"],
-      "kind": { "Output": { "path": "/tmp/rdma_py_finra_result.txt", "slot": 1 } }
+      "kind": { "Output": { "path": "TestOutput/rdma_py_finra_result.txt", "slot": 1 } }
     }
 
   ]

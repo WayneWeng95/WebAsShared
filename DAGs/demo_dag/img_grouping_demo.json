@@ -43,9 +43,9 @@
       "deps": ["group"],
       "kind": { "Output": {
         "paths": [
-          "/tmp/img_grouping_out/gradient_processed.pgm",
-          "/tmp/img_grouping_out/checkerboard_processed.pgm",
-          "/tmp/img_grouping_out/rings_processed.pgm"
+          "TestOutput/img_grouping_out/gradient_processed.pgm",
+          "TestOutput/img_grouping_out/checkerboard_processed.pgm",
+          "TestOutput/img_grouping_out/rings_processed.pgm"
         ],
         "slot": 1
       }}

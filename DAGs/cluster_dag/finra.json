@@ -71,7 +71,7 @@
         "kind": { "Func": { "func": "finra_merge_results", "arg": 400 } } },
 
       { "id": "save", "deps": ["merge"],
-        "kind": { "Output": { "path": "/tmp/rdma_finra_result.txt" } } }
+        "kind": { "Output": { "path": "TestOutput/rdma_finra_result.txt" } } }
     ]
   }
 }

@@ -168,6 +168,7 @@ pub const IBV_SEND_SIGNALED: u32 = 1 << 1;
 
 // ibv_wr_opcode
 pub const IBV_WR_RDMA_WRITE:           u32 = 0;
+pub const IBV_WR_RDMA_READ:            u32 = 1;
 pub const IBV_WR_ATOMIC_CMP_AND_SWP:   u32 = 5;
 pub const IBV_WR_ATOMIC_FETCH_AND_ADD: u32 = 6;
 

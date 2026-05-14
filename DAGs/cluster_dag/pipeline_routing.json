@@ -111,9 +111,9 @@
         "deps": ["img_pipeline"],
         "kind": { "Output": {
           "paths": [
-            "/tmp/rdma_pipeline_routing_out/gradient_processed.pgm",
-            "/tmp/rdma_pipeline_routing_out/checkerboard_processed.pgm",
-            "/tmp/rdma_pipeline_routing_out/rings_processed.pgm"
+            "TestOutput/rdma_pipeline_routing_out/gradient_processed.pgm",
+            "TestOutput/rdma_pipeline_routing_out/checkerboard_processed.pgm",
+            "TestOutput/rdma_pipeline_routing_out/rings_processed.pgm"
           ],
           "slot": 1
         }}

@@ -48,6 +48,15 @@ pub enum MessageKind {
     StageFiles,
     // Worker -> Coordinator
     StageFilesAck,
+
+    // Coordinator -> Worker: offer RDMA MR for shared input files
+    InputShareOffer,
+    // Worker -> Coordinator: accept (send back worker QP info)
+    InputShareAccept,
+    // Coordinator -> Worker: QPs are in RTR/RTS, proceed with RDMA READ
+    InputShareGo,
+    // Worker -> Coordinator: RDMA READ complete, files written to disk
+    InputShareDone,
 }
 
 // ── Payload types ────────────────────────────────────────────────────────────
@@ -74,6 +83,9 @@ pub struct JobCompletedPayload {
     pub job_id: String,
     pub duration_ms: u64,
     pub stdout_tail: String,
+    /// Output files produced by the job, sent back to the coordinator.
+    #[serde(default)]
+    pub result_files: Vec<StagedFile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +149,48 @@ pub struct StagedFile {
     pub rel_path: String,
     #[serde(with = "serde_bytes_base64")]
     pub data: Vec<u8>,
+}
+
+/// One file entry inside an InputShareOffer: describes where in the flat MR the file lives.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputFileEntry {
+    pub path: String,
+    pub offset: u64,
+    pub len: u64,
+}
+
+/// Coordinator → Worker: expose the shared-input MR and coordinator QP info.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputShareOfferPayload {
+    pub job_id: String,
+    /// Coordinator's QP number.
+    pub qpn: u32,
+    /// Coordinator's initial packet sequence number.
+    pub psn: u32,
+    /// Coordinator's GID (16 bytes, JSON-encoded as an array of u8).
+    pub gid: Vec<u8>,
+    /// Coordinator's LID (0 for RoCE).
+    pub lid: u16,
+    /// Remote key of the coordinator's MR.
+    pub rkey: u32,
+    /// Base virtual address of the coordinator's MR.
+    pub addr: u64,
+    /// Total size of the MR (sum of all file lengths).
+    pub total_len: u64,
+    /// Per-file offset/length table into the flat MR.
+    pub files: Vec<InputFileEntry>,
+}
+
+/// Worker → Coordinator: reply with the worker's QP info so the coordinator
+/// can complete its QP handshake (INIT → RTR → RTS).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InputShareAcceptPayload {
+    pub job_id: String,
+    pub worker_id: u32,
+    pub qpn: u32,
+    pub psn: u32,
+    pub gid: Vec<u8>,
+    pub lid: u16,
 }
 
 /// Base64 serde shim so file bytes survive JSON transit without escaping issues.

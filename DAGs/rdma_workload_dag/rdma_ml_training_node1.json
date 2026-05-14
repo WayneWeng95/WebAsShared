@@ -49,7 +49,7 @@
       "kind": { "WasmVoid": { "func": "ml_validate", "arg": 400 } } },
 
     { "id": "save", "deps": ["validate"],
-      "kind": { "Output": { "path": "/tmp/rdma_ml_training_result.txt" } } }
+      "kind": { "Output": { "path": "TestOutput/rdma_ml_training_result.txt" } } }
 
   ]
 }

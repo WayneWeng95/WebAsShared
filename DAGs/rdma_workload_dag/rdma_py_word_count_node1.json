@@ -87,7 +87,7 @@
       "_comment": "─── Stage 8: save primary output (I/O slot 1) ───────────────────────────────",
       "id": "save",
       "deps": ["reduce"],
-      "kind": { "Output": { "path": "/tmp/rdma_py_word_count_result.txt", "slot": 1 } }
+      "kind": { "Output": { "path": "TestOutput/rdma_py_word_count_result.txt", "slot": 1 } }
     }
 
   ]

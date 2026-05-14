@@ -15,7 +15,7 @@
       "kind": { "WasmVoid": { "func": "barrier_verify", "arg": 0 } } },
 
     { "id": "save_basic", "deps": ["verify_basic"],
-      "kind": { "Output": { "path": "/tmp/barrier_test_basic.txt", "slot": 1 } } },
+      "kind": { "Output": { "path": "TestOutput/barrier_test_basic.txt", "slot": 1 } } },
 
     { "id": "mb0", "deps": [], "barrier_group": "multi",
       "kind": { "WasmVoid": { "func": "multi_barrier_worker", "arg": 0 } } },
@@ -30,6 +30,6 @@
       "kind": { "WasmVoid": { "func": "multi_barrier_verify", "arg": 0 } } },
 
     { "id": "save_multi", "deps": ["verify_multi"],
-      "kind": { "Output": { "path": "/tmp/barrier_test_multi.txt", "slot": 3 } } }
+      "kind": { "Output": { "path": "TestOutput/barrier_test_multi.txt", "slot": 3 } } }
   ]
 }

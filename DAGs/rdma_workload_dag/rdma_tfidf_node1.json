@@ -82,7 +82,7 @@
       "_comment": "─── Stage 8: flush OUTPUT_IO_SLOT to disk ───────────────────────────────────",
       "id": "save",
       "deps": ["reduce"],
-      "kind": { "Output": { "path": "/tmp/rdma_tfidf_result.txt" } }
+      "kind": { "Output": { "path": "TestOutput/rdma_tfidf_result.txt" } }
     }
 
   ]

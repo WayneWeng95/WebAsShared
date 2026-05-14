@@ -61,7 +61,7 @@
     {
       "id": "save",
       "deps": ["merge"],
-      "kind": { "Output": { "path": "/tmp/finra_result.txt" } }
+      "kind": { "Output": { "path": "TestOutput/finra_result.txt" } }
     }
 
   ]

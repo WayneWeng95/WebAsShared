@@ -7,8 +7,12 @@ use crate::file_staging;
 use crate::metrics;
 use crate::protocol::*;
 use anyhow::{bail, Context, Result};
+use connect::rdma::context::RdmaContext;
+use connect::rdma::exchange::QpInfo;
+use connect::rdma::memory_region::MemoryRegion;
+use connect::rdma::queue_pair::QueuePair;
 use scheduler::ScxClusterView;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::net::{TcpListener, TcpStream};
 use std::path::Path;
@@ -194,16 +198,28 @@ fn handle_submit(
     let job_id = format!("job_{}", chrono_simple_id());
 
     // Stage shared input files to workers before splitting and assigning jobs.
+    // Try RDMA first; fall back to TCP on error (e.g. no RDMA hardware).
     if !cluster_dag.shared_inputs.is_empty() {
-        let staging_payload = file_staging::prepare_payload(
-            &job_id,
+        let mut s = state.lock().unwrap();
+        let rdma_result = stage_shared_inputs_rdma(
+            &mut s.workers,
             config.node_id,
             &cluster_dag.shared_inputs,
-        )?;
-        if !staging_payload.files.is_empty() {
-            let mut s = state.lock().unwrap();
-            stage_shared_inputs(&mut s.workers, config.node_id, &staging_payload)?;
-            drop(s);
+            &job_id,
+        );
+        drop(s);
+        if let Err(e) = rdma_result {
+            println!("[coordinator] RDMA input staging unavailable ({:#}), falling back to TCP", e);
+            let staging_payload = file_staging::prepare_payload(
+                &job_id,
+                config.node_id,
+                &cluster_dag.shared_inputs,
+            )?;
+            if !staging_payload.files.is_empty() {
+                let mut s = state.lock().unwrap();
+                stage_shared_inputs(&mut s.workers, config.node_id, &staging_payload)?;
+                drop(s);
+            }
         }
     }
 
@@ -334,6 +350,15 @@ fn collect_worker_results(
                                 "[coordinator] worker {} completed job in {}ms",
                                 worker_id, p.duration_ms
                             );
+                            for f in &p.result_files {
+                                if let Some(dir) = std::path::Path::new(&f.rel_path).parent() {
+                                    std::fs::create_dir_all(dir).ok();
+                                }
+                                match std::fs::write(&f.rel_path, &f.data) {
+                                    Ok(_) => println!("[coordinator] result: {}", f.rel_path),
+                                    Err(e) => eprintln!("[coordinator] failed to write result '{}': {}", f.rel_path, e),
+                                }
+                            }
                             worker_durations.push((*worker_id, p.duration_ms));
                             summary_lines.push(format!(
                                 "worker {}: completed in {}ms",
@@ -523,6 +548,196 @@ fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMe
             println!("[coordinator] placement order: {:?} (best first)", best);
         }
     }
+}
+
+// ── RDMA port / GID constants (same as the Executor mesh) ────────────────────
+const RDMA_PORT: u8 = 2;
+const GID_IDX:   u8 = 2;
+
+/// Generate a random-ish packet sequence number (same logic as mesh::rand_psn).
+fn rand_psn() -> u32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0x4321)
+        & 0x00FF_FFFF
+}
+
+/// Stage shared input files to remote workers via RDMA READ.
+///
+/// Coordinator registers all input files in one flat MR, creates one RC QP per
+/// worker, exchanges QP metadata over the existing TCP control channel, then
+/// signals workers to RDMA-READ the data.  Returns `Err` if RDMA is
+/// unavailable (caller falls back to TCP StageFiles).
+fn stage_shared_inputs_rdma(
+    workers: &mut HashMap<u32, WorkerConn>,
+    own_node_id: u32,
+    shared_inputs: &[crate::cluster_dag::SharedInput],
+    job_id: &str,
+) -> Result<()> {
+    let remote_ids: Vec<u32> = workers
+        .keys()
+        .filter(|&&id| id != own_node_id)
+        .cloned()
+        .collect();
+    if remote_ids.is_empty() {
+        return Ok(());
+    }
+
+    // Read all files that are owned by this node into a flat buffer.
+    struct FileEntry { path: String, offset: usize, len: usize }
+    let mut entries: Vec<FileEntry> = Vec::new();
+    let mut flat: Vec<u8> = Vec::new();
+
+    for input in shared_inputs {
+        if input.source_node != own_node_id {
+            continue;
+        }
+        let data = std::fs::read(&input.path)
+            .with_context(|| format!("read shared input: {}", input.path))?;
+        let offset = flat.len();
+        let len = data.len();
+        flat.extend_from_slice(&data);
+        entries.push(FileEntry { path: input.path.clone(), offset, len });
+    }
+    if entries.is_empty() || flat.is_empty() {
+        return Ok(());
+    }
+    if flat.len() > u32::MAX as usize {
+        bail!("shared input total size {} exceeds 4 GiB RDMA READ limit", flat.len());
+    }
+
+    // Pin the buffer on the heap (Box<[u8]> address is stable).
+    let mut buf: Box<[u8]> = flat.into_boxed_slice();
+
+    // RDMA context + MR registration (errors here trigger TCP fallback).
+    let ctx = RdmaContext::new(None, 64)?;
+    let mr = MemoryRegion::register_external(&ctx, buf.as_mut_ptr(), buf.len())?;
+
+    let gid = ctx.query_gid(RDMA_PORT, GID_IDX as i32)?;
+    let port_attr = ctx.query_port(RDMA_PORT)?;
+
+    // Create one QP per worker and transition to INIT.
+    let mut qps: HashMap<u32, (QueuePair, u32)> = HashMap::new();
+    for &id in &remote_ids {
+        let qp = QueuePair::create(&ctx)?;
+        let psn = rand_psn();
+        qp.to_init(RDMA_PORT)?;
+        qps.insert(id, (qp, psn));
+    }
+
+    // Build the file-entry list for the offer payload.
+    let file_entries: Vec<InputFileEntry> = entries
+        .iter()
+        .map(|e| InputFileEntry {
+            path: e.path.clone(),
+            offset: e.offset as u64,
+            len: e.len as u64,
+        })
+        .collect();
+
+    // Send InputShareOffer to each worker.
+    for &id in &remote_ids {
+        let (qp, psn) = &qps[&id];
+        let offer = InputShareOfferPayload {
+            job_id: job_id.to_string(),
+            qpn: qp.qpn(),
+            psn: *psn,
+            gid: gid.raw.to_vec(),
+            lid: port_attr.lid,
+            rkey: mr.rkey(),
+            addr: mr.addr(),
+            total_len: buf.len() as u64,
+            files: file_entries.clone(),
+        };
+        if let Some(w) = workers.get_mut(&id) {
+            send_message(&mut w.stream, &make_message(MessageKind::InputShareOffer, &offer)?)
+                .with_context(|| format!("send InputShareOffer to worker {}", id))?;
+        }
+    }
+
+    println!("[coordinator] waiting for RDMA InputShareAccept from {} workers", remote_ids.len());
+
+    // Collect InputShareAccept from all workers.
+    let timeout = Duration::from_secs(30);
+    let start = Instant::now();
+    let mut accepts: HashMap<u32, InputShareAcceptPayload> = HashMap::new();
+
+    while accepts.len() < remote_ids.len() {
+        if start.elapsed() > timeout {
+            bail!("timeout waiting for InputShareAccept from {:?}",
+                  remote_ids.iter().filter(|id| !accepts.contains_key(id)).collect::<Vec<_>>());
+        }
+        for &id in &remote_ids {
+            if accepts.contains_key(&id) { continue; }
+            if let Some(w) = workers.get_mut(&id) {
+                w.stream.set_read_timeout(Some(Duration::from_millis(100))).ok();
+                match recv_message(&mut w.stream) {
+                    Ok(msg) if msg.kind == MessageKind::InputShareAccept => {
+                        let accept: InputShareAcceptPayload =
+                            serde_json::from_value(msg.payload).context("parse InputShareAccept")?;
+                        println!("[coordinator] worker {} accepted RDMA share", id);
+                        accepts.insert(id, accept);
+                    }
+                    Ok(_) | Err(_) => {}
+                }
+            }
+        }
+    }
+
+    // Transition each coordinator QP to RTR → RTS using the worker's QP info.
+    for &id in &remote_ids {
+        let accept = &accepts[&id];
+        let mut peer_gid = [0u8; 16];
+        peer_gid.copy_from_slice(&accept.gid);
+        let peer_info = QpInfo { qpn: accept.qpn, psn: accept.psn, gid: peer_gid, lid: accept.lid, rkey: 0, addr: 0, len: 0 };
+        let (qp, psn) = qps.get_mut(&id).unwrap();
+        qp.to_rtr(&peer_info, RDMA_PORT, GID_IDX)?;
+        qp.to_rts(*psn)?;
+    }
+
+    // Signal all workers to proceed with RDMA READ.
+    for &id in &remote_ids {
+        if let Some(w) = workers.get_mut(&id) {
+            send_message(
+                &mut w.stream,
+                &make_message(MessageKind::InputShareGo, &serde_json::json!({ "job_id": job_id }))?,
+            ).with_context(|| format!("send InputShareGo to worker {}", id))?;
+        }
+    }
+
+    println!("[coordinator] waiting for RDMA InputShareDone from {} workers", remote_ids.len());
+
+    // Wait for InputShareDone from all workers.
+    let start = Instant::now();
+    let mut done: HashSet<u32> = HashSet::new();
+
+    while done.len() < remote_ids.len() {
+        if start.elapsed() > timeout {
+            bail!("timeout waiting for InputShareDone from {:?}",
+                  remote_ids.iter().filter(|id| !done.contains(id)).collect::<Vec<_>>());
+        }
+        for &id in &remote_ids {
+            if done.contains(&id) { continue; }
+            if let Some(w) = workers.get_mut(&id) {
+                w.stream.set_read_timeout(Some(Duration::from_millis(100))).ok();
+                match recv_message(&mut w.stream) {
+                    Ok(msg) if msg.kind == MessageKind::InputShareDone => {
+                        println!("[coordinator] worker {} RDMA input share complete", id);
+                        done.insert(id);
+                    }
+                    Ok(_) | Err(_) => {}
+                }
+            }
+        }
+    }
+
+    println!("[coordinator] RDMA input staging complete ({} bytes across {} files)",
+             buf.len(), file_entries.len());
+
+    // buf, mr, qps all dropped here (MR deregistered after all READs are done).
+    Ok(())
 }
 
 /// Send staged files to all workers (except self) and wait for StageFilesAck.

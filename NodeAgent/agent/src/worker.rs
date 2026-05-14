@@ -6,6 +6,10 @@ use crate::executor::ExecutorHandle;
 use crate::metrics::{self, MetricsCollector};
 use crate::protocol::*;
 use anyhow::{Context, Result};
+use connect::rdma::context::RdmaContext;
+use connect::rdma::exchange::QpInfo;
+use connect::rdma::memory_region::MemoryRegion;
+use connect::rdma::queue_pair::QueuePair;
 use std::net::TcpStream;
 use std::path::Path;
 use std::thread;
@@ -42,6 +46,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
     };
     let mut current_executor: Option<ExecutorHandle> = None;
     let mut current_shm_path: Option<String> = None;
+    let mut current_dag_json: Option<String> = None;
 
     let status_interval = Duration::from_secs(config.metrics.status_print_interval_s);
     let mut last_status_print = Instant::now();
@@ -67,6 +72,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
 
                         // Extract shm_path from the DAG JSON for metrics.
                         current_shm_path = extract_shm_path(&payload.dag_json);
+                        current_dag_json = Some(payload.dag_json.clone());
 
                         // Launch executor.
                         let handle = ExecutorHandle::spawn(
@@ -107,6 +113,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                             let _ = exec.kill();
                             current_executor = None;
                             current_shm_path = None;
+                            current_dag_json = None;
                         }
                     }
 
@@ -133,6 +140,14 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                                 &serde_json::json!({ "job_id": p.job_id }),
                             )?,
                         )?;
+                    }
+
+                    MessageKind::InputShareOffer => {
+                        let offer: InputShareOfferPayload =
+                            serde_json::from_value(msg.payload)
+                                .context("parse InputShareOffer payload")?;
+                        recv_rdma_input_share(&mut stream, &offer, config.node_id)
+                            .context("RDMA input share")?;
                     }
 
                     _ => {
@@ -165,11 +180,13 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
             match exec.try_wait()? {
                 Some(result) => {
                     let job_id = exec.job_id.clone();
+                    let dag_json = current_dag_json.take().unwrap_or_default();
                     if result.success {
                         println!(
                             "[worker {}] job {} completed in {}ms",
                             config.node_id, job_id, result.duration_ms
                         );
+                        let result_files = collect_result_files(&dag_json, config.node_id);
                         send_message(
                             &mut stream,
                             &make_message(
@@ -178,6 +195,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                                     job_id,
                                     duration_ms: result.duration_ms,
                                     stdout_tail: result.stdout_tail,
+                                    result_files,
                                 },
                             )?,
                         )?;
@@ -200,6 +218,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                     }
                     current_executor = None;
                     current_shm_path = None;
+                    // current_dag_json already consumed by take() above
 
                     // Send idle metrics so the coordinator's snapshot is up-to-date.
                     let idle = collector.sample(None, false, None, None);
@@ -303,8 +322,157 @@ fn print_worker_status(node_id: u32, m: &metrics::NodeMetrics) {
     println!("{}", line);
 }
 
+// ── RDMA constants (mirror the Executor mesh values) ─────────────────────────
+const RDMA_PORT: u8 = 2;
+const GID_IDX:   u8 = 2;
+
+fn rand_psn() -> u32 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0x4321)
+        & 0x00FF_FFFF
+}
+
+/// Handle an RDMA input share offer from the coordinator.
+///
+/// 1. Creates a local RDMA context, QP, and receive-buffer MR.
+/// 2. Sends `InputShareAccept` with the local QP info.
+/// 3. Waits for `InputShareGo`.
+/// 4. Posts an RDMA READ to pull the file data from coordinator's MR.
+/// 5. Writes each file to its destination path on disk.
+/// 6. Sends `InputShareDone`.
+fn recv_rdma_input_share(
+    stream: &mut TcpStream,
+    offer: &InputShareOfferPayload,
+    node_id: u32,
+) -> anyhow::Result<()> {
+    let total = offer.total_len as usize;
+    if total > u32::MAX as usize {
+        anyhow::bail!("InputShareOffer total_len {} exceeds RDMA READ limit", total);
+    }
+
+    let ctx = RdmaContext::new(None, 64)?;
+    let gid = ctx.query_gid(RDMA_PORT, GID_IDX as i32)?;
+    let port_attr = ctx.query_port(RDMA_PORT)?;
+
+    // Allocate the receive buffer and register it.
+    let recv_mr = MemoryRegion::alloc_and_register(&ctx, total)?;
+
+    // Create QP and connect to coordinator's QP.
+    let qp = QueuePair::create(&ctx)?;
+    let psn = rand_psn();
+    qp.to_init(RDMA_PORT)?;
+
+    let mut coord_gid = [0u8; 16];
+    coord_gid.copy_from_slice(&offer.gid);
+    let coord_info = QpInfo {
+        qpn: offer.qpn, psn: offer.psn, gid: coord_gid, lid: offer.lid,
+        rkey: 0, addr: 0, len: 0,
+    };
+    qp.to_rtr(&coord_info, RDMA_PORT, GID_IDX)?;
+    qp.to_rts(psn)?;
+
+    // Send InputShareAccept.
+    let accept = InputShareAcceptPayload {
+        job_id: offer.job_id.clone(),
+        worker_id: node_id,
+        qpn: qp.qpn(),
+        psn,
+        gid: gid.raw.to_vec(),
+        lid: port_attr.lid,
+    };
+    send_message(stream, &make_message(MessageKind::InputShareAccept, &accept)?)?;
+
+    // Wait for InputShareGo (coordinator's QP is now RTR/RTS).
+    stream.set_read_timeout(Some(Duration::from_secs(30)))?;
+    loop {
+        match recv_message(stream) {
+            Ok(msg) if msg.kind == MessageKind::InputShareGo => break,
+            Ok(_) => {}
+            Err(e) => return Err(e.context("waiting for InputShareGo")),
+        }
+    }
+
+    // RDMA READ: pull coordinator's flat buffer into our local MR.
+    qp.post_rdma_read(&recv_mr, total as u32, offer.addr, offer.rkey)?;
+    qp.poll_one_blocking()?;
+
+    // Write individual files to disk.
+    let buf = recv_mr.as_bytes();
+    for entry in &offer.files {
+        let start = entry.offset as usize;
+        let end   = start + entry.len as usize;
+        if let Some(dir) = Path::new(&entry.path).parent() {
+            std::fs::create_dir_all(dir).ok();
+        }
+        std::fs::write(&entry.path, &buf[start..end])
+            .with_context(|| format!("write RDMA-received file: {}", entry.path))?;
+        println!("[worker {}] received via RDMA: '{}'", node_id, entry.path);
+    }
+
+    // Restore poll timeout and notify coordinator.
+    stream.set_read_timeout(Some(Duration::from_millis(common::WORKER_POLL_TIMEOUT_MS)))?;
+    send_message(
+        stream,
+        &make_message(MessageKind::InputShareDone, &serde_json::json!({ "job_id": offer.job_id }))?,
+    )?;
+
+    println!("[worker {}] RDMA input share done ({} bytes)", node_id, total);
+    Ok(())
+}
+
 /// Extract shm_path from a DAG JSON string (best-effort).
 fn extract_shm_path(dag_json: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(dag_json).ok()?;
     v.get("shm_path")?.as_str().map(|s| s.to_string())
+}
+
+/// Parse Output node paths from the per-node DAG JSON.
+fn extract_output_paths(dag_json: &str) -> Vec<String> {
+    let v: serde_json::Value = match serde_json::from_str(dag_json) {
+        Ok(v) => v,
+        Err(_) => return vec![],
+    };
+    let nodes = match v.get("nodes").and_then(|n| n.as_array()) {
+        Some(n) => n,
+        None => return vec![],
+    };
+    let mut paths = Vec::new();
+    for node in nodes {
+        let output = match node.get("kind").and_then(|k| k.get("Output")) {
+            Some(o) => o,
+            None => continue,
+        };
+        if let Some(p) = output.get("path").and_then(|v| v.as_str()) {
+            paths.push(p.to_string());
+        }
+        if let Some(arr) = output.get("paths").and_then(|v| v.as_array()) {
+            for p in arr {
+                if let Some(s) = p.as_str() {
+                    paths.push(s.to_string());
+                }
+            }
+        }
+    }
+    paths
+}
+
+/// Read the output files written by the executor and return them as StagedFiles.
+fn collect_result_files(dag_json: &str, node_id: u32) -> Vec<crate::protocol::StagedFile> {
+    let paths = extract_output_paths(dag_json);
+    let mut files = Vec::new();
+    for path in paths {
+        match std::fs::read(&path) {
+            Ok(data) => {
+                println!("[worker {}] returning result '{}'", node_id, path);
+                files.push(crate::protocol::StagedFile { rel_path: path, data });
+            }
+            Err(e) => {
+                eprintln!("[worker {}] could not read output '{}': {}", node_id, path, e);
+            }
+        }
+    }
+    files
 }

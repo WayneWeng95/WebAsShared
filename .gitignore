@@ -5,6 +5,7 @@ Executor/.claude/
 .claude/
 Partitioner/target/
 TestData/
+TestOutput/
 
 # Build artifacts
 __pycache__/

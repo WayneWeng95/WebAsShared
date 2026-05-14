@@ -43,9 +43,9 @@
       "deps": ["pipeline"],
       "kind": { "Output": {
         "paths": [
-          "/tmp/img_pipeline_out/gradient_processed.pgm",
-          "/tmp/img_pipeline_out/checkerboard_processed.pgm",
-          "/tmp/img_pipeline_out/rings_processed.pgm"
+          "TestOutput/img_pipeline_out/gradient_processed.pgm",
+          "TestOutput/img_pipeline_out/checkerboard_processed.pgm",
+          "TestOutput/img_pipeline_out/rings_processed.pgm"
         ],
         "slot": 1
       }}

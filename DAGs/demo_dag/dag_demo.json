@@ -137,7 +137,7 @@
       "kind": {
         "Watch": {
           "stream": 203,
-          "output": "/tmp/dag_demo_out/pipeline_summary.txt"
+          "output": "TestOutput/dag_demo_out/pipeline_summary.txt"
         }
       }
     },
@@ -148,7 +148,7 @@
       "kind": {
         "Watch": {
           "stream": 21,
-          "output": "/tmp/dag_demo_out/watch_stream_21_aggregate.txt"
+          "output": "TestOutput/dag_demo_out/watch_stream_21_aggregate.txt"
         }
       }
     },
@@ -159,7 +159,7 @@
       "kind": {
         "Watch": {
           "stream": 90,
-          "output": "/tmp/dag_demo_out/watch_stream_90_worker.txt"
+          "output": "TestOutput/dag_demo_out/watch_stream_90_worker.txt"
         }
       }
     },
@@ -169,7 +169,7 @@
       "deps": ["w90", "w91", "aggregate", "dump_broadcast_slot50", "dump_broadcast_slot59"],
       "kind": {
         "Persist": {
-          "output_dir": "/tmp/dag_demo_out",
+          "output_dir": "TestOutput/dag_demo_out",
           "atomics": true,
           "stream_slots": [90, 91, 21, 50],
           "shared_state": false
@@ -309,7 +309,7 @@
       "id": "save_final_output",
       "deps": ["final_out70", "final_out71", "final_out72"],
       "kind": {
-        "Output": { "path": "/tmp/dag_demo_out/final_output.txt" }
+        "Output": { "path": "TestOutput/dag_demo_out/final_output.txt" }
       }
     }
   ]

@@ -55,7 +55,7 @@
       "kind": { "PyFunc": { "func": "ml_validate", "arg": 400 } } },
 
     { "id": "save", "deps": ["validate"],
-      "kind": { "Output": { "path": "/tmp/rdma_py_ml_training_result.txt", "slot": 1 } } }
+      "kind": { "Output": { "path": "TestOutput/rdma_py_ml_training_result.txt", "slot": 1 } } }
 
   ]
 }

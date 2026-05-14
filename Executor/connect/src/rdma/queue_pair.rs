@@ -301,6 +301,38 @@ impl QueuePair {
         Ok(())
     }
 
+    /// Post a one-sided RDMA READ work request.
+    ///
+    /// Reads `len` bytes from `remote_addr` / `remote_rkey` into the local
+    /// `local_mr` buffer.  `IBV_SEND_SIGNALED` causes a completion to appear
+    /// on our CQ when the HCA has written the data into our local memory.
+    pub fn post_rdma_read(
+        &self,
+        local_mr:    &MemoryRegion,
+        len:          u32,
+        remote_addr:  u64,
+        remote_rkey:  u32,
+    ) -> Result<()> {
+        let mut sge: ibv_sge = unsafe { std::mem::zeroed() };
+        sge.addr   = local_mr.addr();
+        sge.length = len;
+        sge.lkey   = local_mr.lkey();
+
+        let mut wr: ibv_send_wr = unsafe { std::mem::zeroed() };
+        wr.wr_id       = 2;
+        wr.sg_list     = &mut sge;
+        wr.num_sge     = 1;
+        wr.opcode      = IBV_WR_RDMA_READ;
+        wr.send_flags  = IBV_SEND_SIGNALED;
+        wr.remote_addr = remote_addr;
+        wr.compare_add = remote_rkey as u64; // low 32 bits = wr.rdma.rkey
+
+        let mut bad_wr: *mut ibv_send_wr = std::ptr::null_mut();
+        let ret = unsafe { wrap_ibv_post_send(self.qp.as_ptr(), &mut wr, &mut bad_wr) };
+        if ret != 0 { return Err(anyhow!("ibv_post_send (RDMA READ) failed: {}", ret)); }
+        Ok(())
+    }
+
     /// Busy-poll this QP's dedicated CQ until one completion arrives.
     pub fn poll_one_blocking(&self) -> Result<u64> {
         let mut wc: ibv_wc = unsafe { std::mem::zeroed() };
