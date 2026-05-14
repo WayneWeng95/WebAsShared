@@ -114,6 +114,27 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                         send_message(&mut stream, &make_signal(MessageKind::Pong))?;
                     }
 
+                    MessageKind::StageFiles => {
+                        let p: StageFilesPayload =
+                            serde_json::from_value(msg.payload)
+                                .context("parse StageFiles payload")?;
+                        for f in &p.files {
+                            if let Some(dir) = std::path::Path::new(&f.rel_path).parent() {
+                                std::fs::create_dir_all(dir).ok();
+                            }
+                            std::fs::write(&f.rel_path, &f.data)
+                                .with_context(|| format!("write staged file: {}", f.rel_path))?;
+                            println!("[worker {}] staged '{}'", config.node_id, f.rel_path);
+                        }
+                        send_message(
+                            &mut stream,
+                            &make_message(
+                                MessageKind::StageFilesAck,
+                                &serde_json::json!({ "job_id": p.job_id }),
+                            )?,
+                        )?;
+                    }
+
                     _ => {
                         eprintln!(
                             "[worker {}] unexpected message: {:?}",

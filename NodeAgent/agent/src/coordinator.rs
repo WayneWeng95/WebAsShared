@@ -3,9 +3,10 @@
 use crate::config::AgentConfig;
 use crate::cluster_dag::ClusterDag;
 use crate::executor::ExecutorHandle;
+use crate::file_staging;
 use crate::metrics;
 use crate::protocol::*;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use scheduler::ScxClusterView;
 use std::collections::HashMap;
 use std::io;
@@ -189,9 +190,24 @@ fn handle_submit(
         serde_json::from_value(msg.payload).context("parse SubmitJob payload")?;
 
     let cluster_dag = ClusterDag::from_json(&payload.cluster_dag_json)?;
-    let per_node_dags = cluster_dag.split(&config.cluster.ips)?;
 
     let job_id = format!("job_{}", chrono_simple_id());
+
+    // Stage shared input files to workers before splitting and assigning jobs.
+    if !cluster_dag.shared_inputs.is_empty() {
+        let staging_payload = file_staging::prepare_payload(
+            &job_id,
+            config.node_id,
+            &cluster_dag.shared_inputs,
+        )?;
+        if !staging_payload.files.is_empty() {
+            let mut s = state.lock().unwrap();
+            stage_shared_inputs(&mut s.workers, config.node_id, &staging_payload)?;
+            drop(s);
+        }
+    }
+
+    let per_node_dags = cluster_dag.split(&config.cluster.ips)?;
 
     println!("[coordinator] submitting job {} ({} nodes)", job_id, per_node_dags.len());
 
@@ -507,6 +523,62 @@ fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMe
             println!("[coordinator] placement order: {:?} (best first)", best);
         }
     }
+}
+
+/// Send staged files to all workers (except self) and wait for StageFilesAck.
+fn stage_shared_inputs(
+    workers: &mut HashMap<u32, WorkerConn>,
+    own_node_id: u32,
+    payload: &StageFilesPayload,
+) -> Result<()> {
+    let remote_ids: Vec<u32> = workers
+        .keys()
+        .filter(|&&id| id != own_node_id)
+        .cloned()
+        .collect();
+
+    if remote_ids.is_empty() {
+        return Ok(());
+    }
+
+    let msg = make_message(MessageKind::StageFiles, payload)?;
+    for &id in &remote_ids {
+        if let Some(w) = workers.get_mut(&id) {
+            send_message(&mut w.stream, &msg)
+                .with_context(|| format!("send StageFiles to worker {}", id))?;
+        }
+    }
+
+    // Wait for StageFilesAck from every remote worker.
+    let timeout = Duration::from_secs(30);
+    let start = Instant::now();
+    let mut pending: std::collections::HashSet<u32> = remote_ids.iter().cloned().collect();
+
+    while !pending.is_empty() {
+        if start.elapsed() > timeout {
+            bail!("timeout waiting for StageFilesAck from {:?}", pending);
+        }
+        for &id in &remote_ids {
+            if !pending.contains(&id) {
+                continue;
+            }
+            if let Some(w) = workers.get_mut(&id) {
+                w.stream
+                    .set_read_timeout(Some(Duration::from_millis(100)))
+                    .ok();
+                match recv_message(&mut w.stream) {
+                    Ok(msg) if msg.kind == MessageKind::StageFilesAck => {
+                        println!("[coordinator] worker {} staged files", id);
+                        pending.remove(&id);
+                    }
+                    Ok(_) => {}
+                    Err(_) => {}
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Generate a simple timestamp-based ID (no external deps).

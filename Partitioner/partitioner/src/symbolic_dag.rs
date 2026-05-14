@@ -1,0 +1,62 @@
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolicDag {
+    pub shm_path_prefix: String,
+    #[serde(default)]
+    pub wasm_path: Option<String>,
+    #[serde(default)]
+    pub python_script: Option<String>,
+    #[serde(default)]
+    pub python_wasm: Option<String>,
+    #[serde(default)]
+    pub log_level: Option<String>,
+    #[serde(default)]
+    pub mode: Option<String>,
+    #[serde(default)]
+    pub runs: Option<u32>,
+    #[serde(default = "default_true")]
+    pub transfer: bool,
+    pub total_nodes: usize,
+    #[serde(default)]
+    pub shared_inputs: Vec<SharedInput>,
+    pub nodes: Vec<SymbolicNode>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SharedInput {
+    pub path: String,
+    pub source_node: u32,
+}
+
+/// A node in a SymbolicDag.
+///
+/// `deps` reference other node `id`s, including across machines.
+/// `kind` is passed through as-is, except that `upstream_nodes: [<id>, ...]` inside
+/// routing nodes (Aggregate / Bridge / Shuffle) is rewritten by the Partitioner to
+/// the concrete `upstream: [<slot>, ...]` form after RecvSlot assignment.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SymbolicNode {
+    pub id: String,
+    #[serde(default)]
+    pub deps: Vec<String>,
+    pub node_id: u32,
+    /// Required on Func/WasmVoid nodes that have cross-node consumers,
+    /// since the Partitioner cannot auto-detect the output slot for those kinds.
+    #[serde(default)]
+    pub output_slot: Option<u32>,
+    #[serde(default)]
+    pub barrier_group: Option<String>,
+    pub kind: serde_json::Value,
+}
+
+impl SymbolicDag {
+    pub fn from_json(json: &str) -> Result<Self> {
+        serde_json::from_str(json).map_err(|e| anyhow::anyhow!("parse SymbolicDag: {}", e))
+    }
+}

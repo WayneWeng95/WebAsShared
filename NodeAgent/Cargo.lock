@@ -48,6 +48,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "node-agent-common",
+ "partitioner",
  "scheduler",
  "serde",
  "serde_json",
@@ -57,6 +58,15 @@ dependencies = [
 [[package]]
 name = "node-agent-common"
 version = "0.1.0"
+
+[[package]]
+name = "partitioner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "proc-macro2"

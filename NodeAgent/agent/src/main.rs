@@ -3,6 +3,7 @@ mod config;
 mod coordinator;
 mod dag_transform;
 mod executor;
+mod file_staging;
 mod metrics;
 mod protocol;
 mod worker;
@@ -208,15 +209,25 @@ fn cmd_submit(args: &[String]) -> Result<()> {
     }
 
     let raw_json = std::fs::read_to_string(&dag_path)
-        .with_context(|| format!("read ClusterDag file: {}", dag_path))?;
+        .with_context(|| format!("read DAG file: {}", dag_path))?;
 
     if python_mode {
         println!("Mode: Python (distributed){}", if aot_mode { " (AOT)" } else { "" });
     }
 
+    // SymbolicDag detection: "total_nodes" is not a ClusterDag field.
+    let cluster_dag_raw = if raw_json.contains("\"total_nodes\"") {
+        println!("[submit] detected SymbolicDag — running Partitioner");
+        let sym = partitioner::SymbolicDag::from_json(&raw_json)?;
+        let partitioned = partitioner::partition(&sym)?;
+        serde_json::to_string(&partitioned).context("serialize partitioned DAG")?
+    } else {
+        raw_json
+    };
+
     // Always transform: converts unified Func nodes to native kinds (WasmVoid or PyFunc).
     let cluster_dag_json = dag_transform::transform_cluster_dag(
-        &raw_json,
+        &cluster_dag_raw,
         python_mode,
         python_script.as_deref(),
         python_wasm.as_deref(),

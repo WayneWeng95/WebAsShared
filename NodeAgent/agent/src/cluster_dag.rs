@@ -46,12 +46,25 @@ pub struct ClusterDag {
     #[serde(default = "default_true")]
     pub transfer: bool,
 
+    /// Files that the coordinator should stage to workers before execution.
+    /// Produced by the Partitioner from a SymbolicDag's shared_inputs field.
+    #[serde(default)]
+    pub shared_inputs: Vec<SharedInput>,
+
     /// Per-node DAG node lists.  Key is the node_id (as string in JSON).
     /// Each entry becomes the `nodes` array in that node's per-node Dag.
     pub node_dags: HashMap<String, Vec<serde_json::Value>>,
 }
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SharedInput {
+    pub path: String,
+    pub source_node: u32,
+}
 
 /// A per-node Dag JSON that the Executor understands.
 #[derive(Debug, Serialize)]

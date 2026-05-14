@@ -1,0 +1,3 @@
+[workspace]
+members = ["partitioner"]
+resolver = "2"

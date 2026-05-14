@@ -43,6 +43,11 @@ pub enum MessageKind {
     SubmitAck,
     StatusResponse,
     JobResult,
+
+    // Coordinator -> Worker (file staging, before AssignJob)
+    StageFiles,
+    // Worker -> Coordinator
+    StageFilesAck,
 }
 
 // ── Payload types ────────────────────────────────────────────────────────────
@@ -119,6 +124,74 @@ pub struct JobResultPayload {
     pub job_id: String,
     pub success: bool,
     pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StageFilesPayload {
+    pub job_id: String,
+    pub files: Vec<StagedFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StagedFile {
+    pub rel_path: String,
+    #[serde(with = "serde_bytes_base64")]
+    pub data: Vec<u8>,
+}
+
+/// Base64 serde shim so file bytes survive JSON transit without escaping issues.
+mod serde_bytes_base64 {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S: Serializer>(data: &[u8], s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&base64_encode(data))
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+        let s = String::deserialize(d)?;
+        base64_decode(&s).map_err(serde::de::Error::custom)
+    }
+
+    fn base64_encode(data: &[u8]) -> String {
+        const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+        for chunk in data.chunks(3) {
+            let b0 = chunk[0] as usize;
+            let b1 = chunk.get(1).copied().unwrap_or(0) as usize;
+            let b2 = chunk.get(2).copied().unwrap_or(0) as usize;
+            let n = (b0 << 16) | (b1 << 8) | b2;
+            out.push(TABLE[(n >> 18) & 0x3f] as char);
+            out.push(TABLE[(n >> 12) & 0x3f] as char);
+            if chunk.len() > 1 { out.push(TABLE[(n >> 6) & 0x3f] as char); } else { out.push('='); }
+            if chunk.len() > 2 { out.push(TABLE[n & 0x3f] as char); } else { out.push('='); }
+        }
+        out
+    }
+
+    fn base64_decode(s: &str) -> Result<Vec<u8>, String> {
+        let s = s.trim_end_matches('=');
+        let mut out = Vec::with_capacity(s.len() * 3 / 4);
+        let mut buf: u32 = 0;
+        let mut bits = 0u32;
+        for ch in s.bytes() {
+            let v = match ch {
+                b'A'..=b'Z' => ch - b'A',
+                b'a'..=b'z' => ch - b'a' + 26,
+                b'0'..=b'9' => ch - b'0' + 52,
+                b'+' => 62,
+                b'/' => 63,
+                _ => return Err(format!("invalid base64 char: {}", ch as char)),
+            } as u32;
+            buf = (buf << 6) | v;
+            bits += 6;
+            if bits >= 8 {
+                bits -= 8;
+                out.push((buf >> bits) as u8);
+                buf &= (1 << bits) - 1;
+            }
+        }
+        Ok(out)
+    }
 }
 
 // ── Wire helpers ─────────────────────────────────────────────────────────────
