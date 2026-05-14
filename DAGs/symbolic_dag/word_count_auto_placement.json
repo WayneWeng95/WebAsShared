@@ -33,10 +33,10 @@
     },
     {
       "id": "distribute", "placement": "all", "deps": ["load"],
-      "kind": { "Func": { "func": "wc_distribute", "out_base": 10 } }
+      "kind": { "Func": { "func": "wc_distribute", "out_base": 30 } }
     },
     {
-      "id": "map_n", "placement": "all", "fanout": 8, "deps": ["distribute"],
+      "id": "map_n", "placement": "all", "fanout": 10, "deps": ["distribute"],
       "kind": { "Func": { "func": "wc_map", "output_offset": 100 } }
     },
     {
