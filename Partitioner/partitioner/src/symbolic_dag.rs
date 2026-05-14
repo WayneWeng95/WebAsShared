@@ -1,6 +1,8 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
+use crate::placer::PlacementHints;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolicDag {
     pub shm_path_prefix: String,
@@ -26,6 +28,10 @@ pub struct SymbolicDag {
     pub max_colocation: Option<usize>,
     #[serde(default)]
     pub shared_inputs: Vec<SharedInput>,
+    /// Optional placement hints embedded in the DAG file itself.
+    /// Overridden by hints passed explicitly to `partition()`.
+    #[serde(default)]
+    pub hints: Option<PlacementHints>,
     pub nodes: Vec<SymbolicNode>,
 }
 
@@ -59,6 +65,18 @@ pub struct SymbolicNode {
     /// since the Partitioner cannot auto-detect the output slot for those kinds.
     #[serde(default)]
     pub output_slot: Option<u32>,
+    /// Expand this node into N identical copies named `{id}_0`, `{id}_1`, …
+    /// Any other node that lists this id in its `deps` will have it replaced
+    /// by all N expanded ids automatically.
+    #[serde(default)]
+    pub fanout: Option<usize>,
+    /// Place one copy of this node on every machine in the cluster.
+    /// Each copy is named `{id}_{machine_id}` and pinned to that machine.
+    /// Dependencies on other `"all"` nodes resolve to the same-machine sibling;
+    /// non-"all" node dependencies on an `"all"` template expand to all copies.
+    /// `Input` nodes with this placement auto-populate `shared_inputs`.
+    #[serde(default)]
+    pub placement: Option<String>,
     #[serde(default)]
     pub barrier_group: Option<String>,
     pub kind: serde_json::Value,

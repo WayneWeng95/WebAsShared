@@ -24,14 +24,17 @@ struct CrossEdge {
 /// node_dags, shared_inputs, …) and can be fed directly to
 /// `dag_transform::transform_cluster_dag` and `ClusterDag::from_json`.
 pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Value> {
-    // ── 0. Auto-assign node_ids for nodes that don't have one ─────────────────
-    // Clone so we don't mutate the caller's SymbolicDag.
-    let mut nodes: Vec<SymbolicNode> = dag.nodes.clone();
+    // ── 0. Expand placement:"all" nodes, then fanout nodes ───────────────────
+    let (after_all, auto_shared_inputs) = expand_all_placements(dag.nodes.clone(), dag.total_nodes);
+    let mut nodes: Vec<SymbolicNode> = expand_fanout(after_all);
     let empty_hints = PlacementHints::default();
+    let effective_hints = hints
+        .or(dag.hints.as_ref())
+        .unwrap_or(&empty_hints);
     assign_nodes(
         &mut nodes,
         dag.total_nodes,
-        hints.unwrap_or(&empty_hints),
+        effective_hints,
         dag.max_colocation,
     );
 
@@ -230,11 +233,15 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         out.insert("runs".into(), json!(v));
     }
     out.insert("transfer".into(), json!(dag.transfer));
-    if !dag.shared_inputs.is_empty() {
-        out.insert(
-            "shared_inputs".into(),
-            serde_json::to_value(&dag.shared_inputs)?,
-        );
+    // Merge explicitly declared shared_inputs with those auto-derived from placement:"all" Input nodes.
+    let mut merged_si = dag.shared_inputs.clone();
+    for si in auto_shared_inputs {
+        if !merged_si.iter().any(|e| e.path == si.path) {
+            merged_si.push(si);
+        }
+    }
+    if !merged_si.is_empty() {
+        out.insert("shared_inputs".into(), serde_json::to_value(&merged_si)?);
     }
     out.insert("node_dags".into(), Value::Object(node_dags));
 
@@ -348,6 +355,126 @@ fn resolve_upstream_nodes(
     let mut new_kind = serde_json::Map::new();
     new_kind.insert(variant.clone(), Value::Object(new_inner));
     Ok(Value::Object(new_kind))
+}
+
+/// Expand nodes with `placement: "all"` into one copy per machine (`{id}_0` … `{id}_{N-1}`).
+///
+/// Dep-rewriting rules:
+///   - An "all" copy M depending on another "all" template T → `T_M` (same-machine sibling).
+///   - A regular node depending on an "all" template T → expanded to all N copies.
+///
+/// Returns the expanded node list and any `SharedInput` entries auto-derived from
+/// `Input` nodes with `placement: "all"` (using source_node 0).
+fn expand_all_placements(
+    nodes: Vec<SymbolicNode>,
+    total_nodes: usize,
+) -> (Vec<SymbolicNode>, Vec<crate::symbolic_dag::SharedInput>) {
+    use std::collections::HashSet;
+
+    let all_templates: HashSet<String> = nodes
+        .iter()
+        .filter(|n| n.placement.as_deref() == Some("all"))
+        .map(|n| n.id.clone())
+        .collect();
+
+    if all_templates.is_empty() {
+        return (nodes, Vec::new());
+    }
+
+    let mut expanded: Vec<SymbolicNode> = Vec::new();
+    let mut shared_inputs: Vec<crate::symbolic_dag::SharedInput> = Vec::new();
+
+    for node in nodes {
+        if node.placement.as_deref() == Some("all") {
+            // Auto-derive shared_inputs from Input nodes so the coordinator stages
+            // the file from machine 0 to all others before the DAG runs.
+            if let Some(input_obj) = node.kind.get("Input").and_then(|v| v.as_object()) {
+                if let Some(path) = input_obj.get("path").and_then(|v| v.as_str()) {
+                    shared_inputs.push(crate::symbolic_dag::SharedInput {
+                        path: path.to_string(),
+                        source_node: 0,
+                    });
+                }
+            }
+
+            for machine in 0..total_nodes as u32 {
+                let mut copy = node.clone();
+                copy.id = format!("{}_{}", node.id, machine);
+                copy.node_id = Some(machine);
+                copy.placement = None;
+                // Same-machine sibling rule for "all" → "all" deps.
+                copy.deps = node
+                    .deps
+                    .iter()
+                    .map(|dep| {
+                        if all_templates.contains(dep) {
+                            format!("{}_{}", dep, machine)
+                        } else {
+                            dep.clone()
+                        }
+                    })
+                    .collect();
+                expanded.push(copy);
+            }
+        } else {
+            // Regular node: broadcast-expand any deps on "all" templates.
+            let mut regular = node.clone();
+            regular.deps = node
+                .deps
+                .iter()
+                .flat_map(|dep| {
+                    if all_templates.contains(dep) {
+                        (0..total_nodes as u32)
+                            .map(|m| format!("{}_{}", dep, m))
+                            .collect::<Vec<_>>()
+                    } else {
+                        vec![dep.clone()]
+                    }
+                })
+                .collect();
+            expanded.push(regular);
+        }
+    }
+
+    (expanded, shared_inputs)
+}
+
+/// Expand nodes with `fanout: N` into N identical copies named `{id}_0` … `{id}_{N-1}`.
+/// Any other node listing the template id in its `deps` gets all N copies substituted in.
+fn expand_fanout(nodes: Vec<SymbolicNode>) -> Vec<SymbolicNode> {
+    // Map: template_id → list of expanded ids
+    let mut expansions: HashMap<String, Vec<String>> = HashMap::new();
+    let mut expanded: Vec<SymbolicNode> = Vec::new();
+
+    for node in nodes {
+        if let Some(n) = node.fanout {
+            let ids: Vec<String> = (0..n).map(|i| format!("{}_{}", node.id, i)).collect();
+            expansions.insert(node.id.clone(), ids.clone());
+            for id in ids {
+                let mut copy = node.clone();
+                copy.id = id;
+                copy.fanout = None;
+                expanded.push(copy);
+            }
+        } else {
+            expanded.push(node);
+        }
+    }
+
+    // Rewrite deps: replace each template_id with all its expanded ids
+    for node in &mut expanded {
+        let mut new_deps: Vec<String> = Vec::new();
+        for dep in &node.deps {
+            if let Some(ids) = expansions.get(dep) {
+                new_deps.extend_from_slice(ids);
+            } else {
+                new_deps.push(dep.clone());
+            }
+        }
+        node.deps = new_deps;
+    }
+
+    expanded
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────

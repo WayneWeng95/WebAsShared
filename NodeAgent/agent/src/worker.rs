@@ -47,6 +47,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
     let mut current_executor: Option<ExecutorHandle> = None;
     let mut current_shm_path: Option<String> = None;
     let mut current_dag_json: Option<String> = None;
+    let mut current_staged_files: Vec<String> = Vec::new();
 
     let status_interval = Duration::from_secs(config.metrics.status_print_interval_s);
     let mut last_status_print = Instant::now();
@@ -114,6 +115,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                             current_executor = None;
                             current_shm_path = None;
                             current_dag_json = None;
+                            remove_staged_files(&mut current_staged_files, config.node_id);
                         }
                     }
 
@@ -132,6 +134,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                             std::fs::write(&f.rel_path, &f.data)
                                 .with_context(|| format!("write staged file: {}", f.rel_path))?;
                             println!("[worker {}] staged '{}'", config.node_id, f.rel_path);
+                            current_staged_files.push(f.rel_path.clone());
                         }
                         send_message(
                             &mut stream,
@@ -146,8 +149,9 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                         let offer: InputShareOfferPayload =
                             serde_json::from_value(msg.payload)
                                 .context("parse InputShareOffer payload")?;
-                        recv_rdma_input_share(&mut stream, &offer, config.node_id)
+                        let paths = recv_rdma_input_share(&mut stream, &offer, config.node_id)
                             .context("RDMA input share")?;
+                        current_staged_files.extend(paths);
                     }
 
                     _ => {
@@ -219,6 +223,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                     current_executor = None;
                     current_shm_path = None;
                     // current_dag_json already consumed by take() above
+                    remove_staged_files(&mut current_staged_files, config.node_id);
 
                     // Send idle metrics so the coordinator's snapshot is up-to-date.
                     let idle = collector.sample(None, false, None, None);
@@ -343,11 +348,21 @@ fn rand_psn() -> u32 {
 /// 4. Posts an RDMA READ to pull the file data from coordinator's MR.
 /// 5. Writes each file to its destination path on disk.
 /// 6. Sends `InputShareDone`.
+fn remove_staged_files(paths: &mut Vec<String>, node_id: u32) {
+    for path in paths.drain(..) {
+        if let Err(e) = std::fs::remove_file(&path) {
+            eprintln!("[worker {}] failed to remove staged file '{}': {}", node_id, path, e);
+        } else {
+            println!("[worker {}] removed staged file '{}'", node_id, path);
+        }
+    }
+}
+
 fn recv_rdma_input_share(
     stream: &mut TcpStream,
     offer: &InputShareOfferPayload,
     node_id: u32,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<String>> {
     let total = offer.total_len as usize;
     if total > u32::MAX as usize {
         anyhow::bail!("InputShareOffer total_len {} exceeds RDMA READ limit", total);
@@ -399,8 +414,9 @@ fn recv_rdma_input_share(
         }
     }
 
-    // Write individual files to disk.
+    // Write individual files to disk and collect the paths for later cleanup.
     let buf = recv_mr.as_bytes();
+    let mut written_paths: Vec<String> = Vec::new();
     for entry in &offer.files {
         let start = entry.offset as usize;
         let end   = start + entry.len as usize;
@@ -410,6 +426,7 @@ fn recv_rdma_input_share(
         std::fs::write(&entry.path, &buf[start..end])
             .with_context(|| format!("write RDMA-received file: {}", entry.path))?;
         println!("[worker {}] received via RDMA: '{}'", node_id, entry.path);
+        written_paths.push(entry.path.clone());
     }
 
     // Restore poll timeout and notify coordinator.
@@ -420,7 +437,7 @@ fn recv_rdma_input_share(
     )?;
 
     println!("[worker {}] RDMA input share done ({} bytes)", node_id, total);
-    Ok(())
+    Ok(written_paths)
 }
 
 /// Extract shm_path from a DAG JSON string (best-effort).

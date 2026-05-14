@@ -261,6 +261,8 @@ mod tests {
             deps: deps.iter().map(|s| s.to_string()).collect(),
             node_id,
             output_slot: None,
+            fanout: None,
+            placement: None,
             barrier_group: None,
             kind: json!({"Func": {"slot": 0}}),
         }

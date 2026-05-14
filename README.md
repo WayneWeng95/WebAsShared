@@ -37,7 +37,7 @@ Subsystem design notes live in [`docs/`](docs/):
 | [docs/barrier.md](docs/barrier.md) | Intra-wave futex barrier: the `ShmApi::barrier_wait` guest API, DAG `barrier_group` JSON syntax, usage examples, and the single-node constraint. |
 | [docs/slots.md](docs/slots.md) | Stream slots and I/O slots — what they are, when to use which, slot lifecycle across DAG waves. |
 | [docs/WASM64.md](docs/WASM64.md) | Investigation into wasm64 (memory64) as an alternative path to larger linear memory, why it compiles but doesn't run practically, and the infrastructure left in place in case wasmtime's JIT performance improves. |
-| [Partitioner/README.md](Partitioner/README.md) | Auto-partitioner: takes a flat `SymbolicDag` (all nodes in one list, each tagged with `node_id`) and produces a `ClusterDag` with `RemoteSend`/`RemoteRecv` pairs and slot assignments generated automatically. Invoked transparently by `node-agent submit` when the input JSON contains `"total_nodes"`. |
+| [Partitioner/README.md](Partitioner/README.md) | Auto-partitioner: takes a `SymbolicDag` (slot-free, may omit `node_id`) and produces a `ClusterDag` with placement decided by live sched_ext load, all slot numbers derived automatically, and `RemoteSend`/`RemoteRecv` pairs injected for cross-node edges. Invoked transparently by `node-agent submit` when the input JSON contains `"total_nodes"`. |
 | [docs/updates.md](docs/updates.md) | Historical change log. |
 
 ## Project Structure
@@ -76,6 +76,10 @@ WebAsShared/
 |   +-- agent_worker.toml           # Worker config
 |-- Partitioner/                    # Symbolic-DAG auto-partitioner
 |   |-- partitioner/src/            # Crate: partition(), SymbolicDag, slot helpers
+|   |   |-- placer.rs               # assign_nodes(): capacity-aware host assignment from sched_ext hints
+|   |   |-- slot_assigner.rs        # assign_slots(): derive all slot numbers from DAG topology
+|   |   |-- splitter.rs             # partition(): cross-node edge detection, RemoteSend/RemoteRecv injection
+|   |   +-- slot.rs                 # output_slot(), collect_slots() helpers
 |   +-- README.md                   # Design notes and upgrade paths
 +-- DAGs/                           # All DAG JSON specifications
     |-- demo_dag/                   # Single-node demos (word count, image pipeline)
@@ -172,6 +176,9 @@ Start the coordinator and worker daemons, then submit jobs:
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/symbolic_dag/word_count.json
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/symbolic_dag/word_count.json --python
 
+# Capacity-aware auto-placement — aggregation nodes placed by live sched_ext load
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/symbolic_dag/word_count_auto.json
+
 # ClusterDag (hand-authored) — explicit per-node split with RemoteSend/RemoteRecv
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/word_count.json
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json
@@ -184,13 +191,64 @@ Start the coordinator and worker daemons, then submit jobs:
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/cluster_dag/finra.json --python --aot
 ```
 
-**SymbolicDag** files are detected automatically (by the presence of `"total_nodes"`): the Partitioner generates `RemoteSend`/`RemoteRecv` pairs, assigns slot IDs, and stages any `shared_inputs` files to workers before execution starts. To preview the generated ClusterDag JSON without running a job:
+**SymbolicDag** files are detected automatically (by the presence of `"total_nodes"`): the Partitioner runs placement, assigns all slot numbers, injects `RemoteSend`/`RemoteRecv` pairs, and stages any `shared_inputs` files to workers before execution starts. To preview the generated ClusterDag JSON without running a job:
 
 ```bash
 ./Partitioner/target/release/partition DAGs/symbolic_dag/word_count.json
+
+# With explicit placement hints (skewed: host 0 idle, host 1 saturated)
+./Partitioner/target/release/partition DAGs/symbolic_dag/word_count_auto.json \
+  --hints '{"capacity":{"0":0.85,"1":0.15},"host_limit":{"0":12,"1":1}}'
 ```
 
 ClusterDag files use unified `Func` nodes that are automatically transformed to `WasmVoid` (Rust) or `PyFunc` (Python) based on the `--python` flag.
+
+#### Slot-Free SymbolicDag Format
+
+Nodes in a SymbolicDag need not specify any slot numbers. The `slot_assigner` derives every slot from the DAG topology plus two optional per-function-type declarations:
+
+| Func field | Meaning |
+|---|---|
+| `"out_base": N` | Fan-out: outputs to slots `[N, N+1, …, N+consumers-1]`; sets `arg = N_consumers`. Encodes the function's hardcoded output base (e.g. `WC_DIST_BASE = 10`). |
+| `"output_offset": K` | Output = input + K; inherits input slot from upstream fan-out. Encodes the function's hardcoded output offset (e.g. `WC_MAP_OUT_BASE = 100`). |
+| neither | Terminal: `arg` = dep's output slot, writes to `OUTPUT_IO_SLOT (1)`. |
+
+`Aggregate {}` derives its `upstream_nodes` from `deps` and receives a freshly allocated `downstream` slot. `Input {}` defaults to `slot: 0`. `Output {}` reads the dep's output slot (rewritten to the RemoteRecv slot when the dep is cross-node).
+
+Example — a complete word count pipeline with no slot numbers:
+
+```json
+{ "id": "distribute_0", "node_id": 0, "deps": ["load_0"],
+  "kind": { "Func": { "func": "wc_distribute", "out_base": 10 } } }
+
+{ "id": "map_0_n0", "node_id": 0, "deps": ["distribute_0"],
+  "kind": { "Func": { "func": "wc_map", "output_offset": 100 } } }
+
+{ "id": "aggregate", "deps": ["map_0_n0", "map_1_n0", ...],
+  "kind": { "Aggregate": {} } }
+
+{ "id": "reduce", "deps": ["aggregate_global"],
+  "kind": { "Func": { "func": "wc_reduce" } } }
+
+{ "id": "save", "deps": ["reduce"],
+  "kind": { "Output": { "path": "result.txt" } } }
+```
+
+#### Capacity-Aware Auto-Placement
+
+Nodes with `node_id` omitted are auto-assigned by the `placer` using live sched_ext stats:
+
+- **Single-host packing**: if all auto nodes fit within the least-loaded host's limit, pack them there to minimise cross-node edges.
+- **Proportional spread**: otherwise, allocate proportionally to `capacity` weights using largest-remainder rounding, then assign greedily in topological order with dep-affinity tie-breaking.
+- **Fallback**: when no hints are available, round-robin across all hosts.
+
+The coordinator passes `PlacementHints { capacity, host_limit }` sourced from its live `ScxClusterView` (see Scheduler section). Three scenarios are covered by `DAGs/symbolic_dag/word_count_auto.json`:
+
+| Scenario | Hints | Result |
+|---|---|---|
+| Balanced | `capacity: {0:0.5, 1:0.5}, host_limit: {0:12, 1:12}` | aggregation split across both hosts |
+| Skewed | `capacity: {0:0.85, 1:0.15}, host_limit: {0:12, 1:1}` | all auto nodes packed onto idle host 0 |
+| No hints | — | uniform round-robin fallback |
 
 ## Architecture
 
@@ -612,3 +670,5 @@ ib_write_bw  -d mlx4_0 -i 2 -x 0 --report_gbits 10.10.1.1
 - **NodeAgent as entry point**: the NodeAgent binary is the single interface for both single-node and multi-node execution, spawning the Executor as a subprocess.
 - **Coordinator-worker model**: static membership, TCP control plane (separate from RDMA data plane), RDMA mesh connects with 30s retry window for robustness. No consensus needed for research-scale clusters (2-32 nodes).
 - **Kernel-aware scheduling**: workers collect real-time SCX sched_ext stats (CPU load, NUMA imbalance, migration pressure) and report them to the coordinator, enabling scheduling decisions informed by actual kernel scheduling state rather than coarse `/proc/stat` samples alone.
+- **Capacity-aware auto-placement**: SymbolicDag nodes with no `node_id` are assigned to hosts at submit time using live sched_ext load data — packing onto the least-loaded host when it has headroom, otherwise spreading proportionally with dep-affinity tie-breaking to minimise cross-node edges.
+- **Slot-free DAG authoring**: SymbolicDag inputs carry no slot numbers. The `slot_assigner` derives every slot from the DAG topology plus two lightweight per-function declarations (`out_base`, `output_offset`) that encode the WASM function's hardcoded I/O offsets. All `Aggregate`, `Input`, `Output`, and terminal `Func` slots are fully automatic.
