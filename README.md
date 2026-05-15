@@ -679,3 +679,9 @@ ib_write_bw  -d mlx4_0 -i 2 -x 0 --report_gbits 10.10.1.1
 - **Slot overlap auto-adjustment**: when two fan-out nodes on the same machine share overlapping `out_base` slot ranges, the Partitioner detects the conflict and shifts the second node's base automatically, injecting the corrected base as `arg` so WASM writes to the right slots without DAG changes.
 - **Wave-0 deadlock prevention**: the Partitioner detects `RemoteRecv`/`RemoteSend` pairs targeting the same peer on the same machine and adds a dependency edge (send before recv) when safe, breaking the mutual-block that would otherwise stall both machines in wave 0.
 - **Slot-free DAG authoring**: SymbolicDag inputs carry no slot numbers. The `slot_assigner` derives every slot from the DAG topology plus two lightweight per-function declarations (`out_base`, `output_offset`) that encode the WASM function's hardcoded I/O offsets. All `Aggregate`, `Input`, `Output`, and terminal `Func` slots are fully automatic.
+
+
+## LeftOver
+  1. the newly transferred ml_training, finra, img_pipeline workloads are not finally tweaked, need additional test and debug.
+  2. The corpus 1GB file will lead to allocation bug where the memory is not properly loaded, causing the crash, need to do bug fix
+  3. Adding the comparison baseline, faasm and deserilzed/serialization and maybe one default standard practice solutions mentioned in either paper. 

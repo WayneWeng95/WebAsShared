@@ -1,0 +1,123 @@
+{
+  "_comment": [
+    "SymbolicDag: Distributed image pipeline + stream routing across 2 nodes.",
+    "",
+    "This DAG is fundamentally asymmetric — each machine runs a different set of",
+    "stages — so all nodes carry explicit node_id rather than placement:'all'.",
+    "The Partitioner splits by node_id without injecting extra RDMA edges:",
+    "  Path A RDMA is embedded inside the StreamPipeline kinds (rdma_send / rdma_recv).",
+    "  Path B RDMA uses explicit RemoteSend / RemoteRecv nodes.",
+    "",
+    "Node 0 (Path A src): load_images → img_pipeline_src (rotate+grayscale, RDMA-send round-by-round)",
+    "Node 0 (Path B):     prod_0..3 → shuffle_rr → agg_shuffled → count_agg + send_stream",
+    "",
+    "Node 1 (Path A dst): img_pipeline_dst (equalize+blur+export, RDMA-recv) → save_images",
+    "Node 1 (Path B):     recv_stream → bridge_recv + local_prod_0..1 → agg_all → count_merged",
+    "Node 1 (cleanup):    free (releases all stream and I/O slots after both paths finish)"
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_pr_ap",
+  "log_level": "info",
+  "transfer": true,
+  "total_nodes": 2,
+
+  "nodes": [
+    {
+      "id": "load_images", "node_id": 0, "deps": [],
+      "kind": { "Input": {
+        "paths": [
+          "TestData/img_gradient.ppm",
+          "TestData/img_checkerboard.ppm",
+          "TestData/img_rings.ppm"
+        ],
+        "slot": 10,
+        "binary": true
+      }}
+    },
+
+    {
+      "id": "img_pipeline_src", "node_id": 0, "deps": ["load_images"],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_load_ppm",  "arg0": 10, "arg1": 20 },
+          { "func": "img_rotate",    "arg0": 20, "arg1": 30 },
+          { "func": "img_grayscale", "arg0": 30, "arg1": 40 }
+        ],
+        "rdma_send": { "peer": 1, "slot": 40, "slot_kind": "Stream", "free_after": true }
+      }}
+    },
+
+    { "id": "prod_0", "node_id": 0, "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 500 } } },
+    { "id": "prod_1", "node_id": 0, "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 501 } } },
+    { "id": "prod_2", "node_id": 0, "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 502 } } },
+    { "id": "prod_3", "node_id": 0, "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 503 } } },
+
+    {
+      "id": "shuffle_rr", "node_id": 0, "deps": ["prod_0","prod_1","prod_2","prod_3"],
+      "kind": { "Shuffle": {
+        "upstream":   [500, 501, 502, 503],
+        "downstream": [510, 511],
+        "policy": { "type": "RoundRobin" }
+      }}
+    },
+    {
+      "id": "agg_shuffled", "node_id": 0, "deps": ["shuffle_rr"],
+      "kind": { "Aggregate": { "upstream": [510, 511], "downstream": 520 } }
+    },
+    {
+      "id": "count_agg", "node_id": 0, "deps": ["agg_shuffled"],
+      "kind": { "WasmU32": { "func": "count_stream_records", "arg": 520 } }
+    },
+    {
+      "id": "send_stream", "node_id": 0, "deps": ["agg_shuffled"],
+      "kind": { "RemoteSend": { "slot": 520, "slot_kind": "Stream", "peer": 1 } }
+    },
+
+    {
+      "id": "img_pipeline_dst", "node_id": 1, "deps": [],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_equalize",   "arg0": 40, "arg1": 50 },
+          { "func": "img_blur",       "arg0": 50, "arg1": 60 },
+          { "func": "img_export_ppm", "arg0": 60, "arg1": 1  }
+        ],
+        "rdma_recv": { "peer": 0, "slot": 40, "slot_kind": "Stream" }
+      }}
+    },
+    {
+      "id": "save_images", "node_id": 1, "deps": ["img_pipeline_dst"],
+      "kind": { "Output": {
+        "paths": [
+          "TestOutput/rdma_pipeline_routing_out/gradient_processed.pgm",
+          "TestOutput/rdma_pipeline_routing_out/checkerboard_processed.pgm",
+          "TestOutput/rdma_pipeline_routing_out/rings_processed.pgm"
+        ],
+        "slot": 1
+      }}
+    },
+
+    {
+      "id": "recv_stream", "node_id": 1, "deps": [],
+      "kind": { "RemoteRecv": { "slot": 600, "slot_kind": "Stream", "peer": 0 } }
+    },
+    {
+      "id": "bridge_recv", "node_id": 1, "deps": ["recv_stream"],
+      "kind": { "Bridge": { "from": 600, "to": 601 } }
+    },
+    { "id": "local_prod_0", "node_id": 1, "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 700 } } },
+    { "id": "local_prod_1", "node_id": 1, "deps": [], "kind": { "WasmVoid": { "func": "produce_stream", "arg": 701 } } },
+    {
+      "id": "agg_all", "node_id": 1, "deps": ["bridge_recv","local_prod_0","local_prod_1"],
+      "kind": { "Aggregate": { "upstream": [601, 700, 701], "downstream": 800 } }
+    },
+    {
+      "id": "count_merged", "node_id": 1, "deps": ["agg_all"],
+      "kind": { "WasmU32": { "func": "count_stream_records", "arg": 800 } }
+    },
+    {
+      "id": "free", "node_id": 1, "deps": ["save_images","count_merged"],
+      "kind": { "FreeSlots": { "stream": [40, 50, 60, 600, 601, 700, 701, 800], "io": [1] } }
+    }
+  ]
+}

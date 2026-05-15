@@ -1,0 +1,84 @@
+{
+  "_comment": [
+    "SymbolicDag: Distributed ML training with partitioner-managed placement.",
+    "",
+    "placement:'all' nodes run one copy per machine:",
+    "  load       → load_0, load_1",
+    "  partition  → partition_0, partition_1  (out_base:10 → slots 10,11 per machine)",
+    "  pca_0      → pca_0_0, pca_0_1         (output_offset:100 → reads 10, writes 110)",
+    "  pca_1      → pca_1_0, pca_1_1         (output_offset:100 → reads 11, writes 111)",
+    "  aggregate_pca → aggregate_pca_0, aggregate_pca_1  (upstream=[110,111], downstream=200)",
+    "  redistribute  → redistribute_0, redistribute_1    (reads slot 200, outputs 8 chunks)",
+    "  train_0..7 → train_0_0..train_7_1     (per-machine, explicit arg/arg2 slots)",
+    "  aggregate_train → aggregate_train_0, aggregate_train_1  (upstream=[130..137], downstream=300)",
+    "",
+    "shared_inputs is auto-derived from the 'load' Input node.",
+    "",
+    "Auto-placed nodes: aggregate_global, validate, save (Pack → colocate on node 0).",
+    "  aggregate_global collects both machines' aggregate_train via 1 RDMA op.",
+    "",
+    "Slot conventions (preserved from ClusterDag for WASM/Python compatibility):",
+    "  partition:    out_base:10 → arg=N_consumers=2; consumers at slots 10, 11",
+    "  pca_i:        output_offset:100 → reads 10+i, writes 110+i",
+    "  aggregate_pca: explicit upstream=[110,111], downstream=200",
+    "  redistribute: arg=200 (input), arg2=8 (n_outputs); writes to slots 30..37 internally",
+    "  train_i:      arg=30+i (input), arg2=130+i (output)",
+    "  aggregate_train: upstream=[130..137], downstream=300"
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_ml_ap",
+  "log_level": "info",
+  "transfer": true,
+  "total_nodes": 2,
+  "placement_policy": "pack",
+  "nodes": [
+    {
+      "id": "load", "placement": "all", "deps": [],
+      "kind": { "Input": { "path": "TestData/mnist_features.csv", "prefetch": true } }
+    },
+    {
+      "id": "partition", "placement": "all", "deps": ["load"],
+      "kind": { "Func": { "func": "ml_partition", "out_base": 10 } }
+    },
+    {
+      "id": "pca_0", "placement": "all", "deps": ["partition"],
+      "kind": { "Func": { "func": "ml_pca", "output_offset": 100 } }
+    },
+    {
+      "id": "pca_1", "placement": "all", "deps": ["partition"],
+      "kind": { "Func": { "func": "ml_pca", "output_offset": 100 } }
+    },
+    {
+      "id": "aggregate_pca", "placement": "all", "deps": ["pca_0", "pca_1"],
+      "kind": { "Aggregate": { "upstream": [110, 111], "downstream": 200 } }
+    },
+    {
+      "id": "redistribute", "placement": "all", "deps": ["aggregate_pca"],
+      "kind": { "Func": { "func": "ml_redistribute", "arg": 200, "arg2": 8 } }
+    },
+    { "id": "train_0", "placement": "all", "deps": ["redistribute"], "kind": { "Func": { "func": "ml_train", "arg": 30, "arg2": 130 } } },
+    { "id": "train_1", "placement": "all", "deps": ["redistribute"], "kind": { "Func": { "func": "ml_train", "arg": 31, "arg2": 131 } } },
+    { "id": "train_2", "placement": "all", "deps": ["redistribute"], "kind": { "Func": { "func": "ml_train", "arg": 32, "arg2": 132 } } },
+    { "id": "train_3", "placement": "all", "deps": ["redistribute"], "kind": { "Func": { "func": "ml_train", "arg": 33, "arg2": 133 } } },
+    { "id": "train_4", "placement": "all", "deps": ["redistribute"], "kind": { "Func": { "func": "ml_train", "arg": 34, "arg2": 134 } } },
+    { "id": "train_5", "placement": "all", "deps": ["redistribute"], "kind": { "Func": { "func": "ml_train", "arg": 35, "arg2": 135 } } },
+    { "id": "train_6", "placement": "all", "deps": ["redistribute"], "kind": { "Func": { "func": "ml_train", "arg": 36, "arg2": 136 } } },
+    { "id": "train_7", "placement": "all", "deps": ["redistribute"], "kind": { "Func": { "func": "ml_train", "arg": 37, "arg2": 137 } } },
+    {
+      "id": "aggregate_train", "placement": "all",
+      "deps": ["train_0","train_1","train_2","train_3","train_4","train_5","train_6","train_7"],
+      "kind": { "Aggregate": { "upstream": [130, 131, 132, 133, 134, 135, 136, 137], "downstream": 300 } }
+    },
+    {
+      "id": "aggregate_global", "deps": ["aggregate_train"],
+      "kind": { "Aggregate": {} }
+    },
+    {
+      "id": "validate", "deps": ["aggregate_global"],
+      "kind": { "Func": { "func": "ml_validate" } }
+    },
+    {
+      "id": "save", "deps": ["validate"],
+      "kind": { "Output": { "path": "TestOutput/ml_training_ap_result.txt" } }
+    }
+  ]
+}

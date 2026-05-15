@@ -6,6 +6,9 @@
   "shm_path_prefix": "/dev/shm/rdma_ml",
   "log_level": "info",
   "transfer": true,
+  "shared_inputs": [
+    { "path": "TestData/mnist_features.csv", "source_node": 0 }
+  ],
   "node_dags": {
     "0": [
       { "id": "load", "deps": [],
