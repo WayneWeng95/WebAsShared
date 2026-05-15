@@ -1,6 +1,6 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::{json, Value};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use crate::placer::{assign_nodes, PlacementHints};
 use crate::slot::{collect_slots, output_slot};
@@ -205,6 +205,88 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
             .push(send_node);
     }
 
+    // ── 5d. Prevent wave-0 deadlock ──────────────────────────────────────────
+    //
+    // If machine M has both a RemoteRecv(from=P) and a RemoteSend(to=P), they
+    // could both land in wave 0 (no deps), causing both machines to block
+    // waiting for each other before the local pipeline has fired.
+    //
+    // Fix: add the RemoteSend as a dep of the RemoteRecv whenever doing so
+    // doesn't introduce a cycle (i.e. recv is NOT already transitively reachable
+    // from send — which would mean it's a true bidirectional exchange that must
+    // run concurrently).
+    for machine_node_list in machine_nodes.values_mut() {
+        // Collect recv and send ids, keyed by peer.
+        let mut recvs_by_peer: HashMap<u32, Vec<String>> = HashMap::new();
+        let mut sends_by_peer: HashMap<u32, Vec<String>> = HashMap::new();
+        for node in machine_node_list.iter() {
+            let id = node["id"].as_str().unwrap_or("").to_string();
+            if let Some(rr) = node["kind"].get("RemoteRecv").and_then(|v| v.as_object()) {
+                if let Some(peer) = rr.get("peer").and_then(|v| v.as_u64()) {
+                    recvs_by_peer.entry(peer as u32).or_default().push(id);
+                }
+            } else if let Some(rs) = node["kind"].get("RemoteSend").and_then(|v| v.as_object()) {
+                if let Some(peer) = rs.get("peer").and_then(|v| v.as_u64()) {
+                    sends_by_peer.entry(peer as u32).or_default().push(id);
+                }
+            }
+        }
+
+        if recvs_by_peer.is_empty() || sends_by_peer.is_empty() {
+            continue;
+        }
+
+        // Build successor map: dep_id → [nodes that depend on dep_id].
+        let mut succ_map: HashMap<String, Vec<String>> = HashMap::new();
+        for node in machine_node_list.iter() {
+            let id = node["id"].as_str().unwrap_or("").to_string();
+            if let Some(deps) = node["deps"].as_array() {
+                for dep in deps {
+                    if let Some(d) = dep.as_str() {
+                        succ_map.entry(d.to_string()).or_default().push(id.clone());
+                    }
+                }
+            }
+        }
+
+        // For each peer that has both a recv and a send on this machine, check
+        // whether adding send→dep of recv is safe (no cycle).
+        let all_peers: Vec<u32> = recvs_by_peer.keys()
+            .filter(|p| sends_by_peer.contains_key(p))
+            .cloned()
+            .collect();
+
+        let mut deps_to_add: Vec<(String, String)> = Vec::new();
+        for peer in all_peers {
+            for recv_id in recvs_by_peer.get(&peer).unwrap() {
+                for send_id in sends_by_peer.get(&peer).unwrap() {
+                    // Adding send as dep of recv is safe only if send is NOT
+                    // already reachable from recv — i.e. no forward path
+                    // recv → … → send exists (which would become a cycle).
+                    if !dag_reachable(&succ_map, recv_id, send_id) {
+                        deps_to_add.push((recv_id.clone(), send_id.clone()));
+                    }
+                }
+            }
+        }
+
+        for (recv_id, send_id) in &deps_to_add {
+            for node in machine_node_list.iter_mut() {
+                if node["id"].as_str() == Some(recv_id.as_str()) {
+                    if let Some(deps) = node["deps"].as_array_mut() {
+                        if !deps.iter().any(|d| d.as_str() == Some(send_id.as_str())) {
+                            deps.push(json!(send_id));
+                            eprintln!(
+                                "[partitioner] ordered recv '{}' after send '{}' (deadlock prevention)",
+                                recv_id, send_id
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     // ── 6. Assemble output ───────────────────────────────────────────────────
 
     let node_dags: serde_json::Map<String, Value> = machine_nodes
@@ -355,6 +437,28 @@ fn resolve_upstream_nodes(
     let mut new_kind = serde_json::Map::new();
     new_kind.insert(variant.clone(), Value::Object(new_inner));
     Ok(Value::Object(new_kind))
+}
+
+/// BFS reachability check through a successor map (dep_id → dependents).
+/// Returns `true` if `target` is reachable from `start` by following successors.
+fn dag_reachable(succ_map: &HashMap<String, Vec<String>>, start: &str, target: &str) -> bool {
+    let mut visited: HashSet<&str> = HashSet::new();
+    let mut queue: VecDeque<&str> = VecDeque::new();
+    queue.push_back(start);
+    while let Some(node) = queue.pop_front() {
+        if node == target {
+            return true;
+        }
+        if !visited.insert(node) {
+            continue;
+        }
+        if let Some(succs) = succ_map.get(node) {
+            for s in succs {
+                queue.push_back(s.as_str());
+            }
+        }
+    }
+    false
 }
 
 /// Expand nodes with `placement: "all"` into one copy per machine (`{id}_0` … `{id}_{N-1}`).

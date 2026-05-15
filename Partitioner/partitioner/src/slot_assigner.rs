@@ -42,30 +42,65 @@ pub(crate) fn assign_slots(nodes: &mut Vec<SymbolicNode>) -> Result<()> {
     // (fanout_src_id, consumer_id) → the specific input slot the fan-out assigned
     let mut consumer_input: HashMap<(String, String), u32> = HashMap::new();
 
+    // fan-out node id → effective (possibly auto-adjusted) output base slot.
+    // The adjusted base is injected as `arg` so the WASM writes to the right slots.
+    let mut fanout_adjusted_base: HashMap<String, u32> = HashMap::new();
+
     // next free slot; starts at 2 so it sits above the two IO slots.
     // Fan-out processing (phase 1 below) will push it past any hardcoded ranges
     // (e.g. wc_distribute base=10 pushes it to ≥20, wc_map offset=100 to ≥120).
     let mut next_slot: u32 = 2;
 
-    // ── Phase 1: fan-out pre-pass ─────────────────────────────────────────────
-    // Walk topo order once to find every Func with `out_base`, assign per-consumer
-    // input slots, and advance next_slot past the reserved range.
-    for &idx in &order {
-        let node = &nodes[idx];
-        if let Some(func) = node.kind.get("Func") {
-            if let Some(base) = func.get("out_base").and_then(|v| v.as_u64()) {
-                let base = base as u32;
-                let src_id = node.id.clone();
-                // Consumers: nodes that list src_id in their deps, in array order.
-                let consumers: Vec<usize> = (0..nodes.len())
-                    .filter(|&i| nodes[i].deps.iter().any(|d| d == &src_id))
-                    .collect();
-                for (i, &cidx) in consumers.iter().enumerate() {
-                    let slot = base + i as u32;
-                    consumer_input.insert((src_id.clone(), nodes[cidx].id.clone()), slot);
-                    next_slot = next_slot.max(slot + 1);
-                }
+    // ── Phase 1: fan-out pre-pass with per-machine overlap auto-adjustment ────
+    //
+    // Two fan-out nodes that land on the same machine cannot share slot numbers —
+    // both would write to the same SHM region and map workers would read stale or
+    // interleaved data and stall.  We detect this from the JSON topology and shift
+    // the second node's base to start immediately after the first's range ends,
+    // then inject the corrected base as `arg` so the WASM writes to the right slots.
+    //
+    // Collect fan-out entries: (machine, original_base, node_idx), topo-ordered.
+    let fanout_entries: Vec<(u32, u32, usize)> = order
+        .iter()
+        .filter_map(|&idx| {
+            let func = nodes[idx].kind.get("Func")?;
+            let base = func.get("out_base")?.as_u64()? as u32;
+            let machine = nodes[idx].node_id?;
+            Some((machine, base, idx))
+        })
+        .collect();
+
+    // Group by machine (stable order within each machine = topo order).
+    let mut machines: Vec<u32> = fanout_entries.iter().map(|&(m, _, _)| m).collect();
+    machines.sort_unstable();
+    machines.dedup();
+
+    for machine in machines {
+        let mut next_free: u32 = 0;
+        for &(m, orig_base, idx) in &fanout_entries {
+            if m != machine {
+                continue;
             }
+            let eff_base = orig_base.max(next_free);
+            if eff_base != orig_base {
+                eprintln!(
+                    "[partitioner] auto-adjusted out_base for '{}' on machine {}: \
+                     {} → {} to avoid slot overlap",
+                    nodes[idx].id, machine, orig_base, eff_base
+                );
+            }
+            let src_id = nodes[idx].id.clone();
+            let consumers: Vec<usize> = (0..nodes.len())
+                .filter(|&i| nodes[i].deps.iter().any(|d| d == &src_id))
+                .collect();
+            let n = consumers.len() as u32;
+            for (i, &cidx) in consumers.iter().enumerate() {
+                let slot = eff_base + i as u32;
+                consumer_input.insert((src_id.clone(), nodes[cidx].id.clone()), slot);
+                next_slot = next_slot.max(slot + 1);
+            }
+            fanout_adjusted_base.insert(src_id, eff_base);
+            next_free = eff_base + n;
         }
     }
 
@@ -106,15 +141,16 @@ pub(crate) fn assign_slots(nodes: &mut Vec<SymbolicNode>) -> Result<()> {
             let out_offset = func.get("output_offset").and_then(|v| v.as_u64());
 
             if out_base.is_some() {
-                // Fan-out: arg = number of direct consumers
-                let n = (0..nodes.len())
-                    .filter(|&i| nodes[i].deps.iter().any(|d| d == &node_id))
-                    .count() as u32;
+                // Fan-out: arg = effective base slot (possibly auto-adjusted in Phase 1).
+                // The WASM reads arg as the first output slot and writes consecutively from there.
+                let eff_base = fanout_adjusted_base
+                    .get(&node_id)
+                    .copied()
+                    .unwrap_or(out_base.unwrap() as u32);
                 let mut new_func = func.clone();
-                new_func.insert("arg".into(), json!(n));
+                new_func.insert("arg".into(), json!(eff_base));
                 nodes[idx].kind = json!({ "Func": Value::Object(new_func) });
-                // Record out_base as the nominal output so id_to_output has an entry.
-                id_to_output.insert(node_id, out_base.unwrap() as u32);
+                id_to_output.insert(node_id, eff_base);
 
             } else if let Some(offset) = out_offset {
                 // Offset-output: arg = slot assigned by upstream fan-out (or dep output)
