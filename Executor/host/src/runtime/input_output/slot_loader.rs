@@ -49,8 +49,9 @@ use std::thread;
 use anyhow::{anyhow, Result};
 use nix::sys::mman::{mmap, munmap, MapFlags, ProtFlags};
 
-use common::{Page, ShmOffset, Superblock};
+use common::{Page, PageId, ShmOffset, Superblock};
 
+use crate::runtime::extended_pool;
 use crate::runtime::mem_operation::reclaimer;
 
 // ─── MappedFile ───────────────────────────────────────────────────────────────
@@ -201,24 +202,14 @@ impl SlotLoader {
         unsafe { &*(self.splice_addr as *const Superblock) }
     }
 
-    fn page_at(&self, offset: ShmOffset) -> &mut Page {
-        unsafe { &mut *((self.splice_addr + offset as usize) as *mut Page) }
+    fn page_ptr(&self, id: PageId) -> Result<*mut Page> {
+        extended_pool::runtime::resolve(id, self.splice_addr)
+            .map_err(|e| anyhow!("SlotLoader: resolve {id:#x}: {e}"))
     }
 
-    fn alloc_page(&self) -> Result<ShmOffset> {
-        // Phase 2.4c: the reclaimer now returns `PageId`.  SlotLoader
-        // only runs during the Input loading phase (before any guest
-        // code executes and before the bump could cross the 80%
-        // threshold), so we can assert the returned id is still in
-        // the direct window and truncate to ShmOffset.  Phase 2.4d
-        // will widen this helper if loaders ever run past threshold.
-        let id = reclaimer::alloc_page(self.splice_addr)
-            .map_err(|e| anyhow!("SlotLoader: {}", e))?;
-        debug_assert!(
-            id < common::DIRECT_LIMIT,
-            "SlotLoader got paged PageId {id:#x} — not yet supported",
-        );
-        Ok(id as ShmOffset)
+    fn alloc_page(&self) -> Result<PageId> {
+        reclaimer::alloc_page(self.splice_addr)
+            .map_err(|e| anyhow!("SlotLoader: {}", e))
     }
 
     fn append_record(&self, slot: u32, payload: &[u8]) -> Result<()> {
@@ -232,22 +223,22 @@ impl SlotLoader {
         let sb = self.sb();
         let s = slot as usize;
 
-        let mut tail: ShmOffset = sb.io_tails[s].load(Ordering::Acquire) as ShmOffset;
+        let mut tail: PageId = sb.io_tails[s].load(Ordering::Acquire);
         if tail == 0 {
             tail = self.alloc_page()?;
-            sb.io_heads[s].store(tail as u64, Ordering::Release);
-            sb.io_tails[s].store(tail as u64, Ordering::Release);
+            sb.io_heads[s].store(tail, Ordering::Release);
+            sb.io_tails[s].store(tail, Ordering::Release);
         }
 
         while !data.is_empty() {
-            let page = self.page_at(tail);
+            let page = unsafe { &mut *self.page_ptr(tail)? };
             let cursor = page.cursor.load(Ordering::Relaxed) as usize;
             let space = common::PAGE_DATA_SIZE.saturating_sub(cursor);
 
             if space == 0 {
                 let next = self.alloc_page()?;
-                page.next_offset.store(next as u64, Ordering::Release);
-                sb.io_tails[s].store(next as u64, Ordering::Release);
+                page.next_offset.store(next, Ordering::Release);
+                sb.io_tails[s].store(next, Ordering::Release);
                 tail = next;
                 continue;
             }

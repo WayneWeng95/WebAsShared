@@ -220,6 +220,11 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
     let mut linker = Linker::new(&engine);
     let memory = setup_vma_environment(&mut store, &mut linker, &file)?;
 
+    // Register the SHM file for host-driven growth (SlotLoader, RDMA receive,
+    // and the reclaimer all call shm::try_grow_shm when the bump overflows).
+    let splice_addr = store.data().splice_addr;
+    crate::shm::register_shm_for_growth(file.try_clone()?, splice_addr);
+
     let wasm_path = dag.wasm_path.as_deref().unwrap_or(WASM_PATH);
     let module = Module::from_file(&engine, wasm_path)?;
     let instance = linker.instantiate(&mut store, &module)?;

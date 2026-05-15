@@ -3,12 +3,12 @@
 //! Two-state FSM:
 //!
 //! ```text
-//!                 bump >= 80% of DIRECT_LIMIT
-//!        Direct ─────────────────────────────▶ Paged
-//!           ▲                                    │
-//!           │  global_live == 0                  │
-//!           │  && bump < 50% of DIRECT_LIMIT     │
-//!           └────────────────────────────────────┘
+//!                 bump >= 80% of DIRECT_LIMIT (1.6 GiB)
+//!        Direct ──────────────────────────────────────▶ Paged
+//!           ▲                                              │
+//!           │  global_live == 0                            │
+//!           │  && bump < 50% of DIRECT_LIMIT               │
+//!           └──────────────────────────────────────────────┘
 //! ```
 //!
 //! `Direct → Paged` is triggered by `ExtendedPool::on_bump_advance`
@@ -60,7 +60,11 @@ fn debug_enter_threshold() -> Option<u64> {
 /// Should we flip `Direct -> Paged` given the current bump offset?
 ///
 /// Honors the `WEBS_FORCE_FLIP_AT` environment override when set,
-/// otherwise uses the 80% production threshold.
+/// otherwise fires at 80% of `DIRECT_LIMIT` (1.6 GiB).  The SHM
+/// file grows dynamically from `INITIAL_SHM_SIZE` up to `DIRECT_LIMIT`
+/// as demand increases; this threshold ensures the GlobalPool only
+/// takes over for workloads that genuinely exhaust the full 2 GiB
+/// direct window.
 #[inline]
 pub fn should_enter_paged(bump_offset: ShmOffset) -> bool {
     if let Some(thresh) = debug_enter_threshold() {
@@ -68,7 +72,7 @@ pub fn should_enter_paged(bump_offset: ShmOffset) -> bool {
     }
     // Compare `bump / DIRECT_LIMIT >= 8/10` without floats.
     //   bump * 10 >= DIRECT_LIMIT * 8
-    // Widening to u64 to avoid overflow for values near DIRECT_LIMIT.
+    // Both sides widened to u64 to avoid overflow.
     (bump_offset as u64) * PAGED_MODE_ENTER_DEN
         >= DIRECT_LIMIT * PAGED_MODE_ENTER_NUM
 }
@@ -92,8 +96,8 @@ mod tests {
     fn enter_at_80_percent() {
         assert!(!should_enter_paged(0));
         assert!(!should_enter_paged((DIRECT_LIMIT as ShmOffset) / 2));
-        // 80% of 2 GiB = 1.6 GiB
-        let eighty = ((DIRECT_LIMIT * 8 / 10) as ShmOffset) + 1;
+        // 80% of DIRECT_LIMIT (2 GiB) = 1.6 GiB
+        let eighty = (DIRECT_LIMIT * 8 / 10) as ShmOffset + 1;
         assert!(should_enter_paged(eighty));
     }
 

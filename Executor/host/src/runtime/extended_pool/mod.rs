@@ -340,7 +340,7 @@ mod tests {
         let mut pool = ExtendedPool::new();
         pool.check_bump(1024, 0).unwrap();
         assert_eq!(pool.mode(), Mode::Direct);
-        // 79% — just under.
+        // 79% of DIRECT_LIMIT — just under the 80% threshold.
         pool.check_bump((DIRECT_LIMIT * 79 / 100) as ShmOffset, 0).unwrap();
         assert_eq!(pool.mode(), Mode::Direct);
     }
@@ -349,7 +349,7 @@ mod tests {
     fn check_bump_at_or_above_80_percent_flips_paged() {
         let (base, size) = make_window(4);
         let mut pool = ExtendedPool::new();
-        // Integer math: strict threshold is `bump * 10 >= DIRECT_LIMIT * 8`.
+        // Strict threshold: bump * 10 >= DIRECT_LIMIT * 8.
         // Nudge by one page to clearly exceed.
         let bump = (DIRECT_LIMIT * 8 / 10) as ShmOffset + PAGE_SIZE;
         pool.check_bump(bump, base).unwrap();

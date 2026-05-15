@@ -53,6 +53,7 @@ use common::{Page, PageId, ShmOffset, Superblock, DIRECT_LIMIT, FREE_LIST_SHARD_
              FREE_LIST_TRIM_ENABLED, FREE_LIST_TRIM_THRESHOLD, PAGE_SIZE};
 
 use crate::runtime::extended_pool;
+use crate::shm;
 
 // ─── Global round-robin shard counter ────────────────────────────────────────
 
@@ -110,9 +111,21 @@ pub fn alloc_page(splice_addr: usize) -> Result<PageId> {
     let offset = sb.bump_allocator.fetch_add(PAGE_SIZE, Ordering::AcqRel);
     let cap = sb.global_capacity.load(Ordering::Acquire);
     if offset + PAGE_SIZE > cap {
-        // Direct-mode bump exhausted.  If paged mode is active, fall
-        // back to the extended pool; the returned PageId will be
-        // `>= DIRECT_LIMIT` and callers must `resolve` it before use.
+        // Direct-mode bump exhausted.  First try to grow the SHM file
+        // (16 MiB → 32 MiB → … → 2 GiB) so the allocation stays in
+        // the direct window.  If growth is possible the page at `offset`
+        // is valid and we proceed normally.
+        if let Ok(new_cap) = shm::try_grow_shm(splice_addr, offset + PAGE_SIZE) {
+            if offset + PAGE_SIZE <= new_cap {
+                let page = unsafe { &mut *((splice_addr + offset as usize) as *mut Page) };
+                page.next_offset.store(0, Ordering::Relaxed);
+                page.cursor.store(0, Ordering::Relaxed);
+                extended_pool::runtime::notify_bump_advance(offset + PAGE_SIZE, splice_addr);
+                return Ok(offset as PageId);
+            }
+        }
+        // SHM is at CAPACITY_HARD_LIMIT (2 GiB).  If paged mode is
+        // active, fall back to the extended pool.
         if extended_pool::runtime::current_mode() == extended_pool::Mode::Paged {
             // Undo the speculative fetch_add so the bump pointer
             // doesn't march past `cap` for subsequent callers.
@@ -122,7 +135,7 @@ pub fn alloc_page(splice_addr: usize) -> Result<PageId> {
         }
         return Err(anyhow!(
             "SHM capacity exhausted ({} of {} bytes used). \
-             Reduce data volume or increase INITIAL_SHM_SIZE.",
+             SHM is at the 2 GiB hard limit and paged mode is not active.",
             offset + PAGE_SIZE,
             cap,
         ));

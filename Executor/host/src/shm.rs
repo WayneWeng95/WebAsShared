@@ -1,8 +1,10 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use nix::sys::mman::{mmap, MapFlags, ProtFlags};
 use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::num::NonZeroUsize;
+use std::sync::{Mutex, OnceLock};
+use std::sync::atomic::Ordering;
 
 use common::*;
 
@@ -56,4 +58,67 @@ pub fn expand_mapping(file: &File, addr: usize, new_size: usize) -> Result<()> {
     file.set_len(new_size as u64)?;
     // 2. Use MAP_FIXED to expand the VMA in place
     map_into_memory(file, addr, new_size)
+}
+
+// ── Host-driven SHM growth ────────────────────────────────────────────────────
+
+/// Process-global SHM file handle and its mapped base address.
+/// Registered once at startup by `register_shm_for_growth`.
+static SHM_GROW: OnceLock<Mutex<(File, usize)>> = OnceLock::new();
+
+/// Register the SHM file for host-driven capacity growth.
+///
+/// Must be called once per process after `setup_vma_environment` sets
+/// the `splice_addr`.  Any subsequent call is silently ignored (the
+/// `OnceLock` keeps only the first registration).
+pub fn register_shm_for_growth(file: File, splice_addr: usize) {
+    let _ = SHM_GROW.set(Mutex::new((file, splice_addr)));
+}
+
+/// Grow the SHM file so that at least `required` bytes are accessible.
+///
+/// Uses double-checked locking: the fast path is a single atomic read
+/// of `sb.global_capacity`; the slow path acquires the mutex, re-checks,
+/// and calls `expand_mapping`.  Capacity doubles geometrically from the
+/// current size, capped at `CAPACITY_HARD_LIMIT` (2 GiB).
+///
+/// Returns `Ok(new_capacity)` on success, or an error if the grower is
+/// not registered or the hard limit would be exceeded.
+pub fn try_grow_shm(splice_addr: usize, required: ShmOffset) -> Result<ShmOffset> {
+    let sb = unsafe { &*(splice_addr as *const Superblock) };
+
+    // Fast path — already large enough.
+    let current = sb.global_capacity.load(Ordering::Acquire);
+    if current >= required {
+        return Ok(current);
+    }
+
+    let guard = SHM_GROW.get()
+        .ok_or_else(|| anyhow!("SHM grower not registered (call register_shm_for_growth at startup)"))?;
+    let (file, base) = &*guard.lock().expect("shm_grow mutex poisoned");
+
+    // Re-check under lock — another thread may have grown already.
+    let current = sb.global_capacity.load(Ordering::Acquire);
+    if current >= required {
+        return Ok(current);
+    }
+
+    // Geometric growth capped at the hard limit.
+    let new_cap = current.saturating_mul(2).max(required).min(CAPACITY_HARD_LIMIT);
+    if new_cap < required {
+        return Err(anyhow!(
+            "SHM hard limit ({} GiB) reached — cannot grow to {} bytes",
+            CAPACITY_HARD_LIMIT as u64 / (1024 * 1024 * 1024),
+            required,
+        ));
+    }
+
+    expand_mapping(file, *base, new_cap as usize)?;
+    sb.global_capacity.store(new_cap, Ordering::Release);
+    eprintln!(
+        "[SHM] grew: {} MiB → {} MiB",
+        current / MIB,
+        new_cap / MIB,
+    );
+    Ok(new_cap)
 }

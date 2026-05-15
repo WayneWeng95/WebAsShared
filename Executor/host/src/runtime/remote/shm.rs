@@ -99,10 +99,9 @@ pub(super) fn alloc_and_link(
     let dest_off = sb.bump_allocator.fetch_add(bytes_to_alloc, Ordering::AcqRel);
     let cap      = sb.global_capacity.load(Ordering::Acquire);
     if dest_off + bytes_to_alloc > cap {
-        return Err(anyhow!(
-            "SHM capacity exhausted for RDMA receive ({} bytes). \
-             Increase INITIAL_SHM_SIZE.", bytes_to_alloc
-        ));
+        // Try to grow the SHM file before failing.
+        crate::shm::try_grow_shm(splice_addr, dest_off + bytes_to_alloc)
+            .map_err(|e| anyhow!("SHM capacity exhausted for RDMA receive: {}", e))?;
     }
 
     for i in 0..n_pages as ShmOffset {
