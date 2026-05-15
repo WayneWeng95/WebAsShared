@@ -37,7 +37,7 @@ Subsystem design notes live in [`docs/`](docs/):
 | [docs/barrier.md](docs/barrier.md) | Intra-wave futex barrier: the `ShmApi::barrier_wait` guest API, DAG `barrier_group` JSON syntax, usage examples, and the single-node constraint. |
 | [docs/slots.md](docs/slots.md) | Stream slots and I/O slots — what they are, when to use which, slot lifecycle across DAG waves. |
 | [docs/WASM64.md](docs/WASM64.md) | Investigation into wasm64 (memory64) as an alternative path to larger linear memory, why it compiles but doesn't run practically, and the infrastructure left in place in case wasmtime's JIT performance improves. |
-| [Partitioner/README.md](Partitioner/README.md) | Auto-partitioner: takes a `SymbolicDag` (slot-free, may omit `node_id`) and produces a `ClusterDag` with placement decided by live sched_ext load, all slot numbers derived automatically, and `RemoteSend`/`RemoteRecv` pairs injected for cross-node edges. Invoked transparently by `node-agent submit` when the input JSON contains `"total_nodes"`. |
+| [Partitioner/README.md](Partitioner/README.md) | Auto-partitioner: takes a `SymbolicDag` (slot-free, may omit `node_id`) and produces a `ClusterDag` with placement controlled by `placement_policy` (balanced / pack / spread / weighted) or live sched_ext load, all slot numbers derived automatically with per-machine overlap detection, `RemoteSend`/`RemoteRecv` pairs injected for cross-node edges, and wave-0 deadlock prevention applied automatically. Invoked transparently by `node-agent submit` when the input JSON contains `"total_nodes"`. |
 | [docs/updates.md](docs/updates.md) | Historical change log. |
 
 ## Project Structure
@@ -77,10 +77,11 @@ WebAsShared/
 |-- Partitioner/                    # Symbolic-DAG auto-partitioner
 |   |-- partitioner/src/            # Crate: partition(), SymbolicDag, slot helpers
 |   |   |-- placer.rs               # assign_nodes(): capacity-aware host assignment from sched_ext hints
-|   |   |-- slot_assigner.rs        # assign_slots(): derive all slot numbers from DAG topology
-|   |   |-- splitter.rs             # partition(): cross-node edge detection, RemoteSend/RemoteRecv injection
+|   |   |-- policies.rs             # PlacementPolicy enum: balanced / pack / spread / weighted; resolve_policy()
+|   |   |-- slot_assigner.rs        # assign_slots(): derive all slot numbers; auto-adjust per-machine fan-out overlaps
+|   |   |-- splitter.rs             # partition(): edge split, RemoteSend/RemoteRecv injection, wave-0 deadlock fix
 |   |   +-- slot.rs                 # output_slot(), collect_slots() helpers
-|   +-- README.md                   # Design notes and upgrade paths
+|   +-- README.md                   # Partitioner design, symbolic DAG format, placement policy reference
 +-- DAGs/                           # All DAG JSON specifications
     |-- demo_dag/                   # Single-node demos (word count, image pipeline)
     |-- workload_dag/               # Single-node workloads (FINRA, ML training, TF-IDF)
@@ -209,8 +210,8 @@ Nodes in a SymbolicDag need not specify any slot numbers. The `slot_assigner` de
 
 | Func field | Meaning |
 |---|---|
-| `"out_base": N` | Fan-out: outputs to slots `[N, N+1, …, N+consumers-1]`; sets `arg = N_consumers`. Encodes the function's hardcoded output base (e.g. `WC_DIST_BASE = 10`). |
-| `"output_offset": K` | Output = input + K; inherits input slot from upstream fan-out. Encodes the function's hardcoded output offset (e.g. `WC_MAP_OUT_BASE = 100`). |
+| `"out_base": N` | Fan-out: outputs to slots `[N, N+1, …, N+consumers-1]`; injects `arg = effective_base` (possibly auto-bumped to avoid per-machine slot overlap). |
+| `"output_offset": K` | Output = upstream fan-out's effective base + K; inherits input slot from upstream. |
 | neither | Terminal: `arg` = dep's output slot, writes to `OUTPUT_IO_SLOT (1)`. |
 
 `Aggregate {}` derives its `upstream_nodes` from `deps` and receives a freshly allocated `downstream` slot. `Input {}` defaults to `slot: 0`. `Output {}` reads the dep's output slot (rewritten to the RemoteRecv slot when the dep is cross-node).
@@ -236,19 +237,23 @@ Example — a complete word count pipeline with no slot numbers:
 
 #### Capacity-Aware Auto-Placement
 
-Nodes with `node_id` omitted are auto-assigned by the `placer` using live sched_ext stats:
+Nodes with `node_id` omitted are auto-assigned by the `placer`. Placement is controlled by the `placement_policy` field in the symbolic DAG JSON (introduced to replace the legacy `hints` object):
 
-- **Single-host packing**: if all auto nodes fit within the least-loaded host's limit, pack them there to minimise cross-node edges.
+```json
+"placement_policy": "pack"       // colocate on fewest hosts (default)
+"placement_policy": "balanced"   // spread proportionally across all hosts
+"placement_policy": "spread"     // at most one auto-node per host
+"placement_policy": { "type": "weighted", "weights": [0.8, 0.2] }
+"placement_policy": { "type": "balanced", "per_host_limit": 4 }
+```
+
+Priority order for hints: **coordinator live sched_ext stats** > **`placement_policy`** > **`hints` (legacy)** > **default (`pack`)**.
+
+When live sched_ext stats are available the coordinator passes `PlacementHints { capacity, host_limit }` computed from `ScxClusterView`, overriding any policy embedded in the file. The placer then:
+
+- **Single-host packing**: if all auto nodes fit within the most-capable host's limit, pack them there to minimise cross-node edges.
 - **Proportional spread**: otherwise, allocate proportionally to `capacity` weights using largest-remainder rounding, then assign greedily in topological order with dep-affinity tie-breaking.
-- **Fallback**: when no hints are available, round-robin across all hosts.
-
-The coordinator passes `PlacementHints { capacity, host_limit }` sourced from its live `ScxClusterView` (see Scheduler section). Three scenarios are covered by `DAGs/symbolic_dag/word_count_auto.json`:
-
-| Scenario | Hints | Result |
-|---|---|---|
-| Balanced | `capacity: {0:0.5, 1:0.5}, host_limit: {0:12, 1:12}` | aggregation split across both hosts |
-| Skewed | `capacity: {0:0.85, 1:0.15}, host_limit: {0:12, 1:1}` | all auto nodes packed onto idle host 0 |
-| No hints | — | uniform round-robin fallback |
+- **Fallback**: when no hints are available and no `placement_policy` is set, defaults to `pack`.
 
 ## Architecture
 
@@ -456,7 +461,7 @@ The host creates a SHM file and maps it at a fixed offset (`0x80000000`) in each
             +--------------------------------+
 ```
 
-Starting SHM size is `INITIAL_SHM_SIZE = 64 MiB` (`common/src/lib.rs`), which is also the length registered as MR1 with the NIC. The bump region grows on demand via `host_remap` (local) or via `MeshNode::ensure_shm_capacity` (host-side, used by the MR2 memcpy-back described below). No per-peer RDMA staging region is pre-reserved — receives allocate from the common page pool on demand.
+Starting SHM size is `INITIAL_SHM_SIZE = 64 MiB` (`common/src/lib.rs`), which grows geometrically on demand via `shm::try_grow_shm` up to `CAPACITY_HARD_LIMIT = 2 GiB`. The NIC registers MR1 over the initial window; MR-src-ext covers pages past the original MR1 boundary as SHM grows. The bump region grows on demand via `host_remap` (local) or via `MeshNode::ensure_shm_capacity` (host-side, used by the MR2 memcpy-back described below). No per-peer RDMA staging region is pre-reserved — receives allocate from the common page pool on demand.
 
 ### Host-side overflow MRs (Path C)
 
@@ -670,5 +675,7 @@ ib_write_bw  -d mlx4_0 -i 2 -x 0 --report_gbits 10.10.1.1
 - **NodeAgent as entry point**: the NodeAgent binary is the single interface for both single-node and multi-node execution, spawning the Executor as a subprocess.
 - **Coordinator-worker model**: static membership, TCP control plane (separate from RDMA data plane), RDMA mesh connects with 30s retry window for robustness. No consensus needed for research-scale clusters (2-32 nodes).
 - **Kernel-aware scheduling**: workers collect real-time SCX sched_ext stats (CPU load, NUMA imbalance, migration pressure) and report them to the coordinator, enabling scheduling decisions informed by actual kernel scheduling state rather than coarse `/proc/stat` samples alone.
-- **Capacity-aware auto-placement**: SymbolicDag nodes with no `node_id` are assigned to hosts at submit time using live sched_ext load data — packing onto the least-loaded host when it has headroom, otherwise spreading proportionally with dep-affinity tie-breaking to minimise cross-node edges.
+- **Placement policies**: SymbolicDag nodes with no `node_id` are assigned by a named `placement_policy` field (`balanced`, `pack`, `spread`, `weighted`) embedded in the DAG JSON. Live sched_ext hints from the coordinator override the policy when available. The default policy (`pack`) colocates auto-placed nodes on the single most-capable host to minimise cross-node edges.
+- **Slot overlap auto-adjustment**: when two fan-out nodes on the same machine share overlapping `out_base` slot ranges, the Partitioner detects the conflict and shifts the second node's base automatically, injecting the corrected base as `arg` so WASM writes to the right slots without DAG changes.
+- **Wave-0 deadlock prevention**: the Partitioner detects `RemoteRecv`/`RemoteSend` pairs targeting the same peer on the same machine and adds a dependency edge (send before recv) when safe, breaking the mutual-block that would otherwise stall both machines in wave 0.
 - **Slot-free DAG authoring**: SymbolicDag inputs carry no slot numbers. The `slot_assigner` derives every slot from the DAG topology plus two lightweight per-function declarations (`out_base`, `output_offset`) that encode the WASM function's hardcoded I/O offsets. All `Aggregate`, `Input`, `Output`, and terminal `Func` slots are fully automatic.

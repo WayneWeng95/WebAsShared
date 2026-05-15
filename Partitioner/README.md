@@ -1,102 +1,137 @@
 # Partitioner
 
-**Status: placeholder — design notes only, no implementation yet.**
+The Partitioner takes a **symbolic, location-agnostic DAG** and auto-partitions it into per-node DAGs suitable for the NodeAgent submission path (`ClusterDag.node_dags`).
 
-Reserved for a future subsystem that takes a **symbolic, location-agnostic DAG**
-and auto-partitions it into per-node DAGs suitable for the existing NodeAgent
-submission path (`ClusterDag.node_dags`).
+A symbolic DAG describes the logical computation — nodes and edges only — without explicit `RemoteSend`/`RemoteRecv` pairs or slot numbers. The Partitioner inserts these automatically.
 
-## Why this exists
-
-Today, distributed workflows are authored as `ClusterDag` JSON with the
-per-node split already done by hand. For example, `DAGs/cluster_dag/word_count.json`
-contains two fully-enumerated DAGs under `node_dags["0"]` and `node_dags["1"]`,
-complete with explicit `RemoteSend` / `RemoteRecv` node pairs, matching slot
-numbers, and matching peer IDs. The author is responsible for:
-
-- Deciding which computations live on which node
-- Inserting `RemoteSend` / `RemoteRecv` at every cross-node edge
-- Assigning compatible slot IDs on each side
-- Keeping the two sides' DAGs structurally consistent
-
-`NodeAgent/agent/src/cluster_dag.rs::split` only does trivial work on top of
-this: it injects the RDMA mesh config (`node_id`, `total`, `ips`) into each
-per-node DAG and ships them. No graph-level reasoning.
-
-This works well for the current research workload set (~8 hand-written pipelines)
-but doesn't scale to larger or dynamically-generated DAGs, and it makes it hard
-to experiment with placement strategies without rewriting the JSON.
-
-## What a Partitioner would do
-
-Accept a single symbolic DAG describing the **logical** computation — nodes
-and edges only, no node IDs or `Remote*` nodes — together with a placement
-annotation (either explicit `node_id` per node, or a cost-based placement
-policy). Produce a `ClusterDag` with the per-node DAGs filled in.
-
-Rough pipeline:
+## Pipeline
 
 ```
-SymbolicDag  ──┐
-               ├──▶ [placement]  ──▶  annotated DAG
-PlacementHint ─┘                       │
-                                       ▼
-                                  [edge splitter]
-                                       │
-                                       ▼
-                                  [slot allocator]
-                                       │
-                                       ▼
-                                    ClusterDag
-                                       │
-                                       ▼
-                          NodeAgent coordinator.submit()
+SymbolicDag (JSON)
+      │
+      ▼
+[1. expand_all_placements]   placement:"all" → one copy per machine
+      │
+      ▼
+[2. expand_fanout]           fanout:N → N parallel copies
+      │
+      ▼
+[3. assign_nodes]            auto-placed nodes → concrete node_ids via placement policy
+      │
+      ▼
+[4. edge splitter]           cross-node edges → RemoteSend / RemoteRecv pairs
+      │
+      ▼
+[5. deadlock prevention]     add RemoteSend → RemoteRecv dep when safe (wave-0 fix)
+      │
+      ▼
+[6. slot_assigner]           assign stream/IO slot numbers; auto-adjust for per-machine overlaps
+      │
+      ▼
+ClusterDag  →  NodeAgent coordinator.submit()
 ```
 
-### Stages
+## Symbolic DAG JSON Format
 
-1. **Placement** — decide `node_id` for every logical node. Simplest version:
-   author tags each node with a `node_id` field; Partitioner just validates.
-   Later: cost model over (compute, data locality, link bandwidth).
+```json
+{
+  "description": ["..."],
+  "shm_path_prefix": "/dev/shm/my_dag",
+  "log_level": "info",
+  "transfer": true,
+  "total_nodes": 2,
+  "placement_policy": "pack",
+  "nodes": [
+    { "id": "load",       "placement": "all", "deps": [],
+      "kind": { "Input": { "path": "TestData/corpus_1gb.txt", "prefetch": true } } },
+    { "id": "distribute", "placement": "all", "deps": ["load"],
+      "kind": { "Func": { "func": "wc_distribute", "out_base": 50 } } },
+    { "id": "map_n",      "placement": "all", "fanout": 4, "deps": ["distribute"],
+      "kind": { "Func": { "func": "wc_map", "output_offset": 100 } } },
+    { "id": "reduce",     "deps": ["aggregate"],
+      "kind": { "Func": { "func": "wc_reduce" } } }
+  ]
+}
+```
 
-2. **Edge splitter** — for every edge whose endpoints are on different nodes,
-   replace it with a `(RemoteSend, RemoteRecv)` pair. Pick matching slot IDs
-   on both sides. Insert any required barriers / synchronization.
+### Node fields
 
-3. **Slot allocator** — assign stream/IO slot numbers consistently across the
-   partition. Reuse slot IDs for disjoint lifetimes where safe.
+| Field | Description |
+|-------|-------------|
+| `placement: "all"` | Expand to one copy per machine (`{id}_0` … `{id}_{N-1}`) |
+| `fanout: N` | Expand to N parallel copies within the same machine |
+| `node_id: K` | Pin to machine K explicitly |
+| *(absent)* | Auto-placed by `placement_policy` |
+| `out_base: S` | Fan-out output slot range starts at S; per-machine overlap auto-adjusted |
 
-4. **MR2 sizing and opt-in** *(future; interacts with the on-demand MR2 feature
-   in the Executor)* — the Executor's MR2 feature is opt-in per transfer via
-   a `use_mr2` flag on `RemoteSend` / `RemoteRecv`, paired with an explicit
-   `RdmaReserve { size, peer }` node on the receiver side. Both are
-   author-written today. A Partitioner should derive them automatically from
-   an edge annotation such as `expected_bytes: 100 MiB`: emit
-   `RdmaReserve` on the receiver, set `use_mr2: true` on both halves of the
-   `Remote*` pair.
+## Placement Policies
 
-## Open questions
+The `placement_policy` field replaces the legacy `hints` object. It accepts either a string shorthand or a parameterised config object.
 
-- **Representation**: a separate Rust crate producing ClusterDag JSON, or an
-  in-process preprocessing step inside NodeAgent's submit path?
-- **Placement input**: author-annotated vs. cost-model-driven. Author
-  annotation is the simpler MVP and covers the research workloads.
-- **Shape of edges**: today cross-node edges are always `RemoteSend/Recv`.
-  Should the Partitioner also know about RDMA atomics, broadcast trees, or
-  ring-reduce patterns for collective ops?
-- **Round-trip**: do we persist the partitioned ClusterDag (authoring artifact)
-  or re-partition at every submit (single source of truth)?
-- **Interaction with MR2 reservation**: the on-demand MR2 DAG node
-  (`RdmaReserve`) is author-written today. A Partitioner should be able to
-  derive it automatically from an edge annotation like `expected_bytes: 100 MiB`.
+### String shorthands
 
-## Not in scope (yet)
+```json
+"placement_policy": "balanced"
+"placement_policy": "pack"
+"placement_policy": "spread"
+```
 
-- Dynamic re-partitioning during a running DAG
-- Failure recovery / node failover
-- Cross-cluster federation
+| Policy | Behaviour |
+|--------|-----------|
+| `balanced` | Equal capacity weight per host; nodes distributed proportionally |
+| `pack` | Colocate all auto-placed nodes on the single most-capable host (default when field is omitted) |
+| `spread` | At most one auto-placed node per host |
 
----
+### Parameterised objects
 
-Revisit this once the on-demand MR2 feature in the Executor has shipped and we
-have more than a handful of ClusterDag workloads authored by hand.
+```json
+"placement_policy": { "type": "weighted", "weights": [0.8, 0.2] }
+"placement_policy": { "type": "balanced", "per_host_limit": 4 }
+```
+
+The `per_host_limit` field caps auto-placed sandboxes per host and works with any policy type.
+
+### Priority order
+
+Live capacity hints from the coordinator always take precedence:
+
+```
+coordinator live hints  >  placement_policy  >  hints (legacy)  >  default (pack)
+```
+
+## Slot Assignment
+
+`slot_assigner::assign_slots` runs after node placement and assigns concrete SHM slot numbers:
+
+- Fan-out nodes (`out_base`) get a slot range starting at `out_base`. If two fan-out nodes on the **same machine** would use overlapping slot ranges, the second node's base is auto-bumped to start immediately after the first's range ends, and the adjusted base is injected as `arg` so the WASM function writes to the correct slots.
+- Nodes with `output_offset` receive the slot assigned to their upstream fan-out source plus the offset.
+- Auto-placed nodes without `out_base` or `output_offset` get the next available slot from a monotone counter.
+
+## Deadlock Prevention
+
+When a machine has both a `RemoteRecv(from=P)` and a `RemoteSend(to=P)` with no dependencies between them, both land in wave 0 and each machine blocks waiting for the other before any local work has run.
+
+The splitter detects this pattern and adds `RemoteSend` as a dependency of `RemoteRecv` whenever doing so cannot create a cycle (checked via BFS reachability). This ensures sends fire first in wave 0 before the corresponding recv waits.
+
+## Example: word_count_auto_placement.json
+
+`DAGs/symbolic_dag/word_count_auto_placement.json` demonstrates a 2-node word count:
+
+- `load` (placement: all) — each machine reads its locally staged 1 GiB corpus shard
+- `distribute` (placement: all, out_base: 50) — splits lines across map workers; writes to slots 50…53 per machine
+- `map_n` (placement: all, fanout: 4) — 4 parallel map workers per machine
+- `aggregate` — collects map outputs per machine
+- `aggregate_global`, `reduce`, `save` — auto-placed by policy (default: `pack`)
+
+The `placement_policy: "pack"` field replaced the old explicit `hints` object:
+
+```json
+// Before (legacy hints)
+"hints": {
+  "capacity":   { "0": 0.5, "1": 0.5 },
+  "host_limit": { "0": 12,  "1": 12  }
+}
+
+// After (placement_policy)
+"placement_policy": "pack"
+```

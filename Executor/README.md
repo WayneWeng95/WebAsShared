@@ -112,6 +112,80 @@ Defined in `common/src/lib.rs`. All offsets are deterministic:
 
 Stream and I/O slots are singly-linked lists of 4 KiB pages. Routing operations (Bridge, Aggregate, Shuffle) manipulate page-chain head/tail pointers atomically — no data copying.
 
+### SHM Allocation Flow
+
+The system uses three distinct memory regions, engaged in order as pressure increases:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Region 1 — Direct SHM  (PageId < 2 GiB = DIRECT_LIMIT)        │
+│  /dev/shm/webs-<pid>   starts at 16 MiB, grows to 2 GiB        │
+│  Accessible by WASM guest and host via raw pointer arithmetic    │
+├─────────────────────────────────────────────────────────────────┤
+│  Region 2 — GlobalPool  (PageId ≥ DIRECT_LIMIT)                 │
+│  /dev/shm/webs-global-<pid>   256 MiB → 8 GiB                  │
+│  Activated when Direct SHM usage hits 1.6 GiB (80% of 2 GiB)  │
+│  Host resolves paged PageIds via extended_pool::runtime::resolve │
+├─────────────────────────────────────────────────────────────────┤
+│  Region 3 — RdmaPool  (PageId ≥ 2^48 = RDMA_MR2_MARKER)        │
+│  /dev/shm/webs-rdma-<pid>   RDMA staging only                   │
+│  Used only when an RDMA transfer exceeds the 256 MiB MR1 budget │
+│  Never accessible to WASM guests                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Phase 1 — Direct mode (bump offset 0 → 1.6 GiB)**
+
+`reclaimer::alloc_page` checks the free list first, then bumps the `bump_allocator` atomic in the Superblock. If the bump would exceed `global_capacity`, `shm::try_grow_shm` is called: it doubles the SHM file size with `ftruncate` and remaps the VMA in-place with `mmap(MAP_FIXED)` — no pages are copied, and all existing pointers remain valid. Growth continues geometrically (16 MiB → 32 → 64 → … → 2 GiB). All resulting PageIds are plain byte offsets within the SHM file.
+
+**Phase 2 — Paged mode flip (bump offset crosses 1.6 GiB)**
+
+When `extended_pool::mode::should_enter_paged(bump)` returns true (i.e. `bump × 10 ≥ DIRECT_LIMIT × 8`), the extended pool transitions to Paged mode. A GlobalPool backing file is created at `/dev/shm/webs-global-<pid>` and a `ResolutionBuffer` is seeded so the host can map any paged PageId (≥ `DIRECT_LIMIT = 2 GiB`) to a host pointer via `extended_pool::runtime::resolve(id, splice_addr)`.
+
+**Phase 3 — Paged mode (overflow into GlobalPool)**
+
+Once in Paged mode, `reclaimer::alloc_page` rolls back the SHM bump and calls `extended_pool::runtime::alloc_paged_page` instead. The GlobalPool grows geometrically from 256 MiB up to 8 GiB. The host accesses paged pages through `resolve`; WASM guests use `ResolutionBuffer` to translate paged PageIds transparently.
+
+**SlotLoader (Phase 2.4d)**
+
+`SlotLoader` calls `reclaimer::alloc_page` which may return a paged PageId (≥ `DIRECT_LIMIT`). All page accesses go through `self.page_ptr(id)` → `extended_pool::runtime::resolve(id, splice_addr)`, so both direct and paged allocations are handled uniformly without any special-casing in the I/O path.
+
+**Example: 1 GiB word-count corpus**
+
+With a 1 GiB input file the SHM starts at 16 MiB and grows: 16 → 32 → 64 → 128 → 256 → 512 MiB → 1 GiB. All pages remain in Direct mode (PageId < 2 GiB). GlobalPool and RdmaPool are never touched. The corpus bytes land in SHM page chains that the WASM `wc_distribute` function reads directly by pointer arithmetic — zero copies after the initial `read()` from disk.
+
+## Partitioner and Auto Placement
+
+The Partitioner (`../Partitioner/`) converts a symbolic, location-agnostic DAG into a concrete `ClusterDag` for NodeAgent submission. Instead of hand-writing `RemoteSend`/`RemoteRecv` pairs and slot numbers, you write a logical DAG and the Partitioner inserts them automatically.
+
+### placement_policy field
+
+The `placement_policy` field in a symbolic DAG JSON controls where auto-placed nodes land. It replaces the old `hints` object:
+
+```json
+// Legacy (still supported, lower priority)
+"hints": { "capacity": { "0": 0.5, "1": 0.5 }, "host_limit": { "0": 12, "1": 12 } }
+
+// New — string shorthand
+"placement_policy": "balanced"   // proportional across all hosts
+"placement_policy": "pack"       // colocate on fewest hosts (default when field is omitted)
+"placement_policy": "spread"     // at most one auto-node per host
+
+// New — parameterised object
+"placement_policy": { "type": "weighted", "weights": [0.8, 0.2] }
+"placement_policy": { "type": "balanced", "per_host_limit": 4 }
+```
+
+Priority order: coordinator live hints > `placement_policy` > `hints` > default (`pack`).
+
+### Key Partitioner changes
+
+- **Slot overlap auto-adjustment** — fan-out nodes on the same machine that share `out_base` ranges are detected at partition time; the second node's base is shifted up automatically, and the corrected base is injected as `arg` into the WASM call so it writes to the right slots.
+- **Wave-0 deadlock prevention** — when a machine has both a `RemoteRecv(from=P)` and a `RemoteSend(to=P)` with no ordering dependency, the Partitioner adds `RemoteSend → dep of RemoteRecv` (if cycle-safe) so sends fire before the matching recv blocks.
+- **Empty `host_limit` semantics** — an absent `host_limit` map now means "no per-host cap" rather than defaulting to 1, allowing all auto-placed nodes to land on one host when using `pack`.
+
+See `../Partitioner/README.md` for the full symbolic DAG format and policy reference.
+
 ## DAG Node Types
 
 The full set of supported node kinds (from `types.rs`):

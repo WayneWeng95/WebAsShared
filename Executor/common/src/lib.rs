@@ -77,7 +77,7 @@ pub const TARGET_OFFSET: usize = 0x8000_0000;   // 2 GiB
 pub const KIB: ShmOffset = 1024;
 pub const MIB: ShmOffset = 1024 * 1024;
 
-pub const INITIAL_SHM_SIZE: ShmOffset = 16 * MIB;
+pub const INITIAL_SHM_SIZE: ShmOffset = 64 * MIB;
 
 pub const PAGE_SIZE: ShmOffset = 4 * KIB;
 
