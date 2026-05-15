@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 
 use crate::placer::{assign_nodes, PlacementHints};
+use crate::policies;
 use crate::slot::{collect_slots, output_slot};
 use crate::slot_assigner::assign_slots;
 use crate::symbolic_dag::{SymbolicDag, SymbolicNode};
@@ -27,10 +28,14 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
     // ── 0. Expand placement:"all" nodes, then fanout nodes ───────────────────
     let (after_all, auto_shared_inputs) = expand_all_placements(dag.nodes.clone(), dag.total_nodes);
     let mut nodes: Vec<SymbolicNode> = expand_fanout(after_all);
-    let empty_hints = PlacementHints::default();
+    // Hint priority: live hints (coordinator) > placement_policy > raw hints > default.
+    let policy_hints: Option<PlacementHints> = dag.placement_policy.as_ref()
+        .map(|p| policies::resolve_policy(p, dag.total_nodes));
+    let default_hints = policies::default_hints(dag.total_nodes);
     let effective_hints = hints
+        .or(policy_hints.as_ref())
         .or(dag.hints.as_ref())
-        .unwrap_or(&empty_hints);
+        .unwrap_or(&default_hints);
     assign_nodes(
         &mut nodes,
         dag.total_nodes,

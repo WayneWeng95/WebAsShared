@@ -102,8 +102,16 @@ fn compute_quotas(
     global_cap: Option<usize>,
 ) -> HashMap<u32, usize> {
     // Per-host limit: from hints.host_limit, capped by global_cap if set.
+    // When host_limit is entirely absent the intent is "no explicit limit" —
+    // any host may receive all auto-placed nodes.  The fallback-to-1 only
+    // applies when *some* limits are set but a particular host is missing
+    // (treat it as the most conservative assumption).
     let limit = |host: u32| -> usize {
-        let per_host = hints.host_limit.get(&host).copied().unwrap_or(1).max(1);
+        let per_host = if hints.host_limit.is_empty() {
+            auto_count
+        } else {
+            hints.host_limit.get(&host).copied().unwrap_or(1).max(1)
+        };
         global_cap.map(|c| per_host.min(c)).unwrap_or(per_host)
     };
 

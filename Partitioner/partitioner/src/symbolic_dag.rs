@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::placer::PlacementHints;
+use crate::policies::PlacementPolicy;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SymbolicDag {
@@ -28,8 +29,13 @@ pub struct SymbolicDag {
     pub max_colocation: Option<usize>,
     #[serde(default)]
     pub shared_inputs: Vec<SharedInput>,
-    /// Optional placement hints embedded in the DAG file itself.
-    /// Overridden by hints passed explicitly to `partition()`.
+    /// Named placement policy embedded in the DAG file.
+    /// Converted to `PlacementHints` when no live hints are available.
+    /// Takes precedence over the raw `hints` field.
+    #[serde(default)]
+    pub placement_policy: Option<PlacementPolicy>,
+    /// Raw placement hints (legacy).  Use `placement_policy` instead.
+    /// Overridden by live hints from the coordinator or by `placement_policy`.
     #[serde(default)]
     pub hints: Option<PlacementHints>,
     pub nodes: Vec<SymbolicNode>,

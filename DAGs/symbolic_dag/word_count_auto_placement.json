@@ -3,29 +3,28 @@
     "Word count with fully partitioner-managed placement and topology.",
     "",
     "placement:'all' nodes are expanded to one copy per machine automatically.",
-    "  load       → load_0, load_1          (each reads the locally staged corpus)",
-    "  distribute → distribute_0, distribute_1",
-    "  map_n      → map_n_0_{0..3}, map_n_1_{0..3}  (fanout:4 applied per machine)",
+    "  load       → load_0, load_1            (each reads the locally staged corpus)",
+    "  distribute → distribute_0, distribute_1  (fan-out base slot: out_base=30)",
+    "  map_n      → map_n_0_{0..9}, map_n_1_{0..9}  (fanout:10 applied per machine)",
     "  aggregate  → aggregate_0, aggregate_1  (each collects its machine's map outputs)",
     "",
     "shared_inputs is auto-derived from the 'load' Input node; no need to declare it.",
     "",
     "Auto-placed nodes: aggregate_global, reduce, save.",
-    "  The partitioner assigns these based on 'hints' below.",
+    "  placement_policy controls where these land (default: pack = colocate on fewest hosts).",
     "",
-    "Switch 'hints' to try different scenarios:",
-    "  balanced: {capacity:{0:0.5, 1:0.5}, host_limit:{0:12,1:12}}",
-    "  skewed:   {capacity:{0:0.85,1:0.15},host_limit:{0:12,1:1}}",
-    "  no hints: remove the hints field entirely"
+    "Available placement_policy values:",
+    "  'balanced'  — spread proportionally across all hosts",
+    "  'pack'      — colocate on fewest hosts (default when field is omitted)",
+    "  'spread'    — at most one auto-node per host",
+    "  { 'type': 'weighted', 'weights': [0.8, 0.2] }  — explicit capacity ratio",
+    "  { 'type': 'balanced', 'per_host_limit': 4 }    — balanced with a sandbox cap"
   ],
   "shm_path_prefix": "/dev/shm/rdma_wc_ap",
   "log_level": "info",
   "transfer": true,
   "total_nodes": 2,
-  "hints": {
-    "capacity":   { "0": 0.5,  "1": 0.5  },
-    "host_limit": { "0": 12,   "1": 12   }
-  },
+  "placement_policy": "pack",
   "nodes": [
     {
       "id": "load", "placement": "all", "deps": [],
@@ -36,7 +35,7 @@
       "kind": { "Func": { "func": "wc_distribute", "out_base": 30 } }
     },
     {
-      "id": "map_n", "placement": "all", "fanout": 10, "deps": ["distribute"],
+      "id": "map_n", "placement": "all", "fanout": 30, "deps": ["distribute"],
       "kind": { "Func": { "func": "wc_map", "output_offset": 100 } }
     },
     {
