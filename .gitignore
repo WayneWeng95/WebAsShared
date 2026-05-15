@@ -1,9 +1,9 @@
-NodeAgent/target/*
-Executor/target/*
+NodeAgent/target/
+Executor/target/
 node-agent
 Executor/.claude/
 .claude/
-Partitioner/target/*
+Partitioner/target/
 TestData/
 TestOutput/
 
