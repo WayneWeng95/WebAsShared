@@ -18,6 +18,7 @@
 //! | `balanced`  | Equal capacity weight per host; nodes spread proportionally.  |
 //! | `pack`      | Concentrate all auto-nodes on the single most-capable host.  |
 //! | `spread`    | At most one auto-node per host (maximises distribution).      |
+//! | `random`    | Each auto-node is assigned to a uniformly random host.        |
 //! | `weighted`  | User-supplied per-host capacity weights (index = host id).   |
 //!
 //! All policies accept an optional `per_host_limit` field that caps the number
@@ -47,7 +48,7 @@ pub enum PlacementPolicy {
     Config(PolicyConfig),
 }
 
-/// The three string-shorthand policies.
+/// The string-shorthand policies.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NamedPolicy {
@@ -57,6 +58,8 @@ pub enum NamedPolicy {
     Pack,
     /// At most one auto-node per host (round-robin / maximise spread).
     Spread,
+    /// Assign each auto-node to a uniformly random host (ignores dep-affinity).
+    Random,
 }
 
 /// Full policy config for parameterised placement.
@@ -135,6 +138,7 @@ fn named_hints(policy: &NamedPolicy, total_nodes: usize, per_host_limit: Option<
             PlacementHints {
                 capacity: (0..total_nodes as u32).map(|i| (i, w)).collect(),
                 host_limit,
+                random: false,
             }
         }
 
@@ -153,6 +157,7 @@ fn named_hints(policy: &NamedPolicy, total_nodes: usize, per_host_limit: Option<
                     .map(|i| (i, if i == 0 { boost } else { rest }))
                     .collect(),
                 host_limit,
+                random: false,
             }
         }
 
@@ -163,8 +168,15 @@ fn named_hints(policy: &NamedPolicy, total_nodes: usize, per_host_limit: Option<
             PlacementHints {
                 capacity: HashMap::new(),
                 host_limit: (0..total_nodes as u32).map(|i| (i, spread_limit)).collect(),
+                random: false,
             }
         }
+
+        NamedPolicy::Random => PlacementHints {
+            capacity: HashMap::new(),
+            host_limit: host_limit,
+            random: true,
+        },
     }
 }
 
@@ -184,7 +196,7 @@ fn weighted_hints(
     let host_limit = per_host_limit
         .map(|lim| (0..total_nodes as u32).map(|i| (i, lim)).collect())
         .unwrap_or_default();
-    PlacementHints { capacity, host_limit }
+    PlacementHints { capacity, host_limit, random: false }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -252,11 +264,35 @@ mod tests {
     }
 
     #[test]
+    fn random_uses_all_hosts() {
+        // With 20 auto-nodes and 4 hosts, every host should appear at least once.
+        let mut nodes: Vec<_> = (0..20).map(|i| make_auto(&format!("n{}", i))).collect();
+        place(&mut nodes, &PlacementPolicy::Named(NamedPolicy::Random), 4);
+        for host in 0..4u32 {
+            let count = nodes.iter().filter(|n| n.node_id == Some(host)).count();
+            assert!(count >= 1, "random: host {} got no nodes (very unlikely)", host);
+        }
+    }
+
+    #[test]
+    fn random_ignores_dep_affinity() {
+        // A chain a→b→c assigned randomly should still get valid host ids.
+        let mut nodes = vec![make_auto("a"), make_auto("b"), make_auto("c")];
+        nodes[1].deps = vec!["a".into()];
+        nodes[2].deps = vec!["b".into()];
+        place(&mut nodes, &PlacementPolicy::Named(NamedPolicy::Random), 3);
+        for n in &nodes {
+            assert!(n.node_id.unwrap() < 3, "node_id out of range");
+        }
+    }
+
+    #[test]
     fn policy_roundtrips_json() {
         let cases = [
             r#""balanced""#,
             r#""pack""#,
             r#""spread""#,
+            r#""random""#,
             r#"{"type":"weighted","weights":[0.7,0.3]}"#,
             r#"{"type":"balanced","per_host_limit":4}"#,
         ];

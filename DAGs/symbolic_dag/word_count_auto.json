@@ -44,13 +44,13 @@
     { "id": "map_8_n1", "node_id": 1, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "output_offset": 100 } } },
     { "id": "map_9_n1", "node_id": 1, "deps": ["distribute_1"], "kind": { "Func": { "func": "wc_map", "output_offset": 100 } } },
     {
-      "id": "aggregate",
+      "id": "aggregate", "node_id": 0,
       "deps": ["map_0_n0","map_1_n0","map_2_n0","map_3_n0","map_4_n0",
                "map_5_n0","map_6_n0","map_7_n0","map_8_n0","map_9_n0"],
       "kind": { "Aggregate": {} }
     },
     {
-      "id": "aggregate_local",
+      "id": "aggregate_local", "node_id": 1,
       "deps": ["map_0_n1","map_1_n1","map_2_n1","map_3_n1","map_4_n1",
                "map_5_n1","map_6_n1","map_7_n1","map_8_n1","map_9_n1"],
       "kind": { "Aggregate": {} }

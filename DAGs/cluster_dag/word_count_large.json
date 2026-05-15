@@ -11,6 +11,7 @@
   "shm_path_prefix": "/dev/shm/rdma_wc_large",
   "log_level": "info",
   "transfer": true,
+  "placement_policy": "balanced",
   "node_dags": {
     "0": [
       {

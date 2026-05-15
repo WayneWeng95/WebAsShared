@@ -24,6 +24,7 @@ fn hints(cap: &[(u32, f64)], lim: &[(u32, usize)]) -> PlacementHints {
     PlacementHints {
         capacity: cap.iter().cloned().collect(),
         host_limit: lim.iter().cloned().collect(),
+        random: false,
     }
 }
 

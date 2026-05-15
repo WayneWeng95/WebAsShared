@@ -1,5 +1,6 @@
 use std::collections::{HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
+use rand::Rng;
 
 use crate::symbolic_dag::SymbolicNode;
 
@@ -19,6 +20,10 @@ pub struct PlacementHints {
     /// Per-host max sandboxes. Absent host → 1.
     #[serde(default)]
     pub host_limit: HashMap<u32, usize>,
+    /// When true, each auto-node is assigned to a uniformly random host.
+    /// Dep-affinity and quota tracking are both skipped.
+    #[serde(default)]
+    pub random: bool,
 }
 
 /// Assign `node_id` for every node whose `node_id` is currently `None`.
@@ -48,6 +53,14 @@ pub fn assign_nodes(
 
     let auto_count = nodes.iter().filter(|n| n.node_id.is_none()).count();
     if auto_count == 0 {
+        return;
+    }
+
+    if hints.random {
+        let mut rng = rand::thread_rng();
+        for node in nodes.iter_mut().filter(|n| n.node_id.is_none()) {
+            node.node_id = Some(rng.gen_range(0..total_nodes as u32));
+        }
         return;
     }
 
@@ -280,6 +293,7 @@ mod tests {
         PlacementHints {
             capacity: cap.iter().cloned().collect(),
             host_limit: lim.iter().cloned().collect(),
+            random: false,
         }
     }
 

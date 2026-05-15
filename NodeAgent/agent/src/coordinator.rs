@@ -201,6 +201,7 @@ fn handle_submit(
         PlacementHints {
             capacity: scheduler::cluster_capacity(&s.scx_view),
             host_limit: scheduler::host_limits(&s.scx_view),
+            random: false,
         }
     };
 
