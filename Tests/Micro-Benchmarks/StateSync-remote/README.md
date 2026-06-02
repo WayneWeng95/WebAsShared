@@ -6,32 +6,43 @@ of `../StateSync-local` (which measured intra-node transfer). Where the local
 study asked "what does it cost to hand state between two functions on one host,"
 this one asks "what does it cost to deliver state between two machines."
 
-## Approaches under test (3)
+## Approaches under test
 
-| # | Approach (`id`) | Path A → B | Copy? | Representative |
-|---|-----------------|-----------|-------|----------------|
-| 1 | External storage, remote (`s3-disk`) | A PUTs to MinIO (disk), B GETs | serialize + 2× store I/O | S3 / object-store chaining |
-| 2 | External in-memory, remote (`redis-remote`) | A SETs to Redis, B GETs | serialize + KV store | disaggregated KV state |
-| 3 | **Shared memory + RDMA (ours, `rdma-shm`)** | A RDMA-WRITEs into B's registered memory | one memcpy into the MR (unavoidable cross-machine) | system's `RemoteSend`/`RemoteRecv` (`connect::RdmaRemote`) |
+| Approach (`id`) | Path A → B | Mechanism |
+|-----------------|-----------|-----------|
+| External storage, remote — disk (`s3-disk`) | A PUTs to MinIO (NVMe), B GETs | S3 / object-store chaining (disk) |
+| External storage, remote — RAM (`s3`) | A PUTs to MinIO (tmpfs), B GETs | S3 / object-store chaining (RAM upper bound) |
+| External in-memory, remote (`redis-remote`) | A SETs to Redis, B GETs | disaggregated KV state |
+| Cloudburst LDPC, cold (`cloudburst-cold`) | consumer cache MISS → fetch from remote KV | Cloudburst-style KV (Anna≈Redis) + colocated cache, first/unique read |
+| Cloudburst LDPC, warm (`cloudburst-warm`) | consumer cache HIT → local memory | same, but repeated/shared read served from the colocated cache |
+| **Shared memory + RDMA (ours, `rdma-shm`)** | A RDMA-WRITEs into B's registered memory | system's `RemoteSend`/`RemoteRecv` (`connect::RdmaRemote`) |
 
-Unlike the local study, **a copy is inevitable for all three** — the bytes
-must physically cross the wire. The question is how much *overhead beyond the
-raw transfer* each mechanism adds: object-store/KV serialization + store
-software stack vs. a single one-sided RDMA WRITE straight into peer memory.
+The **Cloudburst** rows are a faithful *mechanism model* of LDPC (Logical
+Disaggregation with Physical Colocation), not a real Anna/Cloudburst deployment:
+state lives in a disaggregated KV (proxied by Redis) with a cache colocated with
+the consumer. The **cold** row is the producer→consumer handoff (cache miss →
+cross-node KV fetch, ≈ `redis-remote`); the **warm** row is a repeated/shared
+read served from the local cache (the LDPC win — local memcpy, no network). This
+shows Cloudburst's caching does *not* accelerate the first handoff but makes
+subsequent reads local.
 
-## Topology
+For the cross-node delivery a copy is inevitable (bytes must cross the wire); the
+question is the *overhead beyond the raw transfer*: object-store/KV serialization
++ store stack vs. a single one-sided RDMA WRITE into peer memory.
 
-From `NodeAgent/agent_*.toml` (`cluster.ips = ["10.10.1.2", "10.10.1.1"]`):
+## Topology (3-node)
 
 | Node | Role here | IP |
 |------|-----------|----|
 | A | producer (compute) | `10.10.1.2` |
-| B | consumer + store host | `10.10.1.1` |
+| B | consumer (compute) | `10.10.1.1` |
+| C | disaggregated store: Redis + MinIO | `10.10.1.4` |
 
-The S3/Redis backends live on **node B** (the consumer), so the producer→store
-write is the single network traversal and the consumer reads locally — one wire
-crossing, directly comparable to RDMA's one-sided A→B write. The RDMA path uses
-the experiment NIC (`10.10.1.x`, RoCE on `mlx4_0`) directly.
+Store on a **separate node C** (the realistic disaggregated-state tier): both A
+and B dial C, so the store rows traverse the network, while `rdma-shm` is a
+direct A↔B one-sided write on the experiment NIC (`10.10.1.x`, RoCE `mlx4_0`).
+`cloudburst-warm` is consumer-local (the colocated cache), so it needs no network
+and no store.
 
 ## Reused tooling
 
@@ -73,44 +84,41 @@ them identical so the ping-pong stays in lockstep), 30 iters + 5 warmup, mean /
 p50 / p99 and GiB/s. CSV schema (shared by both harnesses):
 `approach,size_bytes,iters,lat_mean_us,lat_p50_us,lat_p99_us,gibps`.
 
-## Running
+## Running (3-node)
 
 ```bash
-# 1. backends on node B (10.10.1.1): Redis + disk S3 only
-./deploy_backends.sh backend --no-s3            # skips the RAM-S3 row
+# 1. store on NODE C (10.10.1.4): Redis + BOTH MinIO instances (disk :9010, RAM :9000)
+./deploy_backends.sh backend                    # all backends (no --no-s3)
 
-# 2. point node A's harness at node B (write backends.env on node A)
-cat > backends.env <<'EOF'
-REDIS_HOST=10.10.1.1
-REDIS_PORT=6379
-S3_DISK_ENDPOINT=http://10.10.1.1:9010
-S3_ACCESS_KEY=minioadmin
-S3_SECRET_KEY=minioadmin123
-S3_BUCKET=statesync
-EOF
+# 2. point NODE A *and* NODE B at the store on C (write backends.env on both):
+printf 'REDIS_HOST=10.10.1.4\nREDIS_PORT=6379\nS3_ENDPOINT=http://10.10.1.4:9000\nS3_DISK_ENDPOINT=http://10.10.1.4:9010\nS3_ACCESS_KEY=minioadmin\nS3_SECRET_KEY=minioadmin123\nS3_BUCKET=statesync\n' > backends.env
 
-# 3. store-based rows — consumer on B, producer on A (one approach at a time):
-#    node B:                                         node A:
-./bench_remote.py consumer --approach redis-remote   # then on A:
-./bench_remote.py producer --approach redis-remote --csv redis_results.csv
-./bench_remote.py consumer --approach s3-disk        # then on A:
-./bench_remote.py producer --approach s3-disk    --csv s3_results.csv
+# All producers/clients UPSERT into one shared results.csv on node A (the default
+# --csv), each replacing only its own approach's rows. Run them in any order.
 
-# 4. RDMA row — server on B, client on A (built in the Executor workspace):
-cd ../../../Executor && cargo build --release -p connect --example rdma_latency
-#    node B:
-./target/release/examples/rdma_latency server 7900
-#    node A:
-./target/release/examples/rdma_latency client 10.10.1.1 7900 \
-    --csv ../Tests/Micro-Benchmarks/StateSync-remote/rdma_results.csv
+# 3. store-based + cloudburst-cold rows — consumer on B, producer on A (one at a time):
+#    NODE B (consumer):                              NODE A (producer):
+./bench_remote.py consumer --approach s3-disk          ./bench_remote.py producer --approach s3-disk
+./bench_remote.py consumer --approach s3               ./bench_remote.py producer --approach s3
+./bench_remote.py consumer --approach redis-remote     ./bench_remote.py producer --approach redis-remote
+./bench_remote.py consumer --approach cloudburst-cold  ./bench_remote.py producer --approach cloudburst-cold
 
-# 5. plot all three (reads *_results.csv in cwd)
-./plot_remote.py            # -> figs/latency_remote.png, throughput_remote.png, bars
+# 4. cloudburst-warm row — NODE A only (colocated cache hit; no consumer/store):
+./bench_remote.py producer --approach cloudburst-warm
+
+# 5. RDMA row — server on B, client on A (A↔B direct; node C not involved):
+#    NODE B:
+../../../Executor/target/release/examples/rdma_latency server 7900
+#    NODE A:
+../../../Executor/target/release/examples/rdma_latency client 10.10.1.1 7900
+
+# 6. plot — NODE A (reads the single results.csv, renders figs/)
+./plot_remote.py
 ```
 
 ## Status
 
-Harness complete and smoke-tested: `rdma_latency` (Rust, validated on RDMA
-loopback), `bench_remote.py` (Redis path validated on loopback; S3 path wired),
-and `plot_remote.py`. Pending: a real two-node run on the cluster to collect
-`*_results.csv`, then `plot_remote.py`.
+Harness complete and validated (RDMA loopback + Redis/Cloudburst loopback;
+S3 wired). Real 3-node run collected for s3-disk, redis-remote, cloudburst, and
+rdma-shm. `plot_remote.py` merges all `*_results.csv` into `results.csv` and
+renders `figs/latency_throughput_remote.png` + `latency_remote_bars.png`.

@@ -34,14 +34,25 @@ plt.rcParams.update({
     "axes.labelsize": LABEL_SIZE, "legend.fontsize": LEGEND_SIZE,
 })
 
-ORDER = ["s3-disk", "redis-remote", "rdma-shm"]
+ORDER = ["s3-disk", "s3", "redis-remote", "cloudburst-cold", "cloudburst-warm", "rdma-shm"]
 LABEL = {
-    "s3-disk":      "S3 (disk)",
-    "redis-remote": "Redis (remote)",
-    "rdma-shm":     "Shared memory + RDMA (ours)",
+    "s3-disk":         "S3 (disk)",
+    "s3":              "S3 (RAM)",
+    "redis-remote":    "Redis (remote)",
+    "cloudburst-cold": "Cloudburst (cold)",
+    "cloudburst-warm": "Cloudburst (warm)",
+    "rdma-shm":        "Shared memory + RDMA",
 }
-COLOR = {"s3-disk": "#8c1d40", "redis-remote": "#e8843c", "rdma-shm": "#1d7a3e"}
-MARKER = {"s3-disk": "o", "redis-remote": "^", "rdma-shm": "*"}
+COLOR = {
+    "s3-disk": "#8c1d40", "s3": "#d1495b", "redis-remote": "#e8843c",
+    "cloudburst-cold": "#5b8fb9", "cloudburst-warm": "#6a4c93",
+    "rdma-shm": "#1d7a3e",
+}
+MARKER = {
+    "s3-disk": "o", "s3": "s", "redis-remote": "^",
+    "cloudburst-cold": "D", "cloudburst-warm": "X",
+    "rdma-shm": "*",
+}
 
 
 def fmt_size(n):
@@ -68,6 +79,21 @@ def approaches_in(data):
     return [a for a in ORDER if a in data] + [a for a in data if a not in ORDER]
 
 
+FIELDS = ["approach", "size_bytes", "iters",
+          "lat_mean_us", "lat_p50_us", "lat_p99_us", "gibps"]
+
+
+def write_merged(data, path):
+    """Write all approaches into one combined CSV, ordered by approach then size."""
+    with open(path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(FIELDS)
+        for a in approaches_in(data):
+            for _, r in data[a]:
+                w.writerow([r.get(k, "") for k in FIELDS])
+    print(f"[plot] merged -> {path}")
+
+
 def style(a):
     return dict(color=COLOR.get(a, "#444"), marker=MARKER.get(a, "o"),
                 label=LABEL.get(a, a), linewidth=1.8,
@@ -81,7 +107,7 @@ def _xaxis(ax, all_sizes):
     ax.grid(True, which="both", ls=":", alpha=0.4)
 
 
-def plot_latency(data, outpath, figsize, metric):
+def plot_latency(data, outpath, figsize, metric, yscale="linear"):
     all_sizes = sorted({s for a in data for s, _ in data[a]})
     idx = {s: i for i, s in enumerate(all_sizes)}
     fig, ax = plt.subplots(figsize=figsize)
@@ -90,10 +116,11 @@ def plot_latency(data, outpath, figsize, metric):
         ys = [float(r[f"lat_{metric}_us"]) for _, r in data[a]]
         ax.plot(xs, ys, **style(a))
     stat = "Mean" if metric == "mean" else "Median"
-    ax.set_yscale("log")
+    ax.set_yscale(yscale)
     _xaxis(ax, all_sizes)
-    ax.set_ylabel(f"{stat} one-way latency (µs, log)", fontsize=YLABEL_SIZE)
-    ax.legend(fontsize=LEGEND_SIZE, framealpha=0.9)
+    unit = "µs, log" if yscale == "log" else "µs"
+    ax.set_ylabel(f"{stat} one-way latency ({unit})", fontsize=YLABEL_SIZE)
+    ax.legend(fontsize=LEGEND_SIZE, framealpha=0.9, loc="upper left")
     fig.tight_layout()
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -113,6 +140,39 @@ def plot_throughput(data, outpath, figsize):
     ax.set_ylabel("throughput (GiB/s, log)", fontsize=YLABEL_SIZE)
     ax.legend(fontsize=LEGEND_SIZE, framealpha=0.9)
     fig.tight_layout()
+    fig.savefig(outpath, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[plot] wrote {outpath}")
+
+
+def plot_panel(data, outpath, figsize, metric, yscale="log"):
+    """Latency (left) + throughput (right) side by side, one shared legend on top."""
+    all_sizes = sorted({s for a in data for s, _ in data[a]})
+    idx = {s: i for i, s in enumerate(all_sizes)}
+    stat = "Mean" if metric == "mean" else "Median"
+    fig, (axL, axR) = plt.subplots(1, 2, figsize=figsize)
+
+    for a in approaches_in(data):                      # left: latency
+        xs = [idx[s] for s, _ in data[a]]
+        ys = [float(r[f"lat_{metric}_us"]) for _, r in data[a]]
+        axL.plot(xs, ys, **style(a))
+    axL.set_yscale(yscale)
+    _xaxis(axL, all_sizes)
+    unit = "µs, log" if yscale == "log" else "µs"
+    axL.set_ylabel(f"{stat} one-way latency ({unit})", fontsize=YLABEL_SIZE)
+
+    for a in approaches_in(data):                      # right: throughput
+        xs = [idx[s] for s, _ in data[a]]
+        ys = [float(r["gibps"]) for _, r in data[a]]
+        axR.plot(xs, ys, **style(a))
+    axR.set_yscale("log")
+    _xaxis(axR, all_sizes)
+    axR.set_ylabel("throughput (GiB/s, log)", fontsize=YLABEL_SIZE)
+
+    fig.tight_layout()
+    handles, labels = axL.get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=min(len(labels), 3),
+               fontsize=LEGEND_SIZE, framealpha=0.9, bbox_to_anchor=(0.5, 1.0))
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"[plot] wrote {outpath}")
@@ -164,18 +224,32 @@ def main():
     ap.add_argument("--format", default="png", choices=["png", "pdf", "svg"])
     ap.add_argument("--figsize", default="9,4.5")
     ap.add_argument("--metric", choices=["mean", "p50"], default="mean")
+    ap.add_argument("--yscale", choices=["linear", "log"], default="log",
+                    help="y-axis for latency_remote (default log; linear emphasizes large-size blow-up)")
+    ap.add_argument("--merged-csv", default="results.csv",
+                    help="combined CSV to (re)write from the inputs; '' to skip")
     args = ap.parse_args()
 
-    paths = args.csv or sorted(glob.glob("*_results.csv"))
+    if args.csv:
+        paths = args.csv
+    elif os.path.exists("results.csv"):
+        paths = ["results.csv"]                       # single shared file (default)
+    else:
+        paths = sorted(glob.glob("*_results.csv"))    # back-compat: fold separate files
     if not paths:
-        raise SystemExit("no CSVs given and no *_results.csv found")
+        raise SystemExit("no results.csv and no *_results.csv found — run the benchmarks first")
     figsize = tuple(float(x) for x in args.figsize.replace("x", ",").split(","))
 
     data = load(paths)
+
+    # Always emit one combined CSV (unless the only input IS that file).
+    if args.merged_csv and paths != [args.merged_csv]:
+        write_merged(data, args.merged_csv)
+
     os.makedirs(args.outdir, exist_ok=True)
     ext = args.format
-    plot_latency(data, os.path.join(args.outdir, f"latency_remote.{ext}"), figsize, args.metric)
-    plot_throughput(data, os.path.join(args.outdir, f"throughput_remote.{ext}"), figsize)
+    plot_panel(data, os.path.join(args.outdir, f"latency_throughput_remote.{ext}"),
+               figsize, args.metric, args.yscale)
     plot_bars(data, os.path.join(args.outdir, f"latency_remote_bars.{ext}"), figsize, args.metric)
     print_speedup(data, args.metric)
 

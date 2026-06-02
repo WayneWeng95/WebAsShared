@@ -47,7 +47,7 @@ S3_POLL_S = 0.001          # inter-poll sleep for the s3 consumer/producer wait
 def load_env():
     cfg = {
         "REDIS_HOST": "127.0.0.1", "REDIS_PORT": "6379", "REDIS_PASS": "",
-        "S3_DISK_ENDPOINT": "", "S3_ACCESS_KEY": "minioadmin",
+        "S3_ENDPOINT": "", "S3_DISK_ENDPOINT": "", "S3_ACCESS_KEY": "minioadmin",
         "S3_SECRET_KEY": "minioadmin123", "S3_BUCKET": "statesync",
     }
     if os.path.exists(ENV_FILE):
@@ -73,11 +73,12 @@ class RedisChannel:
     def reset(self):
         self.r.delete(self.REQ, self.RESP)
 
-    def producer_rtt(self, payload, seq):
+    def deliver_us(self, payload, seq):
         t0 = time.perf_counter_ns()
         self.r.rpush(self.REQ, payload)
         self.r.blpop(self.RESP, timeout=30)
-        return (time.perf_counter_ns() - t0) / 1000.0   # µs round-trip
+        rtt = (time.perf_counter_ns() - t0) / 1000.0
+        return rtt / 2.0                                # one-way
 
     def consumer_serve(self, seq):
         item = self.r.blpop(self.REQ, timeout=60)
@@ -88,11 +89,11 @@ class RedisChannel:
 
 # ── S3 channel (sequence-keyed objects + polling) ─────────────────────────────
 class S3Channel:
-    def __init__(self, cfg):
+    def __init__(self, cfg, endpoint_key="S3_DISK_ENDPOINT"):
         from minio import Minio
-        ep = cfg["S3_DISK_ENDPOINT"]
+        ep = cfg[endpoint_key]
         if not ep:
-            raise RuntimeError("S3_DISK_ENDPOINT not set (deploy_backends.sh backend)")
+            raise RuntimeError(f"{endpoint_key} not set (deploy_backends.sh backend)")
         self.bucket = cfg["S3_BUCKET"]
         secure = ep.startswith("https://")
         host = ep.split("://", 1)[1] if "://" in ep else ep
@@ -124,7 +125,7 @@ class S3Channel:
         import io
         self.c.put_object(self.bucket, key, io.BytesIO(data), length=len(data))
 
-    def producer_rtt(self, payload, seq):
+    def deliver_us(self, payload, seq):
         import io
         rk, sk = f"ss/req/{seq}", f"ss/resp/{seq}"
         t0 = time.perf_counter_ns()
@@ -139,7 +140,7 @@ class S3Channel:
             self.c.remove_object(self.bucket, sk)   # untimed cleanup
         except Exception:
             pass
-        return rtt
+        return rtt / 2.0                  # one-way
 
     def consumer_serve(self, seq):
         rk, sk = f"ss/req/{seq}", f"ss/resp/{seq}"
@@ -155,7 +156,73 @@ class S3Channel:
             pass
 
 
-CHANNELS = {"redis-remote": RedisChannel, "s3-disk": S3Channel}
+# ── Cloudburst LDPC model (disaggregated KV + colocated cache) ────────────────
+class CloudburstChannel:
+    """Faithful *mechanism model* of Cloudburst's LDPC (Logical Disaggregation
+    with Physical Colocation): state lives in a disaggregated KV (Anna — here
+    proxied by Redis) while a cache is colocated with the consumer.
+
+      cloudburst-cold : first / unique delivery — consumer cache MISS, so the
+                        state is fetched from the remote KV (cross-node round
+                        trip). This is the producer->consumer handoff cost, and
+                        it is essentially the disaggregated-KV path.
+      cloudburst-warm : repeated / shared read — consumer cache HIT, served from
+                        the colocated cache at local-memory speed (no network).
+                        This is the LDPC win.
+
+    This models the *mechanism*, not real Anna/Cloudburst (which adds causal
+    consistency, lattice merges, and an autoscaling KV). The colocated cache is
+    an in-process buffer; the warm path therefore has no consumer/network
+    participation.
+    """
+    REQ, RESP = "cb:req", "cb:resp"
+
+    def __init__(self, cfg, warm):
+        self.warm = warm
+        self._buf = None                       # the colocated cache
+        if not warm:
+            import redis
+            self.r = redis.Redis(host=cfg["REDIS_HOST"], port=int(cfg["REDIS_PORT"]),
+                                 password=cfg["REDIS_PASS"] or None, socket_timeout=30)
+            self.r.ping()
+
+    def reset(self):
+        if not self.warm:
+            self.r.delete(self.REQ, self.RESP)
+
+    def deliver_us(self, payload, seq):
+        if self.warm:
+            # Cache HIT: object resident in the colocated cache; cost = local read.
+            if self._buf is None or len(self._buf) != len(payload):
+                self._buf = payload            # (cold-fill already happened earlier)
+            t0 = time.perf_counter_ns()
+            _ = bytearray(self._buf)           # materialize object from local cache (O(N) copy)
+            return (time.perf_counter_ns() - t0) / 1000.0   # one-way (local; no /2)
+        # Cache MISS: fetch from the remote KV (same round-trip as Redis).
+        t0 = time.perf_counter_ns()
+        self.r.rpush(self.REQ, payload)
+        self.r.blpop(self.RESP, timeout=30)
+        rtt = (time.perf_counter_ns() - t0) / 1000.0
+        self._buf = payload                    # populate cache (next read is warm)
+        return rtt / 2.0                       # one-way
+
+    def consumer_serve(self, seq):
+        if self.warm:
+            return                              # cache hit needs no remote peer
+        item = self.r.blpop(self.REQ, timeout=60)
+        if item is None:
+            raise TimeoutError("cloudburst consumer timed out")
+        self.r.rpush(self.RESP, item[1])
+
+
+# Registry of channel constructors (cfg -> channel).
+CHANNELS = {
+    "redis-remote":    lambda cfg: RedisChannel(cfg),
+    "s3-disk":         lambda cfg: S3Channel(cfg, "S3_DISK_ENDPOINT"),
+    "s3":              lambda cfg: S3Channel(cfg, "S3_ENDPOINT"),
+    "cloudburst-cold": lambda cfg: CloudburstChannel(cfg, warm=False),
+    "cloudburst-warm": lambda cfg: CloudburstChannel(cfg, warm=True),
+}
 
 
 def pct(xs, p):
@@ -171,20 +238,42 @@ def fmt_size(n):
     return f"{n // 1024 ** 3}GiB"
 
 
+HEADER = ["approach", "size_bytes", "iters",
+          "lat_mean_us", "lat_p50_us", "lat_p99_us", "gibps"]
+
+
+def upsert_rows(csv_path, approach, rows):
+    """Replace this approach's rows in csv_path (keeping all others), so every
+    run accumulates into one shared results.csv idempotently."""
+    import csv
+    kept = []
+    if os.path.exists(csv_path):
+        with open(csv_path, newline="") as fh:
+            rd = csv.reader(fh)
+            next(rd, None)                         # skip header
+            kept = [r for r in rd if r and r[0] != approach]
+    with open(csv_path, "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(HEADER)
+        w.writerows(kept)
+        w.writerows(rows)
+    print(f"[bench_remote] upserted {len(rows)} '{approach}' rows -> {csv_path} "
+          f"({len(kept) + len(rows)} total)")
+
+
 def run_producer(ch, approach, csv_path):
     GiB = 1024 ** 3
     rows = []
-    print(f"{approach} — one-way latency = RTT/2")
+    print(f"{approach} — one-way latency")
     print(f"{'size':>8}  {'mean us':>12}{'p50 us':>12}{'p99 us':>12}  {'GiB/s':>10}")
     seq = 0
     for size in SIZES:
         payload = os.urandom(size)
         for _ in range(WARMUP):
-            ch.producer_rtt(payload, seq); seq += 1
+            ch.deliver_us(payload, seq); seq += 1
         oneway = []
         for _ in range(ITERS):
-            rtt = ch.producer_rtt(payload, seq); seq += 1
-            oneway.append(rtt / 2.0)
+            oneway.append(ch.deliver_us(payload, seq)); seq += 1
         mean = statistics.fmean(oneway)
         p50, p99 = pct(oneway, 50), pct(oneway, 99)
         gibps = size / (mean * 1e-6) / GiB
@@ -192,13 +281,7 @@ def run_producer(ch, approach, csv_path):
         rows.append((approach, size, ITERS, mean, p50, p99, gibps))
 
     if csv_path:
-        import csv
-        with open(csv_path, "w", newline="") as fh:
-            w = csv.writer(fh)
-            w.writerow(["approach", "size_bytes", "iters",
-                        "lat_mean_us", "lat_p50_us", "lat_p99_us", "gibps"])
-            w.writerows(rows)
-        print(f"[bench_remote] wrote {len(rows)} rows -> {csv_path}")
+        upsert_rows(csv_path, approach, rows)
 
 
 def run_consumer(ch, approach):
@@ -213,11 +296,29 @@ def main():
     ap = argparse.ArgumentParser(description="StateSync-remote store-based latency")
     ap.add_argument("role", choices=["producer", "consumer"])
     ap.add_argument("--approach", required=True, choices=list(CHANNELS))
-    ap.add_argument("--csv", default="", help="(producer) write results CSV here")
+    ap.add_argument("--csv", default="results.csv",
+                    help="(producer) upsert results into this shared CSV (default results.csv)")
     args = ap.parse_args()
 
     cfg = load_env()
-    ch = CHANNELS[args.approach](cfg)
+    if args.approach == "cloudburst-warm":
+        target = "local colocated cache (LDPC warm; no network)"
+    elif args.approach in ("redis-remote", "cloudburst-cold"):
+        target = f"KV {cfg['REDIS_HOST']}:{cfg['REDIS_PORT']}"
+    elif args.approach == "s3":
+        target = f"s3-ram {cfg['S3_ENDPOINT'] or '(unset)'}"
+    else:
+        target = f"s3-disk {cfg['S3_DISK_ENDPOINT'] or '(unset)'}"
+    src = "backends.env" if os.path.exists(ENV_FILE) else "defaults (no backends.env!)"
+    print(f"[bench_remote] {args.approach} -> {target}   [from {src}]")
+    try:
+        ch = CHANNELS[args.approach](cfg)
+    except Exception as e:
+        raise SystemExit(
+            f"[bench_remote] cannot reach the backend ({e}).\n"
+            f"  - is the backend running on node B?   ./deploy_backends.sh status\n"
+            f"  - does backends.env point at node B?  REDIS_HOST / S3_DISK_ENDPOINT\n"
+            f"  resolved target: {target}")
     ch.reset()   # clear any stale req/resp from a previous run
     if args.role == "producer":
         run_producer(ch, args.approach, args.csv)

@@ -43,9 +43,9 @@ fn main() -> Result<()> {
         "client" => {
             let host = args.get(1).map(String::as_str).unwrap_or("127.0.0.1");
             let port: u16 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(7900);
-            let csv = flag(&args, "--csv");
+            let csv = flag(&args, "--csv").unwrap_or_else(|| "results.csv".to_string());
             let mut r = RdmaRemote::connect(host, port, max_size)?;
-            run_client(&mut r, csv.as_deref())?;
+            run_client(&mut r, Some(csv.as_str()))?;
         }
         _ => bail!("usage: rdma_latency <server <port> | client <host> <port> [--csv path]>"),
     }
@@ -103,14 +103,30 @@ fn run_client(r: &mut RdmaRemote, csv: Option<&str>) -> Result<()> {
     }
 
     if let Some(path) = csv {
-        use std::io::Write;
-        let mut f = std::fs::File::create(path)?;
-        writeln!(f, "approach,size_bytes,iters,lat_mean_us,lat_p50_us,lat_p99_us,gibps")?;
-        for row in &rows {
-            writeln!(f, "{}", row)?;
-        }
-        println!("[rdma_latency] wrote {} rows -> {}", rows.len(), path);
+        upsert_csv(path, "rdma-shm", &rows)?;
+        println!("[rdma_latency] upserted {} rdma-shm rows -> {}", rows.len(), path);
     }
+    Ok(())
+}
+
+/// Replace `approach`'s rows in the shared results.csv (keeping all others), so
+/// every harness accumulates into one file idempotently.
+fn upsert_csv(path: &str, approach: &str, rows: &[String]) -> Result<()> {
+    use std::io::Write;
+    const HEADER: &str = "approach,size_bytes,iters,lat_mean_us,lat_p50_us,lat_p99_us,gibps";
+    let prefix = format!("{},", approach);
+    let mut kept: Vec<String> = Vec::new();
+    if let Ok(existing) = std::fs::read_to_string(path) {
+        for line in existing.lines().skip(1) {            // skip header
+            if !line.is_empty() && !line.starts_with(&prefix) {
+                kept.push(line.to_string());
+            }
+        }
+    }
+    let mut f = std::fs::File::create(path)?;
+    writeln!(f, "{}", HEADER)?;
+    for line in &kept { writeln!(f, "{}", line)?; }
+    for row in rows { writeln!(f, "{}", row)?; }
     Ok(())
 }
 
