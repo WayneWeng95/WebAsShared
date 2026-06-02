@@ -28,7 +28,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 # ── Font sizes (match StateSync-local) ────────────────────────────────────────
-TICK_SIZE, LABEL_SIZE, LEGEND_SIZE, YLABEL_SIZE = 16, 23, 17, 18
+TICK_SIZE, LABEL_SIZE, LEGEND_SIZE, YLABEL_SIZE = 16, 16, 17, 16
 plt.rcParams.update({
     "xtick.labelsize": TICK_SIZE, "ytick.labelsize": TICK_SIZE,
     "axes.labelsize": LABEL_SIZE, "legend.fontsize": LEGEND_SIZE,
@@ -159,7 +159,7 @@ def plot_panel(data, outpath, figsize, metric, yscale="log"):
     axL.set_yscale(yscale)
     _xaxis(axL, all_sizes)
     unit = "µs, log" if yscale == "log" else "µs"
-    axL.set_ylabel(f"{stat} one-way latency ({unit})", fontsize=YLABEL_SIZE)
+    axL.set_ylabel(f"{stat} latency ({unit})", fontsize=YLABEL_SIZE)
 
     for a in approaches_in(data):                      # right: throughput
         xs = [idx[s] for s, _ in data[a]]
@@ -167,7 +167,7 @@ def plot_panel(data, outpath, figsize, metric, yscale="log"):
         axR.plot(xs, ys, **style(a))
     axR.set_yscale("log")
     _xaxis(axR, all_sizes)
-    axR.set_ylabel("throughput (GiB/s, log)", fontsize=YLABEL_SIZE)
+    axR.set_ylabel("Throughput (GiB/s, log)", fontsize=YLABEL_SIZE)
 
     fig.tight_layout()
     handles, labels = axL.get_legend_handles_labels()
@@ -192,7 +192,7 @@ def plot_bars(data, outpath, figsize, metric):
     stat = "Mean" if metric == "mean" else "Median"
     ax.set_yscale("log")
     _xaxis(ax, all_sizes)
-    ax.set_ylabel(f"{stat} one-way latency (µs, log)", fontsize=YLABEL_SIZE)
+    ax.set_ylabel(f"{stat} latency (µs, log)", fontsize=YLABEL_SIZE)
     ax.legend(fontsize=LEGEND_SIZE, framealpha=0.9)
     fig.tight_layout()
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
@@ -222,7 +222,7 @@ def main():
                     help="result CSVs (default: *_results.csv in cwd)")
     ap.add_argument("--outdir", default="figs")
     ap.add_argument("--format", default="png", choices=["png", "pdf", "svg"])
-    ap.add_argument("--figsize", default="9,4.5")
+    ap.add_argument("--figsize", default="9,3")
     ap.add_argument("--metric", choices=["mean", "p50"], default="mean")
     ap.add_argument("--yscale", choices=["linear", "log"], default="log",
                     help="y-axis for latency_remote (default log; linear emphasizes large-size blow-up)")

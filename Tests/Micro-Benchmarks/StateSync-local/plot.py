@@ -30,9 +30,9 @@ import matplotlib.pyplot as plt
 
 # ── Font sizes ────────────────────────────────────────────────────────────────
 TICK_SIZE   = 16
-LABEL_SIZE  = 23
+LABEL_SIZE  = 16
 LEGEND_SIZE = 17
-YLABEL_SIZE = 18          # y-axis labels are longer — a touch smaller than LABEL_SIZE
+YLABEL_SIZE = 14          # y-axis labels are longer — a touch smaller than LABEL_SIZE
 plt.rcParams.update({
     "xtick.labelsize": TICK_SIZE,
     "ytick.labelsize": TICK_SIZE,
@@ -217,7 +217,7 @@ def main():
     ap.add_argument("--format", default="png", choices=["png", "pdf", "svg"])
     ap.add_argument("--readers", type=int, default=None,
                     help="which fan-out degree to plot (default: lowest in CSV)")
-    ap.add_argument("--figsize", default="9,4.5",
+    ap.add_argument("--figsize", default="9,3",
                     help="figure size in inches as W,H (default: 9,4.5)")
     ap.add_argument("--metric", choices=["mean", "p50"], default="mean",
                     help="central latency statistic to plot (default: mean)")
