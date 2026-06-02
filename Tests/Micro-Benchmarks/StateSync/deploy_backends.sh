@@ -54,11 +54,18 @@ S3_CONSOLE_PORT="${S3_CONSOLE_PORT:-9001}"
 S3_USER="${S3_USER:-minioadmin}"
 S3_PASS="${S3_PASS:-minioadmin123}"        # MinIO requires >= 8 chars
 S3_BUCKET="${S3_BUCKET:-statesync}"
-S3_DATADIR="${S3_DATADIR:-/tmp/statesync-minio-data}"
+S3_DATADIR="${S3_DATADIR:-/tmp/statesync-minio-data}"            # RAM-backed (tmpfs)
 REDIS_PASS="${REDIS_PASS:-}"               # empty = no auth (experiment net is private)
+
+# Second MinIO instance, disk-backed — the `s3-disk` benchmark row.  /var/tmp is
+# on the NVMe root fs (real persistent block device), vs /tmp which is tmpfs/RAM.
+S3_DISK_PORT="${S3_DISK_PORT:-9010}"
+S3_DISK_CONSOLE_PORT="${S3_DISK_CONSOLE_PORT:-9011}"
+S3_DISK_DATADIR="${S3_DISK_DATADIR:-/var/tmp/statesync-minio-disk}"
 
 WANT_REDIS=1
 WANT_S3=1
+WANT_S3_DISK=1
 BIND_IP=""
 REMOTE_HOST=""                             # backend node IP, used by `compute`
 REDIS_DIR="${REDIS_DIR:-/tmp/statesync-redis}"   # off-repo dir; persistence is off anyway
@@ -100,8 +107,11 @@ parse_flags() {
             --s3-user)      S3_USER="$2";        shift 2;;
             --s3-pass)      S3_PASS="$2";        shift 2;;
             --bucket)       S3_BUCKET="$2";      shift 2;;
+            --s3-disk-port) S3_DISK_PORT="$2";   shift 2;;
+            --s3-disk-dir)  S3_DISK_DATADIR="$2";shift 2;;
             --no-redis)     WANT_REDIS=0;        shift;;
             --no-s3)        WANT_S3=0;           shift;;
+            --no-s3-disk)   WANT_S3_DISK=0;      shift;;
             *) die "unknown flag: $1";;
         esac
     done
@@ -210,50 +220,57 @@ stop_redis() {
 }
 
 # ── MinIO (S3) lifecycle ──────────────────────────────────────────────────────
-start_minio() {
+# Two independent instances run side by side: `ram` (data on tmpfs) and `disk`
+# (data on the NVMe root fs).  They differ only by port + data dir, giving the
+# `s3` and `s3-disk` benchmark rows.
+_start_minio() {
+    local tag="$1" port="$2" console="$3" datadir="$4" label="$5"
     ensure_minio
-    mkdir -p "$RUNDIR" "$S3_DATADIR"
-    local pidfile="$RUNDIR/minio.pid"
-    local logfile="$RUNDIR/minio.log"
+    mkdir -p "$RUNDIR" "$datadir"
+    local pidfile="$RUNDIR/minio-$tag.pid"
+    local logfile="$RUNDIR/minio-$tag.log"
 
     if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-        warn "MinIO already running (pid $(cat "$pidfile")) — restarting"
-        stop_minio
+        warn "MinIO[$tag] already running (pid $(cat "$pidfile")) — restarting"
+        _stop_minio "$tag"
     fi
 
-    log "starting MinIO on $BIND_IP:$S3_PORT (console :$S3_CONSOLE_PORT), data=$S3_DATADIR"
+    log "starting MinIO[$tag] on $BIND_IP:$port ($label), data=$datadir"
     MINIO_ROOT_USER="$S3_USER" MINIO_ROOT_PASSWORD="$S3_PASS" \
-        nohup "$BIN_DIR/minio" server "$S3_DATADIR" \
-            --address "$BIND_IP:$S3_PORT" \
-            --console-address "$BIND_IP:$S3_CONSOLE_PORT" \
+        nohup "$BIN_DIR/minio" server "$datadir" \
+            --address "$BIND_IP:$port" \
+            --console-address "$BIND_IP:$console" \
             >"$logfile" 2>&1 &
     echo $! > "$pidfile"
 
     for _ in $(seq 1 40); do
-        if curl -fsS "http://$BIND_IP:$S3_PORT/minio/health/live" >/dev/null 2>&1; then
-            ok "MinIO up — health/live OK at http://$BIND_IP:$S3_PORT"
+        if curl -fsS "http://$BIND_IP:$port/minio/health/live" >/dev/null 2>&1; then
+            ok "MinIO[$tag] up — http://$BIND_IP:$port ($label)"
             break
         fi
         sleep 0.25
     done
-    curl -fsS "http://$BIND_IP:$S3_PORT/minio/health/live" >/dev/null 2>&1 \
-        || die "MinIO did not become healthy; see $logfile"
+    curl -fsS "http://$BIND_IP:$port/minio/health/live" >/dev/null 2>&1 \
+        || die "MinIO[$tag] did not become healthy; see $logfile"
 
-    # Create the benchmark bucket.
-    "$BIN_DIR/mc" alias set statesync "http://$BIND_IP:$S3_PORT" "$S3_USER" "$S3_PASS" >/dev/null
-    "$BIN_DIR/mc" mb --ignore-existing "statesync/$S3_BUCKET" >/dev/null
-    ok "bucket ready — s3://$S3_BUCKET"
+    "$BIN_DIR/mc" alias set "statesync-$tag" "http://$BIND_IP:$port" "$S3_USER" "$S3_PASS" >/dev/null
+    "$BIN_DIR/mc" mb --ignore-existing "statesync-$tag/$S3_BUCKET" >/dev/null
+    ok "MinIO[$tag] bucket ready — s3://$S3_BUCKET"
 }
 
-stop_minio() {
-    local pidfile="$RUNDIR/minio.pid"
+_stop_minio() {
+    local tag="$1"
+    local pidfile="$RUNDIR/minio-$tag.pid"
     if [[ -f "$pidfile" ]] && kill -0 "$(cat "$pidfile")" 2>/dev/null; then
-        kill "$(cat "$pidfile")" && ok "MinIO stopped"
-    else
-        warn "no running MinIO pidfile at $pidfile"
+        kill "$(cat "$pidfile")" && ok "MinIO[$tag] stopped"
     fi
     rm -f "$pidfile"
 }
+
+start_minio()      { _start_minio ram  "$S3_PORT"      "$S3_CONSOLE_PORT"      "$S3_DATADIR"      "RAM / tmpfs"; }
+start_minio_disk() { _start_minio disk "$S3_DISK_PORT" "$S3_DISK_CONSOLE_PORT" "$S3_DISK_DATADIR" "disk / NVMe"; }
+stop_minio()       { _stop_minio ram; }
+stop_minio_disk()  { _stop_minio disk; }
 
 # ── backends.env emission ─────────────────────────────────────────────────────
 write_env() {
@@ -279,8 +296,9 @@ write_env() {
                 echo "REDIS_PASS=$REDIS_PASS"
             fi
         fi
-        if [[ $WANT_S3 -eq 1 ]]; then
-            echo "S3_ENDPOINT=http://$BIND_IP:$S3_PORT"
+        if [[ $WANT_S3 -eq 1 || $WANT_S3_DISK -eq 1 ]]; then
+            [[ $WANT_S3      -eq 1 ]] && echo "S3_ENDPOINT=http://$BIND_IP:$S3_PORT"
+            [[ $WANT_S3_DISK -eq 1 ]] && echo "S3_DISK_ENDPOINT=http://$BIND_IP:$S3_DISK_PORT"
             echo "S3_ACCESS_KEY=$S3_USER"
             echo "S3_SECRET_KEY=$S3_PASS"
             echo "S3_BUCKET=$S3_BUCKET"
@@ -305,6 +323,7 @@ write_two_node_env() {
         echo "REDIS_LOCAL_HOST=127.0.0.1"
         echo "REDIS_LOCAL_PORT=$REDIS_PORT"
         echo "S3_ENDPOINT=http://$remote:$S3_PORT"
+        echo "S3_DISK_ENDPOINT=http://$remote:$S3_DISK_PORT"
         echo "S3_ACCESS_KEY=$S3_USER"
         echo "S3_SECRET_KEY=$S3_PASS"
         echo "S3_BUCKET=$S3_BUCKET"
@@ -319,9 +338,10 @@ write_two_node_env() {
 cmd_up() {
     parse_flags "$@"
     [[ -z "$BIND_IP" ]] && BIND_IP="$(detect_bind_ip)"
-    log "bind IP = $BIND_IP   (redis=$WANT_REDIS s3=$WANT_S3)"
-    [[ $WANT_REDIS -eq 1 ]] && start_redis
-    [[ $WANT_S3    -eq 1 ]] && start_minio
+    log "bind IP = $BIND_IP   (redis=$WANT_REDIS s3=$WANT_S3 s3-disk=$WANT_S3_DISK)"
+    [[ $WANT_REDIS   -eq 1 ]] && start_redis
+    [[ $WANT_S3      -eq 1 ]] && start_minio
+    [[ $WANT_S3_DISK -eq 1 ]] && start_minio_disk
     write_env
     ok "all requested backends are up"
 }
@@ -329,6 +349,7 @@ cmd_up() {
 cmd_down() {
     parse_flags "$@"
     stop_minio || true
+    stop_minio_disk || true
     stop_redis || true
     ok "teardown complete"
 }
@@ -343,9 +364,14 @@ cmd_status() {
         warn "Redis  : DOWN ($BIND_IP:$REDIS_PORT)"
     fi
     if curl -fsS "http://$BIND_IP:$S3_PORT/minio/health/live" >/dev/null 2>&1; then
-        ok "MinIO  : UP   (http://$BIND_IP:$S3_PORT)"
+        ok "MinIO ram : UP   (http://$BIND_IP:$S3_PORT)"
     else
-        warn "MinIO  : DOWN (http://$BIND_IP:$S3_PORT)"
+        warn "MinIO ram : DOWN (http://$BIND_IP:$S3_PORT)"
+    fi
+    if curl -fsS "http://$BIND_IP:$S3_DISK_PORT/minio/health/live" >/dev/null 2>&1; then
+        ok "MinIO disk: UP   (http://$BIND_IP:$S3_DISK_PORT)"
+    else
+        warn "MinIO disk: DOWN (http://$BIND_IP:$S3_DISK_PORT)"
     fi
 }
 
@@ -417,11 +443,12 @@ cmd_two_node() {
 cmd_backend() {
     parse_flags "$@"
     [[ -z "$BIND_IP" ]] && BIND_IP="$(detect_bind_ip)"
-    log "backend node — Redis + S3 on $BIND_IP"
+    log "backend node — Redis + S3 (ram) + S3 (disk) on $BIND_IP"
     start_redis
     start_minio
+    start_minio_disk
     write_env
-    ok "backend ready — Redis $BIND_IP:$REDIS_PORT, S3 http://$BIND_IP:$S3_PORT"
+    ok "backend ready — Redis $BIND_IP:$REDIS_PORT, S3 :$S3_PORT (ram), S3 :$S3_DISK_PORT (disk)"
     log "now on the COMPUTE node run: ./deploy_backends.sh compute --remote $BIND_IP"
 }
 

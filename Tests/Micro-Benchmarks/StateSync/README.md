@@ -13,13 +13,18 @@ Ordered from most disaggregated (slowest, most general) to most local
 (fastest, our design). All run with **compute on a single node** first; the
 backends for the two "external remote" rows live on a second cluster node.
 
-| # | Approach | Backend | Locality | Representative system / paper |
+| # | Approach (`bench.py` id) | Backend | Locality | Representative system / paper |
 |---|----------|---------|----------|-------------------------------|
-| 1 | External storage, remote | S3-compatible object store (MinIO) | remote node, over network | S3 / object-store function chaining |
-| 2 | External in-memory, remote | Redis | remote node, over network | Disaggregated KV state stores |
-| 3 | Local in-memory | Redis (loopback) | same node, over loopback TCP | Faasm two-tier local state, Pocket/Jiffy-style |
-| 4 | Container shared memory | host shared memory, copy-based | same node, intra-host mmap | *Serialization/Deserialization-free State Transfer in Serverless Workflows* |
-| 5 | **SHM zero-copy (ours)** | page-chain slots in mapped SHM | same node, zero-copy | *Roadrunner: Accelerating Data Delivery to WebAssembly-Based Serverless Functions* |
+| 1 | External storage, remote — disk (`s3-disk`) | S3-compatible object store (MinIO), disk-backed data dir | remote node, over network | S3 / object-store function chaining |
+| 2 | External storage, remote — RAM (`s3`) | S3-compatible object store (MinIO), tmpfs data dir | remote node, over network | object store on fast/RAM tier |
+| 3 | External in-memory, remote (`redis-remote`) | Redis | remote node, over network | Disaggregated KV state stores |
+| 4 | Local in-memory (`redis-local`) | Redis (loopback) | same node, over loopback TCP | Faasm two-tier local state, Pocket/Jiffy-style |
+| 5 | Container shared memory (`shm-copy`) | host shared memory, copy-based | same node, intra-host mmap | *Serialization/Deserialization-free State Transfer in Serverless Workflows* |
+| 6 | **SHM zero-copy — ours (`shm-zerocopy`)** | page-chain slots in mapped SHM | same node, zero-copy | *Roadrunner: Accelerating Data Delivery to WebAssembly-Based Serverless Functions* |
+
+The two S3 rows isolate the **storage-medium** effect: `s3-disk` writes objects to
+the NVMe root fs (`/var/tmp`), `s3` writes to tmpfs (`/tmp`, RAM). Both run as
+separate MinIO instances on the backend node (ports 9010 and 9000).
 
 Rows 4–5 need no external daemon — they are driven entirely by the harness
 (rows 4–5 are implemented in a later step). Rows 1–3 need the Redis / S3
@@ -142,7 +147,22 @@ python3 bench.py --approaches shm-copy shm-zerocopy
 python3 bench.py --sizes 64 4096 1048576 --iters 500 --warmup 50
 python3 bench.py --readers 8                       # fan-out: 1 put, N gets
 python3 bench.py --csv results.csv                 # raw rows for plotting
+python3 bench.py --max-bytes-per-size 0            # disable the budget (full iters)
 ```
+
+**Per-size data budget.** Large payloads at full `--iters` move enormous
+volumes (e.g. 256 MiB × 200 iters × 2 remote rows ≈ 220 GiB over the wire).
+To keep a single run practical, `--max-bytes-per-size` (default **4 GiB**)
+caps iterations per size: small payloads keep the full `--iters`, large ones
+auto-scale down (e.g. 256 MiB → ~8 iters). The resolved per-size iteration
+count is printed before the run and recorded in the CSV (`iters` column). Set
+`--max-bytes-per-size 0` for unlimited.
+
+> **S3 storage medium.** Two S3 rows are measured: `s3` (MinIO data on `/tmp`,
+> tmpfs/RAM) and `s3-disk` (MinIO data on `/var/tmp`, NVMe). The disk row is the
+> realistic "external object storage" baseline; the RAM row is an optimistic
+> upper bound that isolates the storage-medium cost. Override paths with
+> `S3_DATADIR=` / `S3_DISK_DATADIR=` before `./deploy_backends.sh backend`.
 
 The two shared-memory rows run with **no external dependencies** (mmap over a
 `/dev/shm` scratch file). They isolate the #4-vs-#5 contrast directly:

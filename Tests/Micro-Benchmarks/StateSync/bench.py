@@ -3,7 +3,8 @@
 across the five state-synchronization approaches.
 
 Approaches (see README.md):
-  s3            external storage, remote   (MinIO / S3, minio client)
+  s3            external storage, remote   (MinIO / S3, RAM-backed data dir)
+  s3-disk       external storage, remote   (MinIO / S3, disk-backed data dir)
   redis-remote  external in-memory, remote (Redis on the backend node)
   redis-local   external in-memory, local  (Redis on loopback)
   shm-copy      container shared memory     (mmap /dev/shm, consumer copies out)
@@ -49,7 +50,7 @@ def load_env():
     cfg = {
         "REDIS_HOST": "127.0.0.1", "REDIS_PORT": "6379", "REDIS_PASS": "",
         "REDIS_LOCAL_HOST": "127.0.0.1", "REDIS_LOCAL_PORT": "6379",
-        "S3_ENDPOINT": "", "S3_ACCESS_KEY": "minioadmin",
+        "S3_ENDPOINT": "", "S3_DISK_ENDPOINT": "", "S3_ACCESS_KEY": "minioadmin",
         "S3_SECRET_KEY": "minioadmin123", "S3_BUCKET": "statesync",
         "S3_REGION": "us-east-1",
     }
@@ -88,16 +89,22 @@ class Backend:
 
 
 class S3Backend(Backend):
-    """External storage, remote — S3-compatible object store via the MinIO client."""
+    """External storage, remote — S3-compatible object store via the MinIO client.
+
+    The same class drives both the `s3` (RAM-backed MinIO) and `s3-disk`
+    (disk-backed MinIO) rows; they differ only by which endpoint they dial.
+    """
     name = "s3"
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, name="s3", endpoint_key="S3_ENDPOINT"):
         self.cfg = cfg
+        self.name = name
+        self.endpoint_key = endpoint_key
 
     def setup(self, max_size):
-        endpoint = self.cfg["S3_ENDPOINT"]
+        endpoint = self.cfg[self.endpoint_key]
         if not endpoint:
-            raise RuntimeError("S3_ENDPOINT not set (run deploy_backends.sh up)")
+            raise RuntimeError(f"{self.endpoint_key} not set (run deploy_backends.sh up)")
         try:
             from minio import Minio
         except ImportError as e:
@@ -223,7 +230,8 @@ class ShmBackend(Backend):
 
 def build_backends(cfg):
     return {
-        "s3":           lambda: S3Backend(cfg),
+        "s3":           lambda: S3Backend(cfg, "s3", "S3_ENDPOINT"),
+        "s3-disk":      lambda: S3Backend(cfg, "s3-disk", "S3_DISK_ENDPOINT"),
         "redis-remote": lambda: RedisBackend("redis-remote", cfg["REDIS_HOST"],
                                              cfg["REDIS_PORT"], cfg["REDIS_PASS"]),
         "redis-local":  lambda: RedisBackend("redis-local", cfg["REDIS_LOCAL_HOST"],
@@ -241,6 +249,20 @@ def percentile(samples, p):
     s = sorted(samples)
     k = max(0, min(len(s) - 1, int(round((p / 100.0) * (len(s) - 1)))))
     return s[k]
+
+
+def plan_iters(size, readers, cap_iters, budget_bytes, min_iters=5):
+    """Iterations for one size, bounded by a per-size data budget.
+
+    Keeps small payloads at the full `cap_iters` (statistically rich) while
+    auto-scaling large payloads down so a single run doesn't move hundreds of
+    GiB.  budget_bytes <= 0 disables the cap.
+    """
+    if budget_bytes <= 0:
+        return cap_iters
+    per_iter = size * (1 + max(1, readers))   # one PUT + `readers` GETs
+    n = int(budget_bytes // max(1, per_iter))
+    return max(min_iters, min(cap_iters, n))
 
 
 def measure(backend, size, iters, warmup, readers):
@@ -305,19 +327,39 @@ def main():
                     choices=list(registry), help="which approaches to run")
     ap.add_argument("--sizes", nargs="+", type=int,
                     default=[16 * 1024, 1024 * 1024, 16 * 1024 * 1024,
-                             256 * 1024 * 1024],
+                             128 * 1024 * 1024],
                     help="state sizes in bytes")
-    ap.add_argument("--iters", type=int, default=200, help="timed iterations")
-    ap.add_argument("--warmup", type=int, default=20, help="warmup iterations")
+    ap.add_argument("--iters", type=int, default=30,
+                    help="max timed iterations per size (an upper cap)")
+    ap.add_argument("--warmup", type=int, default=5, help="max warmup iterations")
     ap.add_argument("--readers", type=int, default=1,
                     help="consumers per publish (fan-out degree)")
+    ap.add_argument("--max-bytes-per-size", type=int, default=4 * 1024 ** 3,
+                    help="per-size data budget in bytes; caps iters for large "
+                         "payloads so a run doesn't move hundreds of GiB "
+                         "(default 4 GiB; 0 = unlimited)")
     ap.add_argument("--csv", default="", help="write raw results to this CSV")
     args = ap.parse_args()
 
+    GiB = 1024 ** 3
     max_size = max(args.sizes)
+
+    # Resolve per-size iterations under the data budget, up front.
+    plan = {s: plan_iters(s, args.readers, args.iters, args.max_bytes_per_size)
+            for s in args.sizes}
+
     print(f"StateSync micro-benchmark")
-    print(f"  iters={args.iters} warmup={args.warmup} readers={args.readers}")
-    print(f"  sizes={[fmt_size(s) for s in args.sizes]}")
+    print(f"  readers={args.readers}  iters_cap={args.iters}  "
+          f"budget={args.max_bytes_per_size / GiB:.1f} GiB/size"
+          + ("  (unlimited)" if args.max_bytes_per_size <= 0 else ""))
+    print(f"  per-size plan:")
+    for s in args.sizes:
+        it = plan[s]
+        vol = it * (1 + max(1, args.readers)) * s
+        print(f"    {fmt_size(s):>8}: {it:>4} iters  (~{vol / GiB:5.1f} GiB / approach)")
+    n_remote = sum(1 for a in args.approaches if a in ("s3", "s3-disk", "redis-remote"))
+    wire = sum(plan[s] * (1 + max(1, args.readers)) * s for s in args.sizes) * n_remote
+    print(f"  est. wire traffic (remote rows): ~{wire / GiB:.1f} GiB")
     print()
 
     csv_rows = []
@@ -338,12 +380,14 @@ def main():
             for i, size in enumerate(args.sizes):
                 if i > 0:
                     backend.cleanup()
-                r = measure(backend, size, args.iters, args.warmup, args.readers)
+                iters = plan[size]
+                warmup = min(args.warmup, max(1, iters // 4))
+                r = measure(backend, size, iters, warmup, args.readers)
                 print(f"{name:<14}{fmt_size(size):>8}  "
                       f"{r['put']['p50']:>10.2f}{r['put']['p99']:>10.2f}"
                       f"{r['get']['p50']:>10.2f}{r['get']['p99']:>10.2f}  "
                       f"{r['put_gibps']:>10.3f}{r['get_gibps']:>10.3f}")
-                csv_rows.append((name, size, args.readers,
+                csv_rows.append((name, size, args.readers, iters,
                                  r['put']['p50'], r['put']['p99'], r['put']['mean'],
                                  r['get']['p50'], r['get']['p99'], r['get']['mean'],
                                  r['put_gibps'], r['get_gibps']))
@@ -355,7 +399,7 @@ def main():
         import csv
         with open(args.csv, "w", newline="") as fh:
             w = csv.writer(fh)
-            w.writerow(["approach", "size_bytes", "readers",
+            w.writerow(["approach", "size_bytes", "readers", "iters",
                         "put_p50_us", "put_p99_us", "put_mean_us",
                         "get_p50_us", "get_p99_us", "get_mean_us",
                         "put_gibps", "get_gibps"])

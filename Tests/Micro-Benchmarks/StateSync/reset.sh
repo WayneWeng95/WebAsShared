@@ -18,10 +18,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RUNDIR="${RUNDIR:-$SCRIPT_DIR/.run}"
 ENV_FILE="$SCRIPT_DIR/backends.env"
 REDIS_DIR="${REDIS_DIR:-/tmp/statesync-redis}"
-S3_DATADIR="${S3_DATADIR:-/tmp/statesync-minio-data}"
+S3_DATADIR="${S3_DATADIR:-/tmp/statesync-minio-data}"            # RAM-backed
+S3_DISK_DATADIR="${S3_DISK_DATADIR:-/var/tmp/statesync-minio-disk}"  # disk-backed
 REDIS_PORT="${REDIS_PORT:-6379}"
 S3_PORT="${S3_PORT:-9000}"
 S3_CONSOLE_PORT="${S3_CONSOLE_PORT:-9001}"
+S3_DISK_PORT="${S3_DISK_PORT:-9010}"
+S3_DISK_CONSOLE_PORT="${S3_DISK_CONSOLE_PORT:-9011}"
 
 PURGE_BIN=0
 CHECK_ONLY=0
@@ -49,16 +52,22 @@ do_clean() {
     # own run dir / data dir, so we never touch unrelated redis/minio servers).
     pkill -f "redis-server $RUNDIR/redis.conf" 2>/dev/null || true
     pkill -f "minio server $S3_DATADIR"        2>/dev/null || true
+    pkill -f "minio server $S3_DISK_DATADIR"   2>/dev/null || true
     sleep 0.3   # let sockets close before the port check
 
     log "clearing runtime artifacts"
     rm -f "$RUNDIR"/redis.conf "$RUNDIR"/redis.pid "$RUNDIR"/redis.log
-    rm -f "$RUNDIR"/minio.pid  "$RUNDIR"/minio.log
+    rm -f "$RUNDIR"/minio*.pid "$RUNDIR"/minio*.log   # minio.pid, minio-ram/disk.*
     rm -f "$ENV_FILE"
 
     if [[ $KEEP_DATA -eq 0 ]]; then
-        log "removing data dirs ($REDIS_DIR, $S3_DATADIR)"
-        rm -rf "$REDIS_DIR" "$S3_DATADIR"
+        # Report space reclaimed (esp. the disk-backed S3 dir on /) before removing.
+        for d in "$REDIS_DIR" "$S3_DATADIR" "$S3_DISK_DATADIR"; do
+            if [[ -d "$d" ]]; then
+                log "removing $(du -sh "$d" 2>/dev/null | cut -f1) data dir: $d"
+            fi
+        done
+        rm -rf "$REDIS_DIR" "$S3_DATADIR" "$S3_DISK_DATADIR"
     else
         warn "keeping data dirs (--keep-data)"
     fi
@@ -89,7 +98,7 @@ do_check() {
     fi
 
     # Ports.
-    for p in "$REDIS_PORT" "$S3_PORT" "$S3_CONSOLE_PORT"; do
+    for p in "$REDIS_PORT" "$S3_PORT" "$S3_CONSOLE_PORT" "$S3_DISK_PORT" "$S3_DISK_CONSOLE_PORT"; do
         if ss -ltn 2>/dev/null | grep -q ":$p "; then
             warn "port $p still LISTENING:"; ss -ltnp 2>/dev/null | grep ":$p "; clean=0
         else
