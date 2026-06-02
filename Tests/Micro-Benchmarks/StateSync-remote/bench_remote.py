@@ -47,6 +47,7 @@ S3_POLL_S = 0.001          # inter-poll sleep for the s3 consumer/producer wait
 def load_env():
     cfg = {
         "REDIS_HOST": "127.0.0.1", "REDIS_PORT": "6379", "REDIS_PASS": "",
+        "CB_CACHE_HOST": "127.0.0.1",   # Cloudburst colocated cache = consumer node
         "S3_ENDPOINT": "", "S3_DISK_ENDPOINT": "", "S3_ACCESS_KEY": "minioadmin",
         "S3_SECRET_KEY": "minioadmin123", "S3_BUCKET": "statesync",
     }
@@ -159,56 +160,45 @@ class S3Channel:
 # ── Cloudburst LDPC model (disaggregated KV + colocated cache) ────────────────
 class CloudburstChannel:
     """Faithful *mechanism model* of Cloudburst's LDPC (Logical Disaggregation
-    with Physical Colocation): state lives in a disaggregated KV (Anna — here
-    proxied by Redis) while a cache is colocated with the consumer.
+    with Physical Colocation): a KV (Anna — proxied by Redis) with a cache
+    physically colocated with the consumer's node.
 
-      cloudburst-cold : first / unique delivery — consumer cache MISS, so the
-                        state is fetched from the remote KV (cross-node round
-                        trip). This is the producer->consumer handoff cost, and
-                        it is essentially the disaggregated-KV path.
-      cloudburst-warm : repeated / shared read — consumer cache HIT, served from
-                        the colocated cache at local-memory speed (no network).
-                        This is the LDPC win.
+      cloudburst-cold : cache MISS — state is fetched from the *disaggregated*
+                        KV (Redis on node C, `REDIS_HOST`). Both producer and
+                        consumer cross the network, so this ≈ `redis-remote`.
+      cloudburst-warm : cache HIT — the cache (Redis) is colocated on the
+                        *consumer* node (`CB_CACHE_HOST`). The producer pushes
+                        the state to that cache over the network (one hop), and
+                        the consumer reads it from its LOCAL Redis. Removing the
+                        consumer's network round-trip is the LDPC win.
 
-    This models the *mechanism*, not real Anna/Cloudburst (which adds causal
-    consistency, lattice merges, and an autoscaling KV). The colocated cache is
-    an in-process buffer; the warm path therefore has no consumer/network
-    participation.
+    Both regimes are Redis ping-pongs; they differ only in WHERE the Redis lives
+    (node C = disaggregated vs node B = colocated with the consumer). This models
+    the LDPC placement effect, not real Anna (causal consistency, lattice merges,
+    autoscaling).
     """
     REQ, RESP = "cb:req", "cb:resp"
 
     def __init__(self, cfg, warm):
+        import redis
         self.warm = warm
-        self._buf = None                       # the colocated cache
-        if not warm:
-            import redis
-            self.r = redis.Redis(host=cfg["REDIS_HOST"], port=int(cfg["REDIS_PORT"]),
-                                 password=cfg["REDIS_PASS"] or None, socket_timeout=30)
-            self.r.ping()
+        # warm: cache on the consumer node; cold: disaggregated KV on node C.
+        host = cfg["CB_CACHE_HOST"] if warm else cfg["REDIS_HOST"]
+        self.r = redis.Redis(host=host, port=int(cfg["REDIS_PORT"]),
+                             password=cfg["REDIS_PASS"] or None, socket_timeout=30)
+        self.r.ping()
 
     def reset(self):
-        if not self.warm:
-            self.r.delete(self.REQ, self.RESP)
+        self.r.delete(self.REQ, self.RESP)
 
     def deliver_us(self, payload, seq):
-        if self.warm:
-            # Cache HIT: object resident in the colocated cache; cost = local read.
-            if self._buf is None or len(self._buf) != len(payload):
-                self._buf = payload            # (cold-fill already happened earlier)
-            t0 = time.perf_counter_ns()
-            _ = bytearray(self._buf)           # materialize object from local cache (O(N) copy)
-            return (time.perf_counter_ns() - t0) / 1000.0   # one-way (local; no /2)
-        # Cache MISS: fetch from the remote KV (same round-trip as Redis).
         t0 = time.perf_counter_ns()
         self.r.rpush(self.REQ, payload)
         self.r.blpop(self.RESP, timeout=30)
         rtt = (time.perf_counter_ns() - t0) / 1000.0
-        self._buf = payload                    # populate cache (next read is warm)
         return rtt / 2.0                       # one-way
 
     def consumer_serve(self, seq):
-        if self.warm:
-            return                              # cache hit needs no remote peer
         item = self.r.blpop(self.REQ, timeout=60)
         if item is None:
             raise TimeoutError("cloudburst consumer timed out")
@@ -302,7 +292,7 @@ def main():
 
     cfg = load_env()
     if args.approach == "cloudburst-warm":
-        target = "local colocated cache (LDPC warm; no network)"
+        target = f"colocated cache {cfg['CB_CACHE_HOST']}:{cfg['REDIS_PORT']} (consumer node)"
     elif args.approach in ("redis-remote", "cloudburst-cold"):
         target = f"KV {cfg['REDIS_HOST']}:{cfg['REDIS_PORT']}"
     elif args.approach == "s3":
