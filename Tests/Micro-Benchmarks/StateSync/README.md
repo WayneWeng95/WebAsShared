@@ -50,34 +50,76 @@ is never silently evicted.
 
 ## Deploying the backends
 
-On the **remote backend node** (`10.10.1.1`) — brings up Redis + S3:
+### Two-node experiment (no SSH — one command per node)
+
+Run **one command on each machine** (this is the path to use when passwordless
+SSH between nodes isn't available):
 
 ```bash
-./deploy_backends.sh up
+# On the BACKEND node (10.10.1.1) — Redis + S3 bound to the experiment NIC:
+./deploy_backends.sh backend
+
+# On the COMPUTE node (10.10.1.2) — loopback Redis + merged backends.env,
+# pointed at the backend node's IP:
+./deploy_backends.sh compute --remote 10.10.1.1
 ```
 
-On the **compute node** (`10.10.1.2`) — a loopback-only Redis for the
-"local in-memory" row (no S3 needed locally):
+`compute` starts the loopback Redis (the `redis-local` row) and writes
+`backends.env` so the `redis-remote` and `s3` rows resolve to `10.10.1.1` and
+`redis-local` resolves to loopback. Then, on the compute node:
 
 ```bash
-./deploy_backends.sh up --bind 127.0.0.1 --no-s3
+python3 bench.py --csv results.csv
 ```
 
-Or drive the remote node in one shot from the compute node:
+Verify / tear down on each node:
 
 ```bash
-./deploy_backends.sh remote 10.10.1.1 up
+./deploy_backends.sh status     # on either node
+./deploy_backends.sh down       # on each node
 ```
 
-Inspect / tear down:
+> If the backend uses non-default ports/creds (`backend --redis-port N …`),
+> pass the same flags to `compute` so the merged `backends.env` matches.
+
+### One-command variant (requires SSH)
+
+If passwordless SSH to the backend node *does* work, both sides can be done
+from the compute node in one shot:
 
 ```bash
+./deploy_backends.sh two-node 10.10.1.1
+./deploy_backends.sh two-node 10.10.1.1 down
+```
+
+### Manual / single-node
+
+```bash
+./deploy_backends.sh up                          # Redis + S3, auto-detected NIC
+./deploy_backends.sh up --bind 127.0.0.1 --no-s3 # loopback Redis only
+./deploy_backends.sh remote 10.10.1.1 up         # deploy on a remote node
 ./deploy_backends.sh status
 ./deploy_backends.sh down
 ```
 
 Each `up` writes `backends.env` (resolved endpoints + credentials) next to the
-script, ready to `source` from the benchmark harness.
+script, ready to be read by the benchmark harness.
+
+### Reset a node
+
+`reset.sh` returns a node to a clean state and verifies it (stops backends,
+clears runtime/data artifacts, checks processes + ports + the distro Redis
+service). Run it on each node before or after a run:
+
+```bash
+./reset.sh                # stop + clean (keeps downloaded binaries) + check
+./reset.sh --check-only   # report state without touching anything
+./reset.sh --purge-bin    # also delete the downloaded minio/mc binaries
+./reset.sh --keep-data    # clean metadata but keep the data dirs
+```
+
+It only kills instances *this benchmark* started (matched by our run/data dirs),
+so unrelated Redis/MinIO servers on the host are never touched.
 
 ## Running the benchmark (`bench.py`)
 

@@ -44,6 +44,13 @@ if ! grep -q '^\*.*memlock.*unlimited' "$LIMITS_FILE" 2>/dev/null; then
 fi
 info "Current memlock limit: $(ulimit -l) KB (should be unlimited)"
 
+# ── Step 2c: Python clients for the StateSync micro-benchmark ──
+# bench.py (Tests/Micro-Benchmarks/StateSync) talks to Redis and the
+# S3/MinIO backend. --break-system-packages because the distro Python is
+# externally managed (PEP 668) and we install these system-wide on purpose.
+info "Installing Python clients for StateSync benchmark (redis, minio)..."
+pip install --break-system-packages redis minio
+
 
 # ── Step 3: Rust environment setup ──────────────────────────
 info "Setting up Rust environment..."

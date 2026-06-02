@@ -287,8 +287,8 @@ def main():
     ap.add_argument("--approaches", nargs="+", default=list(registry),
                     choices=list(registry), help="which approaches to run")
     ap.add_argument("--sizes", nargs="+", type=int,
-                    default=[64, 1024, 16 * 1024, 256 * 1024,
-                             1024 * 1024, 16 * 1024 * 1024],
+                    default=[16 * 1024, 1024 * 1024, 16 * 1024 * 1024,
+                             256 * 1024 * 1024],
                     help="state sizes in bytes")
     ap.add_argument("--iters", type=int, default=200, help="timed iterations")
     ap.add_argument("--warmup", type=int, default=20, help="warmup iterations")
