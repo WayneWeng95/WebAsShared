@@ -13,20 +13,22 @@ this one asks "what does it cost to deliver state between two machines."
 | External storage, remote — disk (`s3-disk`) | A PUTs to MinIO (NVMe), B GETs | S3 / object-store chaining (disk) |
 | External storage, remote — RAM (`s3`) | A PUTs to MinIO (tmpfs), B GETs | S3 / object-store chaining (RAM upper bound) |
 | External in-memory, remote (`redis-remote`) | A SETs to Redis, B GETs | disaggregated KV state |
-| Cloudburst LDPC, cold (`cloudburst-cold`) | A → KV on node C → B (both cross network) | cache MISS → disaggregated KV (≈ `redis-remote`) |
-| Cloudburst LDPC, warm (`cloudburst-warm`) | A → cache on node B → B reads locally | cache HIT → cache colocated with the consumer |
+| Cloudburst LDPC, cold (`cloudburst-cold`) | Redis on the **producer** node A; consumer fetches remote | cache colocated with producer (1-hop) |
+| Cloudburst LDPC, warm (`cloudburst-warm`) | Redis on the **consumer** node B; producer writes remote | cache colocated with consumer (1-hop) |
 | **Shared memory + RDMA (ours, `rdma-shm`)** | A RDMA-WRITEs into B's registered memory | system's `RemoteSend`/`RemoteRecv` (`connect::RdmaRemote`) |
 
-The **Cloudburst** rows are a faithful *mechanism model* of LDPC (Logical
-Disaggregation with Physical Colocation), not a real Anna/Cloudburst deployment.
-Both are Redis ping-pongs that differ only in **where the cache lives**:
-- **cold** — cache miss: state is read from the *disaggregated* KV on node C, so
-  both producer and consumer cross the network (≈ `redis-remote`).
-- **warm** — cache hit: the cache (Redis) is *colocated on the consumer node B*.
-  The producer pushes state to it over the network (one hop), and the consumer
-  reads from its **local** Redis. Removing the consumer's network round-trip is
-  the LDPC win — warm beats `redis-remote`/cold by exactly the consumer's saved
-  hop.
+The three KV approaches are all Redis ping-pongs that differ only in **where the
+Redis lives** relative to the two compute nodes (a *mechanism model* of LDPC,
+not real Anna):
+- **`redis-remote`** — Redis on a separate **third node C**; both producer and
+  consumer cross the network (**two-hop**).
+- **`cloudburst-cold`** — Redis on the **producer node A**; the producer writes
+  locally, the consumer fetches over the network (**one-hop**).
+- **`cloudburst-warm`** — Redis on the **consumer node B**; the producer writes
+  over the network, the consumer reads locally (**one-hop**).
+
+So colocating the cache on either compute node (cold/warm) saves one of the two
+network crossings that the fully disaggregated `redis-remote` pays.
 
 For the cross-node delivery a copy is inevitable (bytes must cross the wire); the
 question is the *overhead beyond the raw transfer*: object-store/KV serialization
@@ -34,17 +36,16 @@ question is the *overhead beyond the raw transfer*: object-store/KV serializatio
 
 ## Topology (3-node)
 
-| Node | Role here | IP |
-|------|-----------|----|
-| A | producer (compute) | `10.10.1.2` |
-| B | consumer (compute) + Cloudburst colocated cache (Redis) | `10.10.1.1` |
-| C | disaggregated store: Redis + MinIO | `10.10.1.4` |
+| Node | Role here | IP | Runs Redis for |
+|------|-----------|----|----------------|
+| A | producer (compute) | `10.10.1.2` | `cloudburst-cold` (`CB_PRODUCER_HOST`) |
+| B | consumer (compute) | `10.10.1.1` | `cloudburst-warm` (`CB_CONSUMER_HOST`) |
+| C | disaggregated store | `10.10.1.4` | `redis-remote` + MinIO (`s3`, `s3-disk`) |
 
-Store on a **separate node C** (the realistic disaggregated-state tier): the
-`s3*`, `redis-remote`, and `cloudburst-cold` rows dial C, so they traverse the
-network on both sides. `cloudburst-warm` dials a **Redis colocated on node B**
-(`CB_CACHE_HOST`), so the consumer's reads stay on-node. `rdma-shm` is a direct
-A↔B one-sided write on the experiment NIC (`10.10.1.x`, RoCE `mlx4_0`).
+Three Redis instances, one per node, model the three cache placements:
+`redis-remote` → node C (two-hop), `cloudburst-cold` → node A / producer (one-hop),
+`cloudburst-warm` → node B / consumer (one-hop). `rdma-shm` is a direct A↔B
+one-sided write on the experiment NIC (`10.10.1.x`, RoCE `mlx4_0`).
 
 ## Reused tooling
 
@@ -89,14 +90,18 @@ p50 / p99 and GiB/s. CSV schema (shared by both harnesses):
 ## Running (3-node)
 
 ```bash
-# 1a. disaggregated store on NODE C (10.10.1.4): Redis + BOTH MinIO (disk :9010, RAM :9000)
-./deploy_backends.sh backend                    # all backends (no --no-s3)
-# 1b. Cloudburst colocated cache on NODE B (10.10.1.1): just Redis, bound to B
+# 1. one Redis per node + the object stores:
+#    NODE C (10.10.1.4): disaggregated Redis + BOTH MinIO (disk :9010, RAM :9000)
+./deploy_backends.sh backend                                  # all backends (no --no-s3)
+#    NODE A (10.10.1.2): Redis for cloudburst-cold (producer-colocated cache)
+./deploy_backends.sh up --bind 10.10.1.2 --no-s3 --no-s3-disk
+#    NODE B (10.10.1.1): Redis for cloudburst-warm (consumer-colocated cache)
 ./deploy_backends.sh up --bind 10.10.1.1 --no-s3 --no-s3-disk
 
-# 2. point NODE A *and* NODE B at the stores (write backends.env on both; the
+# 2. point NODE A *and* NODE B at all stores (write backends.env on both; the
 #    grouped-echo form is paste-safe — a long printf can line-wrap and corrupt keys):
-{ echo REDIS_HOST=10.10.1.4; echo REDIS_PORT=6379; echo CB_CACHE_HOST=10.10.1.1; \
+{ echo REDIS_HOST=10.10.1.4; echo REDIS_PORT=6379; \
+  echo CB_CONSUMER_HOST=10.10.1.1; echo CB_PRODUCER_HOST=10.10.1.2; \
   echo S3_ENDPOINT=http://10.10.1.4:9000; echo S3_DISK_ENDPOINT=http://10.10.1.4:9010; \
   echo S3_ACCESS_KEY=minioadmin; echo S3_SECRET_KEY=minioadmin123; echo S3_BUCKET=statesync; } > backends.env
 

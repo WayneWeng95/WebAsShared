@@ -47,7 +47,8 @@ S3_POLL_S = 0.001          # inter-poll sleep for the s3 consumer/producer wait
 def load_env():
     cfg = {
         "REDIS_HOST": "127.0.0.1", "REDIS_PORT": "6379", "REDIS_PASS": "",
-        "CB_CACHE_HOST": "127.0.0.1",   # Cloudburst colocated cache = consumer node
+        "CB_CONSUMER_HOST": "127.0.0.1",   # Cloudburst cache on consumer node (warm)
+        "CB_PRODUCER_HOST": "127.0.0.1",   # Cloudburst cache on producer node (cold)
         "S3_ENDPOINT": "", "S3_DISK_ENDPOINT": "", "S3_ACCESS_KEY": "minioadmin",
         "S3_SECRET_KEY": "minioadmin123", "S3_BUCKET": "statesync",
     }
@@ -157,33 +158,29 @@ class S3Channel:
             pass
 
 
-# ── Cloudburst LDPC model (disaggregated KV + colocated cache) ────────────────
+# ── Cloudburst LDPC model — cache placement (consumer vs producer node) ───────
 class CloudburstChannel:
-    """Faithful *mechanism model* of Cloudburst's LDPC (Logical Disaggregation
-    with Physical Colocation): a KV (Anna — proxied by Redis) with a cache
-    physically colocated with the consumer's node.
+    """Mechanism model of Cloudburst's LDPC (Logical Disaggregation with Physical
+    Colocation). All three KV approaches are Redis ping-pongs that differ only in
+    WHERE the cache/KV lives relative to the two compute nodes:
 
-      cloudburst-cold : cache MISS — state is fetched from the *disaggregated*
-                        KV (Redis on node C, `REDIS_HOST`). Both producer and
-                        consumer cross the network, so this ≈ `redis-remote`.
-      cloudburst-warm : cache HIT — the cache (Redis) is colocated on the
-                        *consumer* node (`CB_CACHE_HOST`). The producer pushes
-                        the state to that cache over the network (one hop), and
-                        the consumer reads it from its LOCAL Redis. Removing the
-                        consumer's network round-trip is the LDPC win.
+      cloudburst-warm : Redis colocated on the CONSUMER node (`CB_CONSUMER_HOST`)
+                        — producer writes over the network, consumer reads local.
+      cloudburst-cold : Redis colocated on the PRODUCER node (`CB_PRODUCER_HOST`)
+                        — producer writes local, consumer fetches over network.
+      redis-remote    : Redis on a separate THIRD node (`REDIS_HOST`) — both
+                        producer and consumer cross the network (two-hop).
 
-    Both regimes are Redis ping-pongs; they differ only in WHERE the Redis lives
-    (node C = disaggregated vs node B = colocated with the consumer). This models
-    the LDPC placement effect, not real Anna (causal consistency, lattice merges,
-    autoscaling).
+    warm and cold are single-hop (one side local, one side remote); redis-remote
+    is two-hop. Models the LDPC placement effect, not real Anna.
     """
     REQ, RESP = "cb:req", "cb:resp"
 
     def __init__(self, cfg, warm):
         import redis
         self.warm = warm
-        # warm: cache on the consumer node; cold: disaggregated KV on node C.
-        host = cfg["CB_CACHE_HOST"] if warm else cfg["REDIS_HOST"]
+        # warm: cache on consumer node; cold: cache on producer node.
+        host = cfg["CB_CONSUMER_HOST"] if warm else cfg["CB_PRODUCER_HOST"]
         self.r = redis.Redis(host=host, port=int(cfg["REDIS_PORT"]),
                              password=cfg["REDIS_PASS"] or None, socket_timeout=30)
         self.r.ping()
@@ -195,8 +192,7 @@ class CloudburstChannel:
         t0 = time.perf_counter_ns()
         self.r.rpush(self.REQ, payload)
         self.r.blpop(self.RESP, timeout=30)
-        rtt = (time.perf_counter_ns() - t0) / 1000.0
-        return rtt / 2.0                       # one-way
+        return (time.perf_counter_ns() - t0) / 1000.0 / 2.0   # one-way
 
     def consumer_serve(self, seq):
         item = self.r.blpop(self.REQ, timeout=60)
@@ -292,9 +288,11 @@ def main():
 
     cfg = load_env()
     if args.approach == "cloudburst-warm":
-        target = f"colocated cache {cfg['CB_CACHE_HOST']}:{cfg['REDIS_PORT']} (consumer node)"
-    elif args.approach in ("redis-remote", "cloudburst-cold"):
-        target = f"KV {cfg['REDIS_HOST']}:{cfg['REDIS_PORT']}"
+        target = f"cache on consumer node {cfg['CB_CONSUMER_HOST']}:{cfg['REDIS_PORT']} (1-hop)"
+    elif args.approach == "cloudburst-cold":
+        target = f"cache on producer node {cfg['CB_PRODUCER_HOST']}:{cfg['REDIS_PORT']} (1-hop)"
+    elif args.approach == "redis-remote":
+        target = f"KV {cfg['REDIS_HOST']}:{cfg['REDIS_PORT']} (2-hop)"
     elif args.approach == "s3":
         target = f"s3-ram {cfg['S3_ENDPOINT'] or '(unset)'}"
     else:
