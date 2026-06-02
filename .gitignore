@@ -6,6 +6,8 @@ Executor/.claude/
 Partitioner/target/
 TestData/
 TestOutput/
+Tests/Micro-Benchmarks/StateSync-local/.run
+Tests/Micro-Benchmarks/StateSync-remote/.run
 
 # Build artifacts
 __pycache__/

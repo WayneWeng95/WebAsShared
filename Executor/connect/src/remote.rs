@@ -123,7 +123,9 @@ impl RdmaRemote {
         self.qp.post_rdma_write(&self.mr, n as u32,
                                  self.remote_addr, self.remote_rkey)?;
         self.qp.poll_one_blocking()?;
-        println!("[RdmaRemote] RDMA WRITE complete ({} bytes → remote)", n);
+        if verbose() {
+            println!("[RdmaRemote] RDMA WRITE complete ({} bytes → remote)", n);
+        }
 
         exchange::send_done(&mut self.ctrl)?;
         Ok(())
@@ -132,7 +134,9 @@ impl RdmaRemote {
     /// **Server**: block until the client signals that its RDMA WRITE is done.
     pub fn wait_peer_write(&mut self) -> Result<()> {
         exchange::wait_done(&mut self.ctrl)?;
-        println!("[RdmaRemote] peer write signal received");
+        if verbose() {
+            println!("[RdmaRemote] peer write signal received");
+        }
         Ok(())
     }
 
@@ -152,6 +156,12 @@ impl RdmaRemote {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Data-path logging is off by default (it would dominate latency benchmarks).
+/// Set `RDMA_VERBOSE=1` to re-enable the per-write diagnostics.
+fn verbose() -> bool {
+    std::env::var("RDMA_VERBOSE").map(|v| v != "0").unwrap_or(false)
+}
 
 /// Generate a random 24-bit PSN from the subsecond nanosecond clock.
 fn rand_psn() -> u32 {
