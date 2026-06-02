@@ -94,12 +94,13 @@ p50 / p99 and GiB/s. CSV schema (shared by both harnesses):
 #    NODE C (10.10.1.4): disaggregated Redis + BOTH MinIO (disk :9010, RAM :9000)
 ./deploy_backends.sh backend                                  # all backends (no --no-s3)
 #    NODE A (10.10.1.2): Redis for cloudburst-cold (producer-colocated cache)
-./deploy_backends.sh up --bind 10.10.1.2 --no-s3 --no-s3-disk
+./deploy_backends.sh up --bind 10.10.1.2 --no-s3 --no-s3-disk --no-env
 #    NODE B (10.10.1.1): Redis for cloudburst-warm (consumer-colocated cache)
-./deploy_backends.sh up --bind 10.10.1.1 --no-s3 --no-s3-disk
+./deploy_backends.sh up --bind 10.10.1.1 --no-s3 --no-s3-disk --no-env
 
-# 2. point NODE A *and* NODE B at all stores (write backends.env on both; the
-#    grouped-echo form is paste-safe — a long printf can line-wrap and corrupt keys):
+# 2. point NODE A *and* NODE B at all stores. WRITE THIS AFTER step 1 — `deploy up`
+#    without --no-env (and `reset.sh`) overwrite backends.env. The grouped-echo
+#    form is paste-safe (a long printf can line-wrap and corrupt keys):
 { echo REDIS_HOST=10.10.1.4; echo REDIS_PORT=6379; \
   echo CB_CONSUMER_HOST=10.10.1.1; echo CB_PRODUCER_HOST=10.10.1.2; \
   echo S3_ENDPOINT=http://10.10.1.4:9000; echo S3_DISK_ENDPOINT=http://10.10.1.4:9010; \

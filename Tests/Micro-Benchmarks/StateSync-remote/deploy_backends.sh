@@ -66,6 +66,7 @@ S3_DISK_DATADIR="${S3_DISK_DATADIR:-/var/tmp/statesync-minio-disk}"
 WANT_REDIS=1
 WANT_S3=1
 WANT_S3_DISK=1
+WANT_ENV=1                                  # write backends.env (off via --no-env)
 BIND_IP=""
 REMOTE_HOST=""                             # backend node IP, used by `compute`
 REDIS_DIR="${REDIS_DIR:-/tmp/statesync-redis}"   # off-repo dir; persistence is off anyway
@@ -109,6 +110,7 @@ parse_flags() {
             --bucket)       S3_BUCKET="$2";      shift 2;;
             --s3-disk-port) S3_DISK_PORT="$2";   shift 2;;
             --s3-disk-dir)  S3_DISK_DATADIR="$2";shift 2;;
+            --no-env)       WANT_ENV=0;          shift;;
             --no-redis)     WANT_REDIS=0;        shift;;
             --no-s3)        WANT_S3=0;           shift;;
             --no-s3-disk)   WANT_S3_DISK=0;      shift;;
@@ -342,7 +344,7 @@ cmd_up() {
     [[ $WANT_REDIS   -eq 1 ]] && start_redis
     [[ $WANT_S3      -eq 1 ]] && start_minio
     [[ $WANT_S3_DISK -eq 1 ]] && start_minio_disk
-    write_env
+    [[ $WANT_ENV     -eq 1 ]] && write_env || warn "skipped backends.env (--no-env)"
     ok "all requested backends are up"
 }
 

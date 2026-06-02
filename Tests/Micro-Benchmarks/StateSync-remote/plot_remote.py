@@ -34,7 +34,7 @@ plt.rcParams.update({
     "axes.labelsize": LABEL_SIZE, "legend.fontsize": LEGEND_SIZE,
 })
 
-ORDER = ["s3-disk", "s3", "redis-remote", "cloudburst-cold", "cloudburst-warm", "rdma-shm"]
+ORDER = ["s3-disk", "s3", "cloudburst-cold", "cloudburst-warm", "redis-remote", "rdma-shm"]
 LABEL = {
     "s3-disk":         "S3 (disk)",
     "s3":              "S3 (RAM)",
@@ -137,7 +137,7 @@ def plot_throughput(data, outpath, figsize):
         ax.plot(xs, ys, **style(a))
     ax.set_yscale("log")
     _xaxis(ax, all_sizes)
-    ax.set_ylabel("throughput (GiB/s, log)", fontsize=YLABEL_SIZE)
+    ax.set_ylabel("Throughput (GiB/s, log)", fontsize=YLABEL_SIZE)
     ax.legend(fontsize=LEGEND_SIZE, framealpha=0.9)
     fig.tight_layout()
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
