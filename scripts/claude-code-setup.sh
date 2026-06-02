@@ -95,13 +95,18 @@ main() {
     setup_api_key
 
     # 4. Launch
+    # Persist .local/bin on PATH for future shells (idempotent).
+    if ! grep -q '\.local/bin' "$HOME/.bashrc" 2>/dev/null; then
+        echo 'export PATH="$HOME/.local/bin:$PATH"' >> "$HOME/.bashrc"
+    fi
+    export PATH="$HOME/.local/bin:$PATH"
+
     echo ""
-    info "Ready! Launching Claude Code inside tmux..."
+    info "Setup complete."
+    info "To launch Claude Code in a persistent tmux session run:"
+    info "  tmux new-session -s claude claude"
     info "Tip: Detach with Ctrl+B then D. Reattach with: tmux attach -t claude"
     echo ""
-
-
-    echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc && source ~/.bashrc
 }
 
 main "$@"

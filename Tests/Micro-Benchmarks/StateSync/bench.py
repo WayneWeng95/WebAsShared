@@ -79,6 +79,10 @@ class Backend:
     def get(self, key: str) -> int:         # consumer; returns bytes delivered
         raise NotImplementedError
 
+    def cleanup(self):
+        """Called between size iterations to reset backend state."""
+        pass
+
     def teardown(self):
         pass
 
@@ -126,6 +130,13 @@ class S3Backend(Backend):
             resp.close()
             resp.release_conn()
 
+    def cleanup(self):
+        try:
+            for obj in self.client.list_objects(self.bucket, prefix="statesync/"):
+                self.client.remove_object(self.bucket, obj.object_name)
+        except Exception:
+            pass
+
 
 class RedisBackend(Backend):
     """External in-memory KV — Redis (remote or loopback depending on host)."""
@@ -149,6 +160,12 @@ class RedisBackend(Backend):
     def get(self, key):
         val = self.r.get(key)
         return len(val) if val else 0
+
+    def cleanup(self):
+        try:
+            self.r.flushdb()
+        except Exception:
+            pass
 
     def teardown(self):
         try:
@@ -318,7 +335,9 @@ def main():
         print(f"=== {name} ===")
         print(header)
         try:
-            for size in args.sizes:
+            for i, size in enumerate(args.sizes):
+                if i > 0:
+                    backend.cleanup()
                 r = measure(backend, size, args.iters, args.warmup, args.readers)
                 print(f"{name:<14}{fmt_size(size):>8}  "
                       f"{r['put']['p50']:>10.2f}{r['put']['p99']:>10.2f}"
