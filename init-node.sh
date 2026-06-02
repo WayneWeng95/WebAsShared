@@ -48,13 +48,8 @@ info "Current memlock limit: $(ulimit -l) KB (should be unlimited)"
 # bench.py (Tests/Micro-Benchmarks/StateSync) talks to Redis and the
 # S3/MinIO backend. --break-system-packages because the distro Python is
 # externally managed (PEP 668) and we install these system-wide on purpose.
-<<<<<<< HEAD
 info "Installing Python clients for StateSync benchmark (redis, minio, matplotlib)..."
 pip install --break-system-packages redis minio matplotlib
-=======
-info "Installing Python clients for StateSync benchmark (redis, minio)..."
-pip install --break-system-packages redis minio
->>>>>>> 6ca73cc7b1063913040c6c30a5115cf6b8a216c9
 
 
 # ── Step 3: Rust environment setup ──────────────────────────
