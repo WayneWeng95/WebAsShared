@@ -71,6 +71,12 @@ pub struct Dag {
     /// an infinite loop.  Ignored in `one_shot` mode.
     #[serde(default)]
     pub runs: Option<u32>,
+    /// Stream slots exempt from per-run reclamation.  Used with chunked input
+    /// (`Input.chunk_bytes`) to keep an **accumulator** slot alive across runs
+    /// so per-chunk partial results merge into a running total (e.g. slot 200
+    /// for word count, where `wc_reduce` re-sums the accumulated records).
+    #[serde(default)]
+    pub persist_slots: Vec<u32>,
     /// Optional RDMA full-mesh configuration.  Required when any node uses
     /// `RemoteSend` or `RemoteRecv`.  All nodes in the mesh must specify
     /// matching `total` / `ips` lists and distinct `node_id` values.
@@ -497,6 +503,14 @@ pub struct InputParams {
     /// When `true` one path is loaded per run, cycling via `paths[run % paths.len()]`.
     #[serde(default)]
     pub cycle: bool,
+    /// **Chunked input.**  When set, the file is NOT loaded whole; instead the
+    /// DAG runs in a loop, loading one line-aligned chunk of ~`chunk_bytes`
+    /// bytes per run until EOF (see `SlotLoader::load_chunk`).  Lets inputs far
+    /// larger than the guest SHM window be processed incrementally — pair with
+    /// a `persist_slots` accumulator so per-run partials are merged across
+    /// chunks.  Loaded by the run loop, so `prefetch`/`binary` are ignored.
+    #[serde(default)]
+    pub chunk_bytes: Option<usize>,
 }
 
 /// One stage in a `WasmGrouping`.

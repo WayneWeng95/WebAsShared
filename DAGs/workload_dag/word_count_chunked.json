@@ -1,0 +1,55 @@
+{
+  "_comment": "Chunked word count: processes the input in 256 MiB line-aligned chunks,",
+  "_comment2": "one chunk per run, accumulating per-word totals in persist slot 200.",
+  "_comment3": "Handles inputs far larger than the guest SHM window (e.g. 1 GB corpus).",
+  "shm_path": "/dev/shm/word_count_chunked",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "info",
+  "persist_slots": [200],
+  "nodes": [
+
+    {
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": { "path": "TestData/corpus.txt", "slot": 0, "chunk_bytes": 268435456 } }
+    },
+
+    {
+      "id": "distribute",
+      "deps": ["load"],
+      "kind": { "Func": { "func": "wc_distribute", "arg": 10, "arg2": 10 } }
+    },
+
+    { "id": "map_0", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 10, "arg2": 110 } } },
+    { "id": "map_1", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 11, "arg2": 111 } } },
+    { "id": "map_2", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 12, "arg2": 112 } } },
+    { "id": "map_3", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 13, "arg2": 113 } } },
+    { "id": "map_4", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 14, "arg2": 114 } } },
+    { "id": "map_5", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 15, "arg2": 115 } } },
+    { "id": "map_6", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 16, "arg2": 116 } } },
+    { "id": "map_7", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 17, "arg2": 117 } } },
+    { "id": "map_8", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 18, "arg2": 118 } } },
+    { "id": "map_9", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 19, "arg2": 119 } } },
+
+    {
+      "_comment": "Splice the 10 map outputs onto the PERSISTENT accumulator slot 200.",
+      "id": "aggregate",
+      "deps": ["map_0","map_1","map_2","map_3","map_4","map_5","map_6","map_7","map_8","map_9"],
+      "kind": { "Aggregate": { "upstream": [110, 111, 112, 113, 114, 115, 116, 117, 118, 119], "downstream": 200 } }
+    },
+
+    {
+      "_comment": "Re-sum the accumulator each run; the final run holds the grand total.",
+      "id": "reduce",
+      "deps": ["aggregate"],
+      "kind": { "Func": { "func": "wc_reduce", "arg": 200 } }
+    },
+
+    {
+      "id": "save",
+      "deps": ["reduce"],
+      "kind": { "Output": { "path": "TestOutput/word_count_chunked_result.txt" } }
+    }
+
+  ]
+}

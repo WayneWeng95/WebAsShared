@@ -127,12 +127,12 @@ use serde_json;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use wasmtime::*;
-use crate::runtime::input_output::slot_loader::PrefetchHandle;
+use crate::runtime::input_output::slot_loader::{PrefetchHandle, SlotLoader};
 use crate::runtime::input_output::logger::HostLogger;
 use crate::runtime::mem_operation::reclaimer::{self, SlotKind};
 use crate::runtime::worker::{create_wasmtime_engine, setup_vma_environment, WorkerState};
 use crate::runtime::input_output::persistence::PersistenceWriter;
-use crate::shm::format_shared_memory;
+use crate::shm::{format_shared_memory, sync_mapping_to_capacity};
 use common::WASM_PATH;
 use plan::{build_barrier_assignments, build_slot_refcounts, build_waves, is_oneshot_node, node_owned_slots, node_routed_upstream_slots, parse_level, topo_sort, validate_barrier_groups, validate_dag};
 use workers::{spawn_python_subprocess, spawn_wasm_subprocess};
@@ -373,10 +373,61 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         counts
     };
 
+    // ── Chunked inputs ───────────────────────────────────────────────────────
+    // Input nodes with `chunk_bytes` set are loaded one line-aligned chunk per
+    // run (instead of whole-file) so inputs larger than the guest SHM window can
+    // be processed incrementally.  We drive the run loop until every chunked
+    // input reaches EOF; the generic Input dispatch skips these (loaded here).
+    struct ChunkedInput { slot: u32, path: String, chunk_bytes: usize, file_len: u64 }
+    let chunked_inputs: Vec<ChunkedInput> = dag.nodes.iter().filter_map(|n| {
+        if let NodeKind::Input(p) = &n.kind {
+            if let Some(cb) = p.chunk_bytes {
+                use common::INPUT_IO_SLOT;
+                let path = if !p.paths.is_empty() { p.paths[0].clone() } else { p.path.clone() };
+                let file_len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                return Some(ChunkedInput { slot: p.slot.unwrap_or(INPUT_IO_SLOT), path, chunk_bytes: cb, file_len });
+            }
+        }
+        None
+    }).collect();
+    let chunked_mode = !chunked_inputs.is_empty();
+    let mut chunk_offsets: Vec<u64> = vec![0; chunked_inputs.len()];
+    if chunked_mode {
+        let total: u64 = chunked_inputs.iter().map(|c| c.file_len).sum();
+        println!("[DAG] chunked input: {} source(s), {:.1} MiB total, ~{} MiB/chunk",
+                 chunked_inputs.len(), total as f64 / (1024.0 * 1024.0),
+                 chunked_inputs[0].chunk_bytes / (1024 * 1024));
+    }
+
     let mut run_count = 0u32;
 
     loop {
         run_count += 1;
+
+        // Load the next line-aligned chunk of each chunked input into its slot.
+        // `all_chunks_done` becomes true once every input has been fully consumed
+        // by (and including) this run, which is then the final run.
+        let mut all_chunks_done = chunked_mode;
+        if chunked_mode {
+            let splice_addr = store.data().splice_addr;
+            // A previous run's WASM worker subprocess may have grown the SHM
+            // file; re-sync this process's mapping before loading/walking pages.
+            sync_mapping_to_capacity(splice_addr)?;
+            let loader = SlotLoader::new(splice_addr);
+            for (k, c) in chunked_inputs.iter().enumerate() {
+                if chunk_offsets[k] < c.file_len {
+                    let (_recs, consumed) = loader
+                        .load_chunk(std::path::Path::new(&c.path), c.slot, chunk_offsets[k], c.chunk_bytes)?;
+                    chunk_offsets[k] += consumed;
+                    if consumed == 0 { chunk_offsets[k] = c.file_len; } // guard against stall
+                }
+                if chunk_offsets[k] < c.file_len { all_chunks_done = false; }
+            }
+            println!("[DAG] ══ chunk run #{} (offsets {:?} / {:?}) ══",
+                     run_count, chunk_offsets,
+                     chunked_inputs.iter().map(|c| c.file_len).collect::<Vec<_>>());
+        }
+
         if dag.mode == DagMode::Reset && run_count > 1 {
             println!("[DAG] ══ Reset — run #{} ══", run_count);
             if let Some(ref lg) = logger {
@@ -600,8 +651,14 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                     if let Some(count) = slot_refcounts.get_mut(&key) {
                         *count -= 1;
                         if *count == 0 {
-                            reclaimer::free_stream_slot(splice_addr, s);
-                            println!("[DAG] Reclaimed stream slot {}", s);
+                            // Accumulator slots (chunked-input running totals) survive
+                            // across runs — never reclaim them.
+                            if dag.persist_slots.contains(&(s as u32)) {
+                                println!("[DAG] Persisted stream slot {} (accumulator)", s);
+                            } else {
+                                reclaimer::free_stream_slot(splice_addr, s);
+                                println!("[DAG] Reclaimed stream slot {}", s);
+                            }
                         }
                     }
                 }
@@ -713,6 +770,24 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
             lg.info("DAG", &format!("run #{} completed", run_count));
         }
         println!("[DAG] All nodes completed (run #{}).", run_count);
+
+        // Chunked input drives the loop: keep running until every input hits EOF,
+        // regardless of mode.
+        if chunked_mode {
+            if all_chunks_done {
+                println!("[DAG] All input chunks processed ({} runs).", run_count);
+                break;
+            }
+            // Reclaim ALL transient slots before the next chunk so per-chunk data
+            // (distribute partitions, map inputs, the input chunk) does NOT carry
+            // over and get re-counted — only `persist_slots` accumulators survive.
+            let splice_addr = store.data().splice_addr;
+            // Re-sync the mapping first: a worker subprocess may have grown the
+            // SHM, so chains can extend past this process's stale VMA.
+            sync_mapping_to_capacity(splice_addr)?;
+            reclaimer::free_all_transient(splice_addr, &dag.persist_slots);
+            continue;
+        }
 
         if dag.mode == DagMode::OneShot {
             break;

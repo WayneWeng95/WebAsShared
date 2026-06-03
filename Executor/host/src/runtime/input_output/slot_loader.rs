@@ -173,6 +173,52 @@ impl SlotLoader {
         Ok(count)
     }
 
+    /// Load a **line-aligned chunk** of `path` starting at byte `offset`,
+    /// consuming ~`max_bytes` (snapped to a `\n` boundary so no line — and thus
+    /// no word — is split).  Each non-empty line in the chunk is written as one
+    /// record into `slot`.  Returns `(records_written, bytes_consumed)`;
+    /// `bytes_consumed == 0` means `offset` is already at/past EOF.
+    ///
+    /// Boundary rule: cut at the last `\n` within `[offset, offset+max_bytes)`;
+    /// if the window contains no newline (a line longer than `max_bytes`),
+    /// extend forward to the next `\n` (or EOF) so the line stays whole.
+    pub fn load_chunk(&self, path: &Path, slot: u32, offset: u64, max_bytes: usize) -> Result<(usize, u64)> {
+        let loaded = mmap_file(path).map_err(|e| anyhow!("SlotLoader: {}", e))?;
+        let data = loaded.as_bytes();
+        let total = data.len();
+        let start = offset as usize;
+        if start >= total {
+            return Ok((0, 0)); // EOF
+        }
+
+        // Determine the line-aligned end of this chunk.
+        let mut end = core::cmp::min(start.saturating_add(max_bytes), total);
+        if end < total {
+            match data[start..end].iter().rposition(|&b| b == b'\n') {
+                // Cut just past the last newline in the window.
+                Some(rel) => end = start + rel + 1,
+                // No newline in the window: extend to the next newline (or EOF)
+                // so an over-long line is not split.
+                None => match data[end..].iter().position(|&b| b == b'\n') {
+                    Some(rel) => end = end + rel + 1,
+                    None => end = total,
+                },
+            }
+        }
+
+        let mut count = 0usize;
+        for line in data[start..end].split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
+            self.append_record(slot, line)?;
+            count += 1;
+        }
+        let consumed = (end - start) as u64;
+        println!(
+            "[SlotLoader] chunk '{}' [{}..{}) ({} bytes, {} records) → slot {}",
+            path.display(), start, end, consumed, count, slot,
+        );
+        Ok((count, consumed))
+    }
+
     /// Memory-map `path` and write the entire file as a single record into
     /// `slot`.  Use for binary payloads where line-splitting is inappropriate.
     pub fn load_as_single_record(&self, path: &Path, slot: u32) -> Result<()> {

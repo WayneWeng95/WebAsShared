@@ -75,6 +75,29 @@ pub fn register_shm_for_growth(file: File, splice_addr: usize) {
     let _ = SHM_GROW.set(Mutex::new((file, splice_addr)));
 }
 
+/// Re-sync THIS process's mapping to the superblock's current `global_capacity`.
+///
+/// A WASM worker subprocess may have grown the SHM file (and its own mapping)
+/// via `host_remap` while running.  The main DAG-runner process's mapping is
+/// then stale: walking a page chain into the grown region reads beyond the
+/// mapping (garbage / SIGBUS).  Call this in the main process before touching
+/// pages that a subprocess may have allocated (e.g. cross-run reclamation or
+/// the next chunk load).  Unconditionally `expand_mapping`s to `global_capacity`
+/// (unlike `try_grow_shm`, which short-circuits when the recorded capacity
+/// already equals the target even though the local VMA is smaller).
+pub fn sync_mapping_to_capacity(splice_addr: usize) -> Result<()> {
+    let sb = unsafe { &*(splice_addr as *const Superblock) };
+    let cap = sb.global_capacity.load(Ordering::Acquire) as usize;
+    let guard = SHM_GROW.get()
+        .ok_or_else(|| anyhow!("SHM grower not registered"))?;
+    let (file, base) = &*guard.lock().expect("shm_grow mutex poisoned");
+    // Ensure the file is at least `cap` (a subprocess already grew it, but be safe).
+    if (file.metadata()?.len() as usize) < cap {
+        file.set_len(cap as u64)?;
+    }
+    map_into_memory(file, *base, cap)
+}
+
 /// Grow the SHM file so that at least `required` bytes are accessible.
 ///
 /// Uses double-checked locking: the fast path is a single atomic read

@@ -347,6 +347,29 @@ pub fn free_io_slot(splice_addr: usize, slot: usize) {
     free_page_chain(splice_addr, head);
 }
 
+/// Free every stream + I/O slot's page chain back to the pool, EXCEPT the
+/// stream slots listed in `persist`.  Used between chunked-input runs to reclaim
+/// all transient per-chunk slots (distribute partitions, map outputs, the input
+/// chunk, the output) while keeping accumulator slots (e.g. word-count slot 200)
+/// alive across runs.
+///
+/// Slots whose head is already 0 are skipped (no-op), so it is safe to call even
+/// after the normal per-wave reclamation has freed some of them.
+pub fn free_all_transient(splice_addr: usize, persist: &[u32]) {
+    let sb = unsafe { &*(splice_addr as *const Superblock) };
+    for s in 0..common::STREAM_SLOT_COUNT {
+        if persist.contains(&(s as u32)) { continue; }
+        if sb.writer_heads[s].load(Ordering::Acquire) != 0 {
+            free_stream_slot(splice_addr, s);
+        }
+    }
+    for s in 0..common::IO_SLOT_COUNT {
+        if sb.io_heads[s].load(Ordering::Acquire) != 0 {
+            free_io_slot(splice_addr, s);
+        }
+    }
+}
+
 // ─── Slot cursor reset ────────────────────────────────────────────────────────
 
 /// Reset the SHM atomic read-cursor for a stream or I/O slot to zero.

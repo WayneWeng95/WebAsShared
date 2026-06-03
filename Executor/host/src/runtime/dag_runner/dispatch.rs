@@ -322,7 +322,10 @@ pub(super) fn execute_node(
         NodeKind::Input(p) => {
             use common::INPUT_IO_SLOT;
             let slot = p.slot.unwrap_or(INPUT_IO_SLOT);
-            if p.binary {
+            if p.chunk_bytes.is_some() {
+                // Chunked input is loaded by the run loop (one chunk per run);
+                // nothing to do here.
+            } else if p.binary {
                 let paths: &[String] = if !p.paths.is_empty() { &p.paths } else { std::slice::from_ref(&p.path) };
                 let inputer = SlotLoader::new(splice_addr);
                 if p.cycle && paths.len() > 1 {
