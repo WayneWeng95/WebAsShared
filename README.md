@@ -684,6 +684,43 @@ ib_write_bw  -d mlx4_0 -i 2 -x 0 --report_gbits 10.10.1.1
 - **Slot-free DAG authoring**: SymbolicDag inputs carry no slot numbers. The `slot_assigner` derives every slot from the DAG topology plus two lightweight per-function declarations (`out_base`, `output_offset`) that encode the WASM function's hardcoded I/O offsets. All `Aggregate`, `Input`, `Output`, and terminal `Func` slots are fully automatic.
 
 
+## Troubleshooting
+
+### `RDMA mesh setup failed: bind 0.0.0.0:75xx: Address already in use (os error 98)`
+
+A previous job's Executor (`host`) subprocess was left running on one of the
+nodes (job killed / timed out / Ctrl-C) and is still holding the RDMA mesh
+control ports. The mesh uses **deterministic ports** (`BASE_PORT + node_id *
+MAX_NODES + j`, e.g. 7524/7525), so the next job collides with the orphan.
+
+**The error names the node and port** — fix it **on that node**:
+
+```bash
+# 1. Find the orphaned executor holding a 75xx mesh port:
+ss -ltnp | grep -E ':75[0-9][0-9]'
+#   LISTEN ... 0.0.0.0:7525 ... users:(("host",pid=10181,fd=10))
+
+# 2. Kill the orphaned executor(s) — leaves the node-agent daemon running:
+pkill -9 -f 'release/host'          # or: kill -9 <pid> from step 1
+
+# 3. Confirm it's gone / ports free:
+pgrep -af 'release/host'            # prints nothing
+ss -ltn | grep -E ':75[0-9][0-9]'  # empty
+```
+
+Then resubmit from the coordinator. If `ss` shows **no** process but the bind
+still fails, the port is in `TIME_WAIT` — wait ~60 s, or restart that node's
+daemon (`pkill -f node-agent` then `./node-agent start --config NodeAgent/agent.toml`).
+
+Reset-everything before a fresh run (run on **every** node, then restart daemons):
+```bash
+pkill -9 -f 'release/host'; pkill -f 'node-agent'
+```
+
+> Root-cause fixes to make this self-healing (not yet applied): set
+> `SO_REUSEADDR` on the mesh listeners in `Executor/connect/src/rdma/exchange.rs`,
+> and have the worker reap its Executor child when a job fails/times out.
+
 ## LeftOver
   1. the newly transferred ml_training, finra, img_pipeline workloads are not finally tweaked, need additional test and debug.
   2. The corpus 1GB file will lead to allocation bug where the memory is not properly loaded, causing the crash, need to do bug fix

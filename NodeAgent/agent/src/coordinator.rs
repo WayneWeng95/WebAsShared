@@ -247,6 +247,16 @@ fn handle_submit(
 
     let per_node_dags = cluster_dag.split(&config.cluster.ips)?;
 
+    // Workers that actually receive a per-node DAG this run (excluding self).
+    // Result collection must wait for EXACTLY these — not every connected node —
+    // or a job partitioned across fewer nodes than are online (declared
+    // total_nodes < live nodes) would block forever on nodes that got no job.
+    let assigned_workers: std::collections::HashSet<u32> = per_node_dags
+        .keys()
+        .copied()
+        .filter(|id| *id != config.node_id)
+        .collect();
+
     println!("[coordinator] submitting job {} ({} nodes)", job_id, per_node_dags.len());
 
     // Send ACK to client immediately.
@@ -316,7 +326,7 @@ fn handle_submit(
         }
 
         // Collect results from workers.
-        collect_worker_results(config, state, &job_id, client_stream, job_start, local_ms, live_nodes)?;
+        collect_worker_results(config, state, &job_id, client_stream, job_start, local_ms, &assigned_workers)?;
     }
 
     Ok(())
@@ -330,7 +340,7 @@ fn collect_worker_results(
     client_stream: &mut TcpStream,
     job_start: Instant,
     local_ms: u64,
-    live_nodes: usize,
+    assigned_workers: &std::collections::HashSet<u32>,
 ) -> Result<()> {
     let start = Instant::now();
     let timeout = Duration::from_secs(config.timeouts.job_timeout_s);
@@ -339,13 +349,13 @@ fn collect_worker_results(
     let mut summary_lines = Vec::new();
     let mut worker_durations: Vec<(u32, u64)> = Vec::new();
 
-    // Only wait for workers that actually received a job — i.e. node ids in the
-    // live partition (0..live_nodes), excluding self.  Workers connected but
-    // outside the live set (an interior node was down) are not part of this run.
+    // Wait for exactly the workers that received a per-node DAG this run (and are
+    // still connected) — NOT every connected node — so a job partitioned across
+    // fewer nodes than are online doesn't block on idle nodes.
     let expected_workers: Vec<u32> = {
         let s = state.lock().unwrap();
         s.workers.keys()
-            .filter(|id| **id != config.node_id && (**id as usize) < live_nodes)
+            .filter(|id| **id != config.node_id && assigned_workers.contains(id))
             .cloned()
             .collect()
     };
