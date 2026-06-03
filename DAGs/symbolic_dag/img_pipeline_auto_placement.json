@@ -18,7 +18,6 @@
   "shm_path_prefix": "/dev/shm/rdma_pr_ap",
   "log_level": "info",
   "transfer": true,
-  "total_nodes": 2,
 
   "nodes": [
     {

@@ -605,18 +605,41 @@ fn resolve_dag(dag_json: &str, capacity: &PlacementHints, live_nodes: usize) -> 
 
     if probe.get("nodes").is_some() {
         let mut symbolic = SymbolicDag::from_json(dag_json)?;
-        // Scale the partition to the nodes that are actually online: the DAG's
-        // `total_nodes` is treated as an UPPER BOUND, and we partition across
-        // min(declared, live) nodes so a cluster running fewer machines than the
-        // roster still works (the placer auto-distributes over the live set).
-        let declared = symbolic.total_nodes;
-        let effective = declared.min(live_nodes).max(1);
-        if effective != declared {
-            println!("[coordinator] partitioning across {} live node(s) (DAG declared {})",
-                     effective, declared);
-        }
-        symbolic.total_nodes = effective;
-        let hints = if capacity.capacity.is_empty() { None } else { Some(capacity) };
+        // Resolve how many nodes to partition across against the live cluster:
+        //   - total_nodes omitted     → use ALL available nodes.
+        //   - total_nodes <= live     → use the requested count.
+        //   - total_nodes >  live     → clamp to what's available and warn.
+        let effective = match symbolic.total_nodes {
+            None => {
+                println!("[coordinator] total_nodes not set — using all {} available node(s)", live_nodes);
+                live_nodes.max(1)
+            }
+            Some(d) if d > live_nodes => {
+                println!("[coordinator] requested total_nodes={} but only {} node(s) online — using {}",
+                         d, live_nodes, live_nodes);
+                live_nodes.max(1)
+            }
+            Some(d) => {
+                println!("[coordinator] partitioning across {} node(s) ({} online)", d, live_nodes);
+                d.max(1)
+            }
+        };
+        symbolic.total_nodes = Some(effective);
+        // Clamp the SCX-derived hints to the nodes actually in this partition
+        // (0..effective).  cluster_capacity/host_limit are keyed by *connected*
+        // node ids, which can exceed `effective` when total_nodes < live — left
+        // unclamped, the placer could pick a "best host" outside the partition
+        // and assign an auto node to a non-existent node_id.
+        let clamped = PlacementHints {
+            capacity: capacity.capacity.iter()
+                .filter(|(&id, _)| (id as usize) < effective)
+                .map(|(&id, &c)| (id, c)).collect(),
+            host_limit: capacity.host_limit.iter()
+                .filter(|(&id, _)| (id as usize) < effective)
+                .map(|(&id, &l)| (id, l)).collect(),
+            random: capacity.random,
+        };
+        let hints = if clamped.capacity.is_empty() { None } else { Some(&clamped) };
         let cluster_value = partitioner::partition(&symbolic, hints)
             .context("partition SymbolicDag")?;
         let cluster_json = serde_json::to_string(&cluster_value)?;

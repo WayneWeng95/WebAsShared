@@ -62,13 +62,17 @@ fn pin_converge_to_coordinator(nodes: &mut [SymbolicNode], coordinator_id: u32) 
 /// node_dags, shared_inputs, …) and can be fed directly to
 /// `dag_transform::transform_cluster_dag` and `ClusterDag::from_json`.
 pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Value> {
+    // total_nodes is optional in the DAG: the coordinator sets it from the live
+    // cluster size before partitioning; the standalone CLI defaults it.  Resolve
+    // a concrete count here (≥1) and use it throughout.
+    let total_nodes = dag.total_nodes.unwrap_or(1).max(1);
     // ── 0. Expand placement:"all" nodes, then fanout nodes ───────────────────
-    let (after_all, auto_shared_inputs) = expand_all_placements(dag.nodes.clone(), dag.total_nodes);
+    let (after_all, auto_shared_inputs) = expand_all_placements(dag.nodes.clone(), total_nodes);
     let mut nodes: Vec<SymbolicNode> = expand_fanout(after_all);
     // Hint priority: live hints (coordinator) > placement_policy > raw hints > default.
     let policy_hints: Option<PlacementHints> = dag.placement_policy.as_ref()
-        .map(|p| policies::resolve_policy(p, dag.total_nodes));
-    let default_hints = policies::default_hints(dag.total_nodes);
+        .map(|p| policies::resolve_policy(p, total_nodes));
+    let default_hints = policies::default_hints(total_nodes);
     let effective_hints = hints
         .or(policy_hints.as_ref())
         .or(dag.hints.as_ref())
@@ -88,7 +92,7 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
 
     assign_nodes(
         &mut nodes,
-        dag.total_nodes,
+        total_nodes,
         effective_hints,
         dag.max_colocation,
     );
@@ -104,10 +108,10 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         let nid = node.node_id.ok_or_else(|| {
             anyhow!("node '{}' was not assigned a node_id (placer bug)", node.id)
         })?;
-        if nid as usize >= dag.total_nodes {
+        if nid as usize >= total_nodes {
             bail!(
                 "node '{}' has node_id {} but total_nodes is {}",
-                node.id, nid, dag.total_nodes
+                node.id, nid, total_nodes
             );
         }
         for dep in &node.deps {
@@ -191,7 +195,7 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
 
     // ── 5. Build per-machine node lists ──────────────────────────────────────
 
-    let mut machine_nodes: HashMap<u32, Vec<Value>> = (0..dag.total_nodes as u32)
+    let mut machine_nodes: HashMap<u32, Vec<Value>> = (0..total_nodes as u32)
         .map(|i| (i, Vec::new()))
         .collect();
 

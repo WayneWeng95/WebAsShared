@@ -21,7 +21,14 @@ pub struct SymbolicDag {
     pub runs: Option<u32>,
     #[serde(default = "default_true")]
     pub transfer: bool,
-    pub total_nodes: usize,
+    /// Number of machines to partition across.  **Optional** — when a job is
+    /// submitted, the coordinator fills this in from the live cluster size, so a
+    /// SymbolicDag normally omits it and runs on however many nodes are online.
+    /// An explicit value acts as an upper bound (the coordinator uses
+    /// `min(total_nodes, live_nodes)`).  The standalone `partition` CLI defaults
+    /// it via `--nodes N` (or 2) since it has no live cluster to query.
+    #[serde(default)]
+    pub total_nodes: Option<usize>,
     /// Optional hard cap on sandboxes per host.  `None` (default) means the
     /// placer uses the auto-derived limit from CPU cores and busy %.
     /// Set to `Some(n)` to override and cap at n regardless of core count.
