@@ -106,8 +106,27 @@ impl ClusterDag {
     /// `ips` is the live cluster IP list (from agent config).
     /// Returns a map: node_id -> serialized Dag JSON string.
     pub fn split(&self, ips: &[String]) -> Result<HashMap<u32, String>> {
-        let total = ips.len();
         let mut result = HashMap::new();
+
+        // The RDMA mesh must span exactly the nodes that are part of THIS job —
+        // i.e. the node ids present in `node_dags` — not the full cluster roster.
+        // Otherwise, when the job is partitioned across fewer nodes than the
+        // configured `ips` list (e.g. a 4-node roster running a 2-node job), the
+        // full RC QP mesh would wait forever for the absent nodes to join.
+        // node ids are a contiguous prefix 0..job_nodes, so ips[0..job_nodes] are
+        // the right addresses.
+        let job_nodes = self
+            .node_dags
+            .keys()
+            .filter_map(|k| k.parse::<u32>().ok())
+            .max()
+            .map(|m| m as usize + 1)
+            .unwrap_or(0);
+        if job_nodes > ips.len() {
+            bail!("job spans {} nodes but only {} cluster IPs are configured", job_nodes, ips.len());
+        }
+        let total = job_nodes;
+        let mesh_ips: Vec<String> = ips[..total].to_vec();
 
         // Determine if RDMA is needed: check if any node_dag has RemoteSend/RemoteRecv nodes.
         let needs_rdma = self.has_remote_nodes();
@@ -118,7 +137,7 @@ impl ClusterDag {
 
             if node_id as usize >= total {
                 bail!(
-                    "node_id {} in ClusterDag exceeds cluster size {}",
+                    "node_id {} in ClusterDag exceeds job size {}",
                     node_id, total
                 );
             }
@@ -127,7 +146,7 @@ impl ClusterDag {
                 Some(RdmaSection {
                     node_id: node_id as usize,
                     total,
-                    ips: ips.to_vec(),
+                    ips: mesh_ips.clone(),
                     transfer: self.transfer,
                 })
             } else {
