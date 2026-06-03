@@ -130,10 +130,41 @@ impl Default for ScxConfig {
 
 impl AgentConfig {
     /// Load config from a TOML file.
+    ///
+    /// `node_id` and `role` are OPTIONAL in the file: when omitted they are
+    /// auto-resolved so a SINGLE shared `agent.toml` (just the `cluster.ips`
+    /// list + paths) can be deployed identically to every node — each node
+    /// matches one of its own interface IPs against `cluster.ips` to learn its
+    /// `node_id`, and derives `role` (node 0 = coordinator, others = worker).
+    /// Explicit `node_id` / `role` in the file still take precedence.
     pub fn load(path: &Path) -> Result<Self> {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("read config file: {}", path.display()))?;
-        toml::from_str(&content)
+        let mut value: toml::Value = toml::from_str(&content)
+            .with_context(|| format!("parse config file: {}", path.display()))?;
+        let table = value.as_table_mut().context("config root is not a TOML table")?;
+
+        // Auto-detect node_id from the local interface IPs if not pinned.
+        if !table.contains_key("node_id") {
+            let ips: Vec<String> = table
+                .get("cluster").and_then(|c| c.get("ips")).and_then(|v| v.as_array())
+                .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                .unwrap_or_default();
+            let nid = detect_node_id(&ips).with_context(|| format!(
+                "could not auto-detect node_id: none of cluster.ips {:?} match a local \
+                 interface — set node_id explicitly in {}", ips, path.display()))?;
+            println!("[config] auto-detected node_id={} (local IP = cluster.ips[{}] = {})",
+                     nid, nid, ips[nid as usize]);
+            table.insert("node_id".into(), toml::Value::Integer(nid as i64));
+        }
+        // Derive role from node_id if not pinned (node 0 = coordinator).
+        if !table.contains_key("role") {
+            let nid = table.get("node_id").and_then(|v| v.as_integer()).unwrap_or(0);
+            let role = if nid == 0 { "coordinator" } else { "worker" };
+            table.insert("role".into(), toml::Value::String(role.into()));
+        }
+
+        value.try_into()
             .with_context(|| format!("parse config file: {}", path.display()))
     }
 
@@ -147,4 +178,19 @@ impl AgentConfig {
     pub fn total_nodes(&self) -> usize {
         self.cluster.ips.len()
     }
+}
+
+/// Return the index in `ips` of the first address that belongs to a local
+/// interface on this machine (so it can serve as this node's `node_id`).
+///
+/// Detection binds a UDP socket to `(ip, 0)`: the bind succeeds only when `ip`
+/// is assigned to a local interface, so no shell-out or extra crate is needed.
+fn detect_node_id(ips: &[String]) -> Result<u32> {
+    use std::net::UdpSocket;
+    for (i, ip) in ips.iter().enumerate() {
+        if UdpSocket::bind((ip.as_str(), 0)).is_ok() {
+            return Ok(i as u32);
+        }
+    }
+    anyhow::bail!("no local interface matches any of cluster.ips")
 }

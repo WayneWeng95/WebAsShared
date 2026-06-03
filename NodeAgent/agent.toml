@@ -1,0 +1,25 @@
+# NodeAgent config — SINGLE SHARED config for the whole cluster.
+#
+# Deploy this identical file to every node and run the same command everywhere:
+#     ./node-agent start --config NodeAgent/agent.toml
+#
+# Each node auto-detects its own node_id by matching a local interface IP against
+# cluster.ips below, and derives its role (node 0 = coordinator, others = worker).
+# To override on a node, add `node_id = N` / `role = "..."` (takes precedence).
+
+[cluster]
+# IPs in node_id order: index 0 = node 0 (coordinator), index 1 = node 1, ...
+ips = ["10.10.1.2", "10.10.1.1", "10.10.1.3", "10.10.1.4"]
+agent_port = 9500
+
+[paths]
+executor_bin = "/opt/myapp/WebAsShared/Executor/target/release/host"
+executor_work_dir = "/opt/myapp/WebAsShared"
+
+[metrics]
+interval_ms = 2000
+log_path = "/tmp/node_agent_metrics.jsonl"
+
+[timeouts]
+job_timeout_s = 600
+health_check_s = 5

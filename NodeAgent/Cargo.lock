@@ -118,6 +118,7 @@ name = "partitioner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "node-agent-common",
  "rand",
  "serde",
  "serde_json",

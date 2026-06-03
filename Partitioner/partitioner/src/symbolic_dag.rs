@@ -38,6 +38,11 @@ pub struct SymbolicDag {
     /// Overridden by live hints from the coordinator or by `placement_policy`.
     #[serde(default)]
     pub hints: Option<PlacementHints>,
+    /// Override `PARTITIONER_CONVERGE_ON_COORDINATOR` for this DAG: pin the
+    /// convergence tail (final aggregate / reduce / Output) onto node 0 so the
+    /// result co-locates with the input.  `None` → use the compile-time default.
+    #[serde(default)]
+    pub converge_on_coordinator: Option<bool>,
     pub nodes: Vec<SymbolicNode>,
 }
 

@@ -92,3 +92,15 @@ pub const ADVISOR_W_MIGRATIONS: f64 = 0.10;
 
 /// Weight: job-running penalty (node already has an active executor).
 pub const ADVISOR_W_JOB_RUNNING: f64 = 0.25;
+
+// ─── Partitioner ──────────────────────────────────────────────────────────────
+
+/// When `true`, the Partitioner pins the convergence tail of an auto-placed
+/// SymbolicDag — the final fan-in aggregate, the reduce, and the `Output`
+/// node(s) — onto the coordinator (node 0), so the result converges on the same
+/// node that holds the input/distributor and the output file lands there.
+///
+/// Only nodes the placer would otherwise auto-assign are affected; explicitly
+/// pinned `node_id`s and per-machine (`placement: "all"`) nodes are untouched.
+/// A SymbolicDag may override this per-DAG via `"converge_on_coordinator": bool`.
+pub const PARTITIONER_CONVERGE_ON_COORDINATOR: bool = true;

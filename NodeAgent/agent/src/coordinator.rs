@@ -195,17 +195,27 @@ fn handle_submit(
     let payload: SubmitJobPayload =
         serde_json::from_value(msg.payload).context("parse SubmitJob payload")?;
 
-    // Snapshot capacity before acquiring any further locks.
-    let placement_hints: PlacementHints = {
+    // Snapshot capacity + live membership before acquiring any further locks.
+    let (placement_hints, live_nodes): (PlacementHints, usize) = {
         let s = state.lock().unwrap();
-        PlacementHints {
+        let connected: std::collections::HashSet<u32> = s.workers.keys().copied().collect();
+        let live = contiguous_live_count(&connected);
+        // Warn if any worker is online but beyond the contiguous prefix (an
+        // interior node is down) — it won't be used this run.
+        let beyond: Vec<u32> = connected.iter().copied().filter(|&id| id as usize >= live).collect();
+        if !beyond.is_empty() {
+            println!("[coordinator] note: worker(s) {:?} online but an interior node is offline; \
+                      using only the contiguous live set 0..{}", beyond, live);
+        }
+        let hints = PlacementHints {
             capacity: scheduler::cluster_capacity(&s.scx_view),
             host_limit: scheduler::host_limits(&s.scx_view),
             random: false,
-        }
+        };
+        (hints, live)
     };
 
-    let cluster_dag = resolve_dag(&payload.cluster_dag_json, &placement_hints)?;
+    let cluster_dag = resolve_dag(&payload.cluster_dag_json, &placement_hints, live_nodes)?;
 
     let job_id = format!("job_{}", chrono_simple_id());
 
@@ -306,7 +316,7 @@ fn handle_submit(
         }
 
         // Collect results from workers.
-        collect_worker_results(config, state, &job_id, client_stream, job_start, local_ms)?;
+        collect_worker_results(config, state, &job_id, client_stream, job_start, local_ms, live_nodes)?;
     }
 
     Ok(())
@@ -320,6 +330,7 @@ fn collect_worker_results(
     client_stream: &mut TcpStream,
     job_start: Instant,
     local_ms: u64,
+    live_nodes: usize,
 ) -> Result<()> {
     let start = Instant::now();
     let timeout = Duration::from_secs(config.timeouts.job_timeout_s);
@@ -328,10 +339,13 @@ fn collect_worker_results(
     let mut summary_lines = Vec::new();
     let mut worker_durations: Vec<(u32, u64)> = Vec::new();
 
+    // Only wait for workers that actually received a job — i.e. node ids in the
+    // live partition (0..live_nodes), excluding self.  Workers connected but
+    // outside the live set (an interior node was down) are not part of this run.
     let expected_workers: Vec<u32> = {
         let s = state.lock().unwrap();
         s.workers.keys()
-            .filter(|id| **id != config.node_id)
+            .filter(|id| **id != config.node_id && (**id as usize) < live_nodes)
             .cloned()
             .collect()
     };
@@ -570,17 +584,28 @@ fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMe
 /// - `nodes` present     → SymbolicDag; partition it server-side using live
 ///                         capacity hints so the placer can colocate sandboxes
 ///                         on the least-loaded hosts.
-fn resolve_dag(dag_json: &str, capacity: &PlacementHints) -> Result<ClusterDag> {
+fn resolve_dag(dag_json: &str, capacity: &PlacementHints, live_nodes: usize) -> Result<ClusterDag> {
     let probe: serde_json::Value =
         serde_json::from_str(dag_json).context("parse submitted DAG JSON")?;
 
     if probe.get("node_dags").is_some() {
-        // Already partitioned.
+        // Already partitioned — its node layout is fixed; we can't rescale it.
         return ClusterDag::from_json(dag_json);
     }
 
     if probe.get("nodes").is_some() {
-        let symbolic = SymbolicDag::from_json(dag_json)?;
+        let mut symbolic = SymbolicDag::from_json(dag_json)?;
+        // Scale the partition to the nodes that are actually online: the DAG's
+        // `total_nodes` is treated as an UPPER BOUND, and we partition across
+        // min(declared, live) nodes so a cluster running fewer machines than the
+        // roster still works (the placer auto-distributes over the live set).
+        let declared = symbolic.total_nodes;
+        let effective = declared.min(live_nodes).max(1);
+        if effective != declared {
+            println!("[coordinator] partitioning across {} live node(s) (DAG declared {})",
+                     effective, declared);
+        }
+        symbolic.total_nodes = effective;
         let hints = if capacity.capacity.is_empty() { None } else { Some(capacity) };
         let cluster_value = partitioner::partition(&symbolic, hints)
             .context("partition SymbolicDag")?;
@@ -589,6 +614,20 @@ fn resolve_dag(dag_json: &str, capacity: &PlacementHints) -> Result<ClusterDag> 
     }
 
     bail!("submitted JSON is neither a ClusterDag (has node_dags) nor a SymbolicDag (has nodes)")
+}
+
+/// Count of contiguous live nodes starting at node 0 (the coordinator, always
+/// present).  Returns the largest `k` such that node ids `0..k` are all online.
+///
+/// We require a contiguous prefix because the partitioner emits node ids
+/// `0..total_nodes`; if an *interior* node is down (e.g. node 1 offline but 2
+/// online) we stop at the gap rather than place work on a dead node.
+fn contiguous_live_count(connected: &std::collections::HashSet<u32>) -> usize {
+    let mut k = 1u32; // node 0 (self) always counts
+    while connected.contains(&k) {
+        k += 1;
+    }
+    k as usize
 }
 
 // ── RDMA port / GID constants (same as the Executor mesh) ────────────────────

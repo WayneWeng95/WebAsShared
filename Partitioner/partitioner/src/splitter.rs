@@ -15,6 +15,43 @@ struct CrossEdge {
     recv_slot: u32,
 }
 
+/// Pin the convergence tail onto `coordinator_id` (the input/distributor node).
+///
+/// Starting from every `Output` node, walk backward through `deps`, pinning each
+/// auto-placed (`node_id == None`) node to `coordinator_id`.  Recursion follows
+/// only single-dep (linear-tail) nodes; at the first fan-in node (≥2 deps — the
+/// convergence point) the node is pinned but its branches are NOT followed, so
+/// the upstream parallel work the placer would distribute is left alone.
+///
+/// Net effect on a typical map-reduce DAG: `aggregate_global`, `reduce`, and
+/// `save` land on node 0; the per-machine maps/aggregates stay where placed.
+fn pin_converge_to_coordinator(nodes: &mut [SymbolicNode], coordinator_id: u32) {
+    let id_to_idx: HashMap<String, usize> =
+        nodes.iter().enumerate().map(|(i, n)| (n.id.clone(), i)).collect();
+    let mut stack: Vec<usize> = nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.kind.get("Output").is_some())
+        .map(|(i, _)| i)
+        .collect();
+    let mut visited: HashSet<usize> = HashSet::new();
+    while let Some(idx) = stack.pop() {
+        if !visited.insert(idx) {
+            continue;
+        }
+        if nodes[idx].node_id.is_none() {
+            nodes[idx].node_id = Some(coordinator_id);
+        }
+        // Follow only a single-dep linear tail; stop at the first fan-in so we
+        // don't pull the distributed parallel branches onto the coordinator.
+        if nodes[idx].deps.len() == 1 {
+            if let Some(&d) = id_to_idx.get(&nodes[idx].deps[0]) {
+                stack.push(d);
+            }
+        }
+    }
+}
+
 /// Partition a SymbolicDag into a ClusterDag-compatible JSON value.
 ///
 /// `hints` provides optional per-host capacity weights (from `cluster_capacity`)
@@ -36,6 +73,19 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         .or(policy_hints.as_ref())
         .or(dag.hints.as_ref())
         .unwrap_or(&default_hints);
+
+    // ── 0a. Converge-on-coordinator: before auto-placement, pin the convergence
+    // tail (Output + its single-chain auto ancestors up to the first fan-in)
+    // onto node 0, so the final reduce/output co-locate with the node-0 input.
+    // Gated by the DAG override or the compile-time default; respects explicit
+    // pins and per-machine ("all") nodes (they are already `Some`).
+    let converge = dag
+        .converge_on_coordinator
+        .unwrap_or(node_agent_common::PARTITIONER_CONVERGE_ON_COORDINATOR);
+    if converge {
+        pin_converge_to_coordinator(&mut nodes, 0);
+    }
+
     assign_nodes(
         &mut nodes,
         dag.total_nodes,

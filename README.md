@@ -171,6 +171,9 @@ Start the coordinator and worker daemons, then submit jobs:
 # On worker machine (node 1):
 ./node-agent start --config NodeAgent/agent_worker.toml
 
+# On worker machine
+./node-agent start --config NodeAgent/agent.toml
+
 # Submit distributed jobs (from any machine with coordinator access):
 
 # SymbolicDag (auto-partitioned) — no manual RemoteSend/RemoteRecv needed
