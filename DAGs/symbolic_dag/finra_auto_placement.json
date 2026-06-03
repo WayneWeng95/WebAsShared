@@ -20,6 +20,7 @@
   ],
   "shm_path_prefix": "/dev/shm/rdma_finra_ap",
   "log_level": "info",
+  "total_nodes": 3,
   "transfer": true,
   "placement_policy": "pack",
   "nodes": [

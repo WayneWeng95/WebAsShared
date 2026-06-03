@@ -1,6 +1,7 @@
 {
   "shm_path_prefix": "/dev/shm/rdma_wc_auto",
   "log_level": "info",
+  "total_nodes": 3,
   "transfer": true,
   "shared_inputs": [
     { "path": "TestData/corpus_large.txt", "source_node": 0 }

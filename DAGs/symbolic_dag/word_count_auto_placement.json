@@ -22,6 +22,7 @@
   ],
   "shm_path_prefix": "/dev/shm/rdma_wc_ap",
   "log_level": "info",
+  "total_nodes": 1,
   "transfer": true,
   "placement_policy": "pack",
   "nodes": [
@@ -34,7 +35,7 @@
       "kind": { "Func": { "func": "wc_distribute", "out_base": 50 } }
     },
     {
-      "id": "map_n", "placement": "all", "fanout": 4, "deps": ["distribute"],
+      "id": "map_n", "placement": "all", "fanout": 30, "deps": ["distribute"],
       "kind": { "Func": { "func": "wc_map", "output_offset": 100 } }
     },
     {

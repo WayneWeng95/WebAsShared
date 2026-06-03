@@ -4,6 +4,7 @@
   "_comment3": "The Partitioner auto-generates RemoteSend/RemoteRecv and slot assignments.",
   "shm_path_prefix": "/dev/shm/rdma_wc",
   "log_level": "info",
+  "total_nodes": 1,
   "transfer": true,
   "shared_inputs": [
     { "path": "TestData/corpus_large.txt", "source_node": 0 }
