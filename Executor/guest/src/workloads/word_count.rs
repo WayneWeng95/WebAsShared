@@ -33,11 +33,16 @@ const WC_MAP_OUT_BASE: u32 = 100;
 /// round-robin to one of the `n_workers` stream slots starting at `WC_DIST_BASE`.
 #[no_mangle]
 pub extern "C" fn wc_distribute(n_workers: u32) {
-    let lines = ShmApi::read_all_inputs();
-    for (i, (_origin, line)) in lines.iter().enumerate() {
-        let slot = WC_DIST_BASE + (i as u32 % n_workers);
+    // Stream the input one line at a time (bounded heap) instead of
+    // materializing the whole corpus with read_all_inputs — the latter needs
+    // one heap Vec per line and OOMs / trips the allocator on large inputs
+    // (millions of records).  Here only one line buffer is live at once.
+    let mut i: u32 = 0;
+    ShmApi::for_each_input(|_origin, line| {
+        let slot = WC_DIST_BASE + (i % n_workers);
         ShmApi::append_stream_data(slot, line);
-    }
+        i += 1;
+    });
 }
 
 /// Map: count occurrences of every unique word in stream slot `slot`.

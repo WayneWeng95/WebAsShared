@@ -71,6 +71,13 @@ impl ShmApi {
         Self::read_all_inputs_from(INPUT_IO_SLOT)
     }
 
+    /// Stream every record from the default `INPUT_IO_SLOT`, calling
+    /// `f(origin, &payload)` per record with a single reused buffer.  Bounded
+    /// heap footprint — use this instead of `read_all_inputs` for large inputs.
+    pub fn for_each_input<F: FnMut(u32, &[u8])>(f: F) {
+        Self::for_each_io_record(INPUT_IO_SLOT, f)
+    }
+
     /// Read the most recent input record as UTF-8 from the default `INPUT_IO_SLOT`.
     pub fn read_input_str() -> Option<(u32, alloc::string::String)> {
         Self::read_input_str_from(INPUT_IO_SLOT)

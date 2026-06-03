@@ -162,10 +162,14 @@ pub const BUMP_SOFT_LIMIT: ShmOffset = 0x7FF0_0000;
 
 /// Hard ceiling for `global_capacity` doubling (Rust workloads).
 ///
-/// Bound to `DIRECT_LIMIT` because a wasm32 Rust guest can only address
-/// `TARGET_OFFSET .. TARGET_OFFSET + 2 GiB` as direct memory; pages past
-/// that must go through the extended-pool paged-mode resolver.
-pub const CAPACITY_HARD_LIMIT: ShmOffset = 0x8000_0000;           // 2 GiB
+/// MUST stay ≤ the guest SHM *window* = (wasm Memory min) − `TARGET_OFFSET`.
+/// The host maps the SHM file at `TARGET_OFFSET` and the guest heap grows in
+/// `[min, 4 GiB)`; if capacity exceeds the window the file mapping overruns the
+/// heap region and corrupts the guest allocator.  The wasm Memory min is
+/// 57344 pages (3.5 GiB) in `worker.rs`, so the window is 1.5 GiB — keep these
+/// two in sync.  (A larger SHM window means a smaller guest heap; wasm32 splits
+/// the 2 GiB above `TARGET_OFFSET` between the two.)
+pub const CAPACITY_HARD_LIMIT: ShmOffset = 0x6000_0000;           // 1.5 GiB (= 3.5 GiB min − 2 GiB)
 
 /// Hard ceiling for `global_capacity` growth when the DAG contains
 /// Python workloads.

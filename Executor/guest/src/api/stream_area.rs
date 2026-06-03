@@ -166,6 +166,66 @@ pub(super) fn chain_read_all(head_offset: ShmOffset) -> Vec<(u32, Vec<u8>)> {
     records
 }
 
+/// Streaming counterpart of [`chain_read_all`]: walk the chain ONCE and invoke
+/// `on_record(origin, &payload)` per record, reusing a single payload buffer.
+///
+/// Unlike `chain_read_all`, this never materializes all records at once — the
+/// live heap footprint is bounded by the largest single record, so it scales to
+/// inputs of any size (the `read_all` path OOMs / panics on multi-GB inputs that
+/// would need millions of simultaneous allocations).
+pub(super) fn chain_for_each<F: FnMut(u32, &[u8])>(head_offset: ShmOffset, mut on_record: F) {
+    if head_offset == 0 { return; }
+    let sb = ShmApi::superblock();
+    let mut current_offset = head_offset;
+    let mut cursor_in_page: ShmOffset = 0;
+
+    let mut read_exact = |dest: &mut [u8]| -> bool {
+        let mut dest = dest;
+        while !dest.is_empty() {
+            if current_offset == 0 { return false; }
+            let required_cap = current_offset + PAGE_SIZE;
+            let local_cap = unsafe { super::LOCAL_CAPACITY };
+            if required_cap > local_cap {
+                let global_cap = sb.global_capacity.load(Ordering::Acquire);
+                if global_cap >= required_cap {
+                    unsafe { host_remap(global_cap); super::LOCAL_CAPACITY = global_cap; }
+                } else { return false; }
+            }
+            let page = unsafe { &*((SHM_BASE + current_offset as usize) as *const Page) };
+            let page_written = page.cursor.load(Ordering::Acquire);
+            let available = page_written.saturating_sub(cursor_in_page);
+            if available == 0 {
+                current_offset = page.next_offset.load(Ordering::Acquire) as ShmOffset;
+                cursor_in_page = 0;
+                continue;
+            }
+            let read_len = core::cmp::min(available as usize, dest.len());
+            unsafe {
+                let src = page.data.as_ptr().add(cursor_in_page as usize);
+                core::ptr::copy_nonoverlapping(src, dest.as_mut_ptr(), read_len);
+            }
+            cursor_in_page += read_len as ShmOffset;
+            dest = &mut dest[read_len..];
+        }
+        true
+    };
+
+    let mut payload: Vec<u8> = Vec::new();   // reused across records
+    loop {
+        let mut len_buf = [0u8; 4];
+        if !read_exact(&mut len_buf) { break; }
+        let record_len = u32::from_le_bytes(len_buf) as usize;
+        let mut origin_buf = [0u8; 4];
+        if !read_exact(&mut origin_buf) { break; }
+        let origin = u32::from_le_bytes(origin_buf);
+        payload.clear();
+        payload.reserve(record_len);
+        unsafe { payload.set_len(record_len); }
+        if !read_exact(&mut payload) { break; }
+        on_record(origin, &payload);
+    }
+}
+
 // ─── Stream-slot ShmApi methods ───────────────────────────────────────────────
 
 impl ShmApi {

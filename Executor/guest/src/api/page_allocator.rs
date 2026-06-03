@@ -64,7 +64,12 @@ impl ShmApi {
         loop {
             let current_alloc = sb.bump_allocator.load(Ordering::Acquire);
 
-            if current_alloc >= BUMP_SOFT_LIMIT { continue; }
+            // Genuine exhaustion of the direct window: fail fast with a clear
+            // trap rather than spinning forever (the old `continue` here hung).
+            if current_alloc >= BUMP_SOFT_LIMIT {
+                panic!("SHM bump exhausted near the 2 GiB direct-window limit \
+                        (bump={current_alloc}); input too large for the direct SHM window");
+            }
 
             let local_cap = unsafe { super::LOCAL_CAPACITY };
 
@@ -74,12 +79,20 @@ impl ShmApi {
                     unsafe { host_remap(global_cap); super::LOCAL_CAPACITY = global_cap; }
                     continue;
                 } else {
-                    let new_cap = local_cap * 2;
-                    if new_cap >= CAPACITY_HARD_LIMIT { continue; }
+                    // Clamp to the hard limit so the FINAL doubling can reach
+                    // exactly CAPACITY_HARD_LIMIT (2 GiB).  The old `local_cap*2
+                    // >= CAPACITY_HARD_LIMIT` test rejected this, freezing
+                    // capacity one doubling short (e.g. stuck at 1 GiB) and
+                    // spinning forever.
+                    let new_cap = local_cap.saturating_mul(2).min(CAPACITY_HARD_LIMIT);
+                    if new_cap <= local_cap {
+                        panic!("SHM already at the 2 GiB hard limit (cap={local_cap}) \
+                                — cannot grow further for this allocation");
+                    }
                     if sb.global_capacity.compare_exchange(local_cap, new_cap, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
                         unsafe { host_remap(new_cap); super::LOCAL_CAPACITY = new_cap; }
-                        continue;
-                    } else { continue; }
+                    }
+                    continue;
                 }
             }
 

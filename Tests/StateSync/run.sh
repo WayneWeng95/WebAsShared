@@ -98,6 +98,11 @@ run_plot() {
   python3 "$HERE/plot_compare.py" "$@"
 }
 
+run_plot_remote() {
+  log "plotting Redis (remote) vs Shared memory + RDMA -> $HERE/figs"
+  python3 "$HERE/plot_remote_compare.py" "$@"
+}
+
 summary() {
   echo
   log "==== results ===="
@@ -113,9 +118,10 @@ case "$cmd" in
   remote-server)  run_remote_server "$@" ;;
   remote-client)  run_remote_client "$@"; summary ;;
   plot)           run_plot "$@" ;;
+  plot-remote)    run_plot_remote "$@" ;;
   all)            build; run_local; run_loopback; run_plot; summary ;;
   summary)        summary ;;
   help|-h|--help)
     sed -n '2,40p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
-  *) die "unknown command '$cmd' (try: build | local | loopback | remote-server | remote-client | plot | all | summary | help)" ;;
+  *) die "unknown command '$cmd' (try: build | local | loopback | remote-server | remote-client | plot | plot-remote | all | summary | help)" ;;
 esac

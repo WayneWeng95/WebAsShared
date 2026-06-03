@@ -35,7 +35,17 @@ pub fn setup_vma_environment(
     linker: &mut Linker<WorkerState>,
     file: &File,
 ) -> Result<Memory> {
-    let memory_ty = MemoryType::shared(49152, 65536);
+    // The guest's 4 GiB wasm32 address space is split above TARGET_OFFSET
+    // (2 GiB): the SHM window is [TARGET_OFFSET, min) and the guest heap grows
+    // in [min, max).  `min` therefore trades guest-addressable SHM window
+    // against heap:
+    //   min=3   GiB → 1.0 GiB SHM window, 1.0 GiB heap (old default; OOB >1 GiB SHM)
+    //   min=3.5 GiB → 1.5 GiB SHM window, 0.5 GiB heap
+    // Shared memories can't be grown through the store at runtime (wasmtime
+    // unreachable!()), and min==max leaves the heap unable to grow (immediate
+    // OOM), so this split is fixed at instantiation.  57344 pages = 3.5 GiB:
+    // wc_distribute now streams (tiny heap), so we favour a larger SHM window.
+    let memory_ty = MemoryType::shared(57344, 65536);
 
     let memory = Memory::new(&mut *store, memory_ty)?;
 
@@ -62,6 +72,8 @@ pub fn setup_vma_environment(
                 std::process::id(),
                 new_size / 1024 / 1024
             );
+            // The wasm Memory already spans the full 4 GiB, so only the file
+            // mapping needs to grow to expose the new SHM bytes to the guest.
             expand_mapping(&state.file, state.splice_addr, new_size as usize).unwrap();
         },
     )?;
