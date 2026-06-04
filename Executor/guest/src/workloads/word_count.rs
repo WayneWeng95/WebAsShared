@@ -39,10 +39,16 @@ const WC_MAP_OUT_BASE: u32 = 100;
 /// Word count is order-insensitive, so contiguous chunks (vs the old
 /// round-robin) yield identical aggregate counts; only which worker sees which
 /// lines changes.
+/// `arg` packs the output layout assigned by the partitioner:
+///   low 16 bits  = base stream slot (the first slot the map workers read)
+///   high 16 bits = number of map workers (= contiguous segments to produce)
+/// Legacy/native form (high bits == 0, used by hand-authored single-node DAGs):
+///   `arg` is the worker count and the base defaults to `WC_DIST_BASE`.
 #[no_mangle]
-pub extern "C" fn wc_distribute(n_workers: u32) {
+pub extern "C" fn wc_distribute(arg: u32) {
+    let (out_base, n_workers) = super::unpack_fanout_arg(arg, WC_DIST_BASE);
     if n_workers == 0 { return; }
-    ShmApi::split_input_contiguous(common::INPUT_IO_SLOT, WC_DIST_BASE, n_workers);
+    ShmApi::split_input_contiguous(common::INPUT_IO_SLOT, out_base, n_workers);
 }
 
 /// Map: count occurrences of every unique word in stream slot `slot`.

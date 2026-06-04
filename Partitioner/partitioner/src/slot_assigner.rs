@@ -20,7 +20,9 @@ const OUTPUT_IO_SLOT: u32 = 1;
 /// |------------------|-------------------------------------------------------------------|
 /// | `out_base: N`    | Fan-out function (e.g. wc_distribute).  Assigns slots            |
 /// |                  | [N, N+1, …] to each direct consumer in array order.              |
-/// |                  | Sets `arg = N_consumers` on this node.                           |
+/// |                  | Packs `arg = base | (n_consumers << 16)` so the guest knows      |
+/// |                  | both the (possibly auto-adjusted) base slot and how many        |
+/// |                  | contiguous output slots to fill.                                |
 /// | `output_offset: K` | Output = arg + K (e.g. wc_map with K=100).  `arg` is the        |
 /// |                  | slot assigned by the upstream fan-out (or dep's output slot).    |
 /// | neither          | Terminal function.  `arg` = dep's output slot,                   |
@@ -45,6 +47,10 @@ pub(crate) fn assign_slots(nodes: &mut Vec<SymbolicNode>) -> Result<()> {
     // fan-out node id → effective (possibly auto-adjusted) output base slot.
     // The adjusted base is injected as `arg` so the WASM writes to the right slots.
     let mut fanout_adjusted_base: HashMap<String, u32> = HashMap::new();
+
+    // fan-out node id → number of direct consumers (= how many contiguous slots
+    // the fan-out must fill).  Packed into `arg` alongside the base below.
+    let mut fanout_consumer_count: HashMap<String, u32> = HashMap::new();
 
     // next free slot; starts at 2 so it sits above the two IO slots.
     // Fan-out processing (phase 1 below) will push it past any hardcoded ranges
@@ -99,7 +105,8 @@ pub(crate) fn assign_slots(nodes: &mut Vec<SymbolicNode>) -> Result<()> {
                 consumer_input.insert((src_id.clone(), nodes[cidx].id.clone()), slot);
                 next_slot = next_slot.max(slot + 1);
             }
-            fanout_adjusted_base.insert(src_id, eff_base);
+            fanout_adjusted_base.insert(src_id.clone(), eff_base);
+            fanout_consumer_count.insert(src_id, n);
             next_free = eff_base + n;
         }
     }
@@ -141,15 +148,24 @@ pub(crate) fn assign_slots(nodes: &mut Vec<SymbolicNode>) -> Result<()> {
             let out_offset = func.get("output_offset").and_then(|v| v.as_u64());
 
             if out_base.is_some() {
-                // Fan-out: arg = effective base slot (possibly auto-adjusted in Phase 1).
-                // The WASM reads arg as the first output slot and writes consecutively from there.
+                // Fan-out: pack BOTH the effective base slot (possibly auto-
+                // adjusted in Phase 1) and the consumer count into the single
+                // `arg`.  The guest needs both — where to write (base) and how
+                // many contiguous output slots to fill (one per map consumer):
+                //   arg = base (low 16 bits) | n_consumers (high 16 bits)
+                // Passing base alone (the old behavior) made the guest treat it
+                // as the worker count and write to a hardcoded base, so only the
+                // overlapping slots were consumed and most data was dropped.
                 let eff_base = fanout_adjusted_base
                     .get(&node_id)
                     .copied()
                     .unwrap_or(out_base.unwrap() as u32);
+                let n_consumers = fanout_consumer_count.get(&node_id).copied().unwrap_or(0);
+                let packed = eff_base | (n_consumers << 16);
                 let mut new_func = func.clone();
-                new_func.insert("arg".into(), json!(eff_base));
+                new_func.insert("arg".into(), json!(packed));
                 nodes[idx].kind = json!({ "Func": Value::Object(new_func) });
+                // Downstream slot resolution still keys off the bare base slot.
                 id_to_output.insert(node_id, eff_base);
 
             } else if let Some(offset) = out_offset {

@@ -34,7 +34,7 @@
       "kind": { "Func": { "func": "wc_distribute", "out_base": 50 } }
     },
     {
-      "id": "map_n", "placement": "all", "fanout": 30, "deps": ["distribute"],
+      "id": "map_n", "placement": "all", "fanout": 8, "deps": ["distribute"],
       "kind": { "Func": { "func": "wc_map", "output_offset": 100 } }
     },
     {

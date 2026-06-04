@@ -66,15 +66,22 @@ fn vec_norm_sq(v: &[f32]) -> f32 {
 
 // ── Exported functions ───────────────────────────────────────────────────────
 
-/// Partition: split dataset from I/O slot 0 round-robin to stream slots 10..10+n.
+/// Partition: split dataset from I/O slot 0 round-robin to `n_shards` stream
+/// slots starting at `base`.
+///
+/// `arg` packs the partitioner's slot layout: `base | (n_shards << 16)` (see
+/// `partitioner::slot_assigner`).  Legacy single-node DAGs (high bits clear)
+/// pass a bare shard count and default the base to `PARTITION_BASE`.
 #[no_mangle]
-pub extern "C" fn ml_partition(n_shards: u32) {
+pub extern "C" fn ml_partition(arg: u32) {
+    let (base, n_shards) = super::unpack_fanout_arg(arg, PARTITION_BASE);
+    if n_shards == 0 { return; }
     let records = ShmApi::read_all_inputs();
     let mut idx: u32 = 0;
     for (_origin, rec) in &records {
         let s = core::str::from_utf8(rec).unwrap_or("").trim();
         if s.is_empty() || s.starts_with("label") { continue; }
-        ShmApi::append_stream_data(PARTITION_BASE + (idx % n_shards), rec);
+        ShmApi::append_stream_data(base + (idx % n_shards), rec);
         idx += 1;
     }
 }
