@@ -325,30 +325,51 @@ impl MeshNode {
                 abs_addr, len, mr1_end,
             ));
         }
-        // Address is in extension region.
-        let needed_end = abs_addr + len as u64;
-        let needed_len = (needed_end - mr1_end) as usize;
+        // Address is in extension region — ensure the MR covers it.
+        self.ensure_src_ext_covers(shm_base, abs_addr + len as u64)
+    }
+
+    /// The MR1 lkey (covers SHM `[base, base + INITIAL_SHM_SIZE)`).
+    pub fn mr1_lkey(&self) -> u32 {
+        self.mr.lkey()
+    }
+
+    /// Ensure `MR-src-ext` covers the SHM extension up to absolute `end_addr`
+    /// in a SINGLE (re)registration, returning its lkey.
+    ///
+    /// MR-src-ext is always anchored at `shm_base + INITIAL_SHM_SIZE`, so one
+    /// registration reaching the highest address a transfer touches covers
+    /// every extension page below it.  The registration is cached, so callers
+    /// that pass the full SHM capacity as `end_addr` pay for it once and every
+    /// later transfer reuses the same lkey until the SHM itself grows.
+    ///
+    /// Callers building a multi-SGE transfer that spans the extension MUST grow
+    /// the MR once via this method up to the highest address they touch BEFORE
+    /// recording any per-page lkey.  Growing mid-collection deregisters the old
+    /// MR and strands the lkeys already stored in earlier SGEs, which the NIC
+    /// then rejects with a local protection error (WC status 4).
+    pub fn ensure_src_ext_covers(&self, shm_base: u64, end_addr: u64) -> Result<u32> {
+        let mr1_end = shm_base + common::INITIAL_SHM_SIZE as u64;
+        debug_assert!(end_addr > mr1_end, "ensure_src_ext_covers: end_addr inside MR1");
 
         let mut guard = self.src_ext.lock().expect("MR-src-ext mutex poisoned");
-        match guard.as_ref() {
-            Some(ext) if ext.covers(abs_addr, len) => {
+        if let Some(ext) = guard.as_ref() {
+            if ext.covered_start + ext.covered_len as u64 >= end_addr {
                 let lkey = ext.lkey();
                 ext.touch();
                 return Ok(lkey);
             }
-            _ => {}
         }
 
-        // Need to (re)register with coverage up to needed_end.  Grow by
-        // doubling relative to whichever is larger: current coverage or
-        // needed_len.
+        // (Re)register with coverage up to end_addr.  Grow by doubling relative
+        // to whichever is larger: current coverage or the newly-needed length.
+        let needed_len = (end_addr - mr1_end) as usize;
         let new_len = match guard.as_ref() {
             Some(ext) => (ext.covered_len.saturating_mul(2)).max(needed_len),
             None      => needed_len.max(common::PAGE_SIZE as usize),
         };
         *guard = None; // drop the old registration before re-reg
-        let start_ptr = mr1_end as *mut u8;
-        let storage = src_mr::SrcExtStorage::new(&self.ctx, start_ptr, new_len)?;
+        let storage = src_mr::SrcExtStorage::new(&self.ctx, mr1_end as *mut u8, new_len)?;
         let lkey = storage.lkey();
         storage.touch();
         *guard = Some(storage);

@@ -44,7 +44,7 @@ pub(in crate::mesh) struct SrcExtStorage {
     lkey:          u32,
     /// Absolute address of the first byte this MR covers
     /// (= shm_base + INITIAL_SHM_SIZE).
-    covered_start: u64,
+    pub(in crate::mesh) covered_start: u64,
     /// Number of bytes currently covered.  Grown on demand by
     /// deregistering and re-registering with a larger length.
     pub(in crate::mesh) covered_len: usize,

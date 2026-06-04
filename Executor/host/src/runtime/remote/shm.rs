@@ -42,8 +42,16 @@ pub(super) fn collect_src_sges(
         RemoteSlotKind::Io     => sb.io_heads[slot].load(Ordering::Acquire),
     };
     let shm_base: u64 = splice_addr as u64;
+    let mr1_end: u64 = shm_base + common::INITIAL_SHM_SIZE as u64;
 
     let mut src_sges: Vec<SrcSge> = Vec::new();
+    // Indices of SGEs whose page lives in the SHM extension (offset ≥
+    // INITIAL_SHM_SIZE).  Their lkey is filled in AFTER the walk: we grow
+    // MR-src-ext exactly once to span the whole extension, then stamp the
+    // resulting lkey here.  Assigning ext lkeys during the walk would let a
+    // later page grow (and thus re-register) the MR, deregistering the lkey
+    // already stored in earlier SGEs → NIC local protection error (status 4).
+    let mut ext_sge_idxs: Vec<usize> = Vec::new();
     let mut total_bytes: ShmOffset = 0;
     let mut page_id = head;
 
@@ -55,8 +63,20 @@ pub(super) fn collect_src_sges(
             let used = page.cursor.load(Ordering::Acquire) as u32;
             if used > 0 {
                 let data_vaddr = page.data.as_ptr() as u64;
-                let lkey = mesh.src_lkey_for_shm(shm_base, data_vaddr, used)?;
-                src_sges.push((data_vaddr, used, lkey));
+                if data_vaddr + used as u64 <= mr1_end {
+                    // Fully inside MR1 — lkey is fixed.
+                    src_sges.push((data_vaddr, used, mesh.mr1_lkey()));
+                } else if data_vaddr >= mr1_end {
+                    // Fully in the extension — defer lkey until the single
+                    // post-walk MR-src-ext registration.
+                    ext_sge_idxs.push(src_sges.len());
+                    src_sges.push((data_vaddr, used, 0)); // placeholder lkey
+                } else {
+                    return Err(anyhow!(
+                        "collect_src_sges: page {:#x}+{} straddles the MR1/MR-src-ext \
+                         boundary {:#x}", data_vaddr, used, mr1_end
+                    ));
+                }
                 total_bytes += used as ShmOffset;
             }
             page_id = page.next_offset.load(Ordering::Acquire);
@@ -80,6 +100,20 @@ pub(super) fn collect_src_sges(
             page_id = page.next_offset.load(Ordering::Acquire);
         }
     }
+
+    // Single ext-MR provisioning: grow MR-src-ext once to span the whole SHM
+    // extension (up to current capacity), then stamp its lkey into every ext
+    // SGE.  Sizing to capacity (rather than this transfer's high-water mark)
+    // means the registration is reused across transfers and only changes when
+    // the SHM itself grows — never mid-collection.
+    if !ext_sge_idxs.is_empty() {
+        let cap = sb.global_capacity.load(Ordering::Acquire);
+        let ext_lkey = mesh.ensure_src_ext_covers(shm_base, shm_base + cap as u64)?;
+        for idx in ext_sge_idxs {
+            src_sges[idx].2 = ext_lkey;
+        }
+    }
+
     Ok((src_sges, total_bytes))
 }
 
