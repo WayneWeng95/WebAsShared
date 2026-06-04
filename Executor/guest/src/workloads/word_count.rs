@@ -29,20 +29,20 @@ const WC_DIST_BASE: u32 = 10;
 /// Map output base: wc_map(slot) writes to stream slot `slot + WC_MAP_OUT_BASE`.
 const WC_MAP_OUT_BASE: u32 = 100;
 
-/// Distribute: read every line from the default input I/O slot and append it
-/// round-robin to one of the `n_workers` stream slots starting at `WC_DIST_BASE`.
+/// Distribute the input across `n_workers` stream slots starting at
+/// `WC_DIST_BASE`, **zero-copy**: the input page chain is split into `n_workers`
+/// contiguous, record-aligned segments by relinking page pointers, so no line
+/// bytes are copied (only the ≤1-page seam at each of the `n_workers-1` cut
+/// points). Peak SHM stays ≈ 1× input instead of the 2× the old per-line copy
+/// required, and distribute no longer memcpys the whole corpus.
+///
+/// Word count is order-insensitive, so contiguous chunks (vs the old
+/// round-robin) yield identical aggregate counts; only which worker sees which
+/// lines changes.
 #[no_mangle]
 pub extern "C" fn wc_distribute(n_workers: u32) {
-    // Stream the input one line at a time (bounded heap) instead of
-    // materializing the whole corpus with read_all_inputs — the latter needs
-    // one heap Vec per line and OOMs / trips the allocator on large inputs
-    // (millions of records).  Here only one line buffer is live at once.
-    let mut i: u32 = 0;
-    ShmApi::for_each_input(|_origin, line| {
-        let slot = WC_DIST_BASE + (i % n_workers);
-        ShmApi::append_stream_data(slot, line);
-        i += 1;
-    });
+    if n_workers == 0 { return; }
+    ShmApi::split_input_contiguous(common::INPUT_IO_SLOT, WC_DIST_BASE, n_workers);
 }
 
 /// Map: count occurrences of every unique word in stream slot `slot`.

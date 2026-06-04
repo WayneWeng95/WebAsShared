@@ -27,14 +27,14 @@
   "nodes": [
     {
       "id": "load", "placement": "all", "deps": [],
-      "kind": { "Input": { "path": "TestData/corpus.txt", "prefetch": true } }
+      "kind": { "Input": { "path": "TestData/corpus_xlarge.txt", "prefetch": true } }
     },
     {
       "id": "distribute", "placement": "all", "deps": ["load"],
       "kind": { "Func": { "func": "wc_distribute", "out_base": 50 } }
     },
     {
-      "id": "map_n", "placement": "all", "fanout": 30, "deps": ["distribute"],
+      "id": "map_n", "placement": "all", "fanout": 5, "deps": ["distribute"],
       "kind": { "Func": { "func": "wc_map", "output_offset": 100 } }
     },
     {

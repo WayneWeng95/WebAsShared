@@ -1,12 +1,3 @@
-The high assignment with dag nodes follows strictly 1,2,3,4 order, if 3 dropped its basically can not make it work.
-
-The dat node numbers field is not fully fixed yet.
-
-
-----Both can be acceptable just for testing purpose. 
-
-
---- The scx seems not connected into the placement, need check. maybe we test with just hard coded policy for easier testing 
 
 --- The testing file size is too small and unable to showcase the fan-out performance benefits, also the measuring need to check
 

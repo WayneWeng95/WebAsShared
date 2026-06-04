@@ -251,6 +251,178 @@ impl ShmApi {
         );
     }
 
+    /// Zero-copy contiguous split of input I/O slot `in_io_slot`'s page chain
+    /// into `n` stream slots `out_base .. out_base + n`.
+    ///
+    /// The input is a chain of length-prefixed records (`[len:u32][origin:u32]
+    /// [payload]`) packed tightly across 4 KiB pages, so records straddle page
+    /// boundaries. We partition it into `n` byte-balanced, **record-aligned**
+    /// contiguous segments and install each as a stream slot's chain by
+    /// relinking `next_offset` pointers — no payload is copied. The only data
+    /// copied is the partial seam page at each of the `n-1` cut points (≤ one
+    /// page each), so distribute runs in O(n·PAGE_SIZE) copying instead of
+    /// O(input). Peak SHM therefore stays ≈ 1× input rather than 2×.
+    ///
+    /// On return the input slot is emptied (head/tail cleared): every page now
+    /// belongs to exactly one stream slot, so later reclamation is unaffected.
+    ///
+    /// Assumes well-formed framing and that no single record exceeds `total/n`
+    /// bytes (true for line records); a pathologically huge record could leave
+    /// an intermediate worker empty, which the readers handle gracefully.
+    pub fn split_input_contiguous(in_io_slot: u32, out_base: u32, n: u32) {
+        let sb = Self::superblock();
+        let set_slot = |w: u32, head: ShmOffset, tail: ShmOffset| {
+            let s = (out_base + w) as usize;
+            sb.writer_heads[s].store(head as u64, Ordering::Release);
+            sb.writer_tails[s].store(tail as u64, Ordering::Release);
+        };
+
+        if n == 0 { return; }
+        let in_head = sb.io_heads[in_io_slot as usize].load(Ordering::Acquire) as ShmOffset;
+        if in_head == 0 {
+            for w in 0..n { set_slot(w, 0, 0); }
+            return;
+        }
+
+        // ── Forward readers over the packed chain (lazy page advance) ──────────
+        // Read `buf.len()` bytes from (*cp,*co), crossing pages; false at EOF.
+        unsafe fn read_fwd(cp: &mut ShmOffset, co: &mut usize, mut buf: &mut [u8]) -> bool {
+            while !buf.is_empty() {
+                if *cp == 0 { return false; }
+                let page = &*((SHM_BASE + *cp as usize) as *const Page);
+                let cursor = page.cursor.load(Ordering::Acquire) as usize;
+                if *co >= cursor {
+                    *cp = page.next_offset.load(Ordering::Acquire) as ShmOffset;
+                    *co = 0;
+                    continue;
+                }
+                let take = core::cmp::min(cursor - *co, buf.len());
+                core::ptr::copy_nonoverlapping(page.data.as_ptr().add(*co), buf.as_mut_ptr(), take);
+                *co += take;
+                buf = &mut buf[take..];
+            }
+            true
+        }
+        // Skip `len` bytes (no copy); false if the chain ends first.
+        unsafe fn skip_fwd(cp: &mut ShmOffset, co: &mut usize, mut len: usize) -> bool {
+            while len > 0 {
+                if *cp == 0 { return false; }
+                let page = &*((SHM_BASE + *cp as usize) as *const Page);
+                let cursor = page.cursor.load(Ordering::Acquire) as usize;
+                if *co >= cursor {
+                    *cp = page.next_offset.load(Ordering::Acquire) as ShmOffset;
+                    *co = 0;
+                    continue;
+                }
+                let take = core::cmp::min(cursor - *co, len);
+                *co += take;
+                len -= take;
+            }
+            true
+        }
+        // Walk to the last page of a chain (its tail).
+        unsafe fn chain_tail(head: ShmOffset) -> ShmOffset {
+            if head == 0 { return 0; }
+            let mut t = head;
+            loop {
+                let page = &*((SHM_BASE + t as usize) as *const Page);
+                let nx = page.next_offset.load(Ordering::Acquire) as ShmOffset;
+                if nx == 0 { return t; }
+                t = nx;
+            }
+        }
+
+        // ── Pass 1: total payload+framing bytes (sum of page cursors). ─────────
+        let mut total: u64 = 0;
+        {
+            let mut p = in_head;
+            while p != 0 {
+                let page = unsafe { &*((SHM_BASE + p as usize) as *const Page) };
+                total += page.cursor.load(Ordering::Acquire) as u64;
+                p = page.next_offset.load(Ordering::Acquire) as ShmOffset;
+            }
+        }
+
+        // ── Pass 2: walk records; cut at record boundaries near byte targets. ──
+        let mut seg_head = in_head;
+        let mut cur_page = in_head;
+        let mut cur_off: usize = 0;
+        let mut emitted: u64 = 0;
+        let mut worker: u32 = 0;
+
+        loop {
+            let mut hdr = [0u8; 8];
+            if !unsafe { read_fwd(&mut cur_page, &mut cur_off, &mut hdr) } {
+                break; // end of chain
+            }
+            let len = u32::from_le_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]) as usize;
+            if !unsafe { skip_fwd(&mut cur_page, &mut cur_off, len) } {
+                break; // truncated record (malformed input)
+            }
+            emitted += 8 + len as u64;
+
+            // Target for worker `worker` is a cumulative (worker+1)/n of total.
+            if worker + 1 < n && emitted >= (worker as u64 + 1) * total / n as u64 {
+                // Cut at the current record boundary (cur_page, cur_off).
+                let w_tail: ShmOffset;
+                let next_head: ShmOffset;
+                if cur_page == 0 {
+                    w_tail = unsafe { chain_tail(seg_head) };
+                    next_head = 0;
+                } else {
+                    let page = unsafe { &mut *((SHM_BASE + cur_page as usize) as *mut Page) };
+                    let pcursor = page.cursor.load(Ordering::Acquire) as usize;
+                    let orig_next = page.next_offset.load(Ordering::Acquire) as ShmOffset;
+                    if cur_off >= pcursor {
+                        // Clean page-end boundary — no copy needed.
+                        page.next_offset.store(0, Ordering::Release);
+                        w_tail = cur_page;
+                        next_head = orig_next;
+                        cur_page = orig_next;
+                        cur_off = 0;
+                    } else {
+                        // Mid-page boundary — copy the [cur_off..pcursor] tail to
+                        // a fresh page that heads the next segment, then truncate
+                        // this page so it ends worker `worker`'s chain.
+                        let np = Self::try_allocate_page();
+                        let np_page = unsafe { &mut *((SHM_BASE + np as usize) as *mut Page) };
+                        let taillen = pcursor - cur_off;
+                        unsafe {
+                            core::ptr::copy_nonoverlapping(
+                                page.data.as_ptr().add(cur_off),
+                                np_page.data.as_mut_ptr(),
+                                taillen,
+                            );
+                        }
+                        np_page.cursor.store(taillen as ShmOffset, Ordering::Release);
+                        np_page.next_offset.store(orig_next as u64, Ordering::Release);
+                        page.cursor.store(cur_off as ShmOffset, Ordering::Release);
+                        page.next_offset.store(0, Ordering::Release);
+                        w_tail = cur_page;
+                        next_head = np;
+                        cur_page = np;
+                        cur_off = 0;
+                    }
+                }
+                set_slot(worker, seg_head, w_tail);
+                worker += 1;
+                seg_head = next_head;
+                if next_head == 0 { break; }
+            }
+        }
+
+        // Final non-empty worker gets the remainder; any leftover workers empty.
+        if worker < n {
+            let tail = unsafe { chain_tail(seg_head) };
+            set_slot(worker, seg_head, tail);
+            for w in (worker + 1)..n { set_slot(w, 0, 0); }
+        }
+
+        // Ownership of every page has moved to the stream slots.
+        sb.io_heads[in_io_slot as usize].store(0, Ordering::Release);
+        sb.io_tails[in_io_slot as usize].store(0, Ordering::Release);
+    }
+
     /// Return the most recent record from stream `target_worker_id`.
     pub fn read_latest_stream_data(target_worker_id: u32) -> Option<(u32, Vec<u8>)> {
         let head = Self::superblock().writer_heads[target_worker_id as usize]
