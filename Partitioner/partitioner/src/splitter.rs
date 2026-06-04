@@ -234,7 +234,15 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
             &cross_edges,
         )?;
         let kind = resolve_output_kind(&kind, &sym_node.deps, sym_machine, &cross_edges);
-        let kind = translate_func_kind(kind);
+        // For a fan-out Func (has `out_base`), the guest needs the consumer
+        // count alongside the base slot.  Count this node's direct consumers and
+        // let translate_func_kind pack it into the high bits of `arg`.
+        let n_consumers = if sym_node.kind.get("Func").and_then(|f| f.get("out_base")).is_some() {
+            nodes.iter().filter(|m| m.deps.iter().any(|d| d == &sym_node.id)).count() as u32
+        } else {
+            0
+        };
+        let kind = translate_func_kind(kind, n_consumers);
 
         let mut obj = serde_json::Map::new();
         obj.insert("id".into(), json!(sym_node.id));
@@ -419,14 +427,29 @@ fn resolve_output_kind(
 ///
 /// `arg2` in the SymbolicDag is the output slot used only for cross-node
 /// routing during partitioning. The executor does not know about it.
+///
+/// For a fan-out Func (one declaring `out_base`), `n_consumers` is packed into
+/// the high 16 bits of `arg` (base in the low 16): the guest reads the base
+/// slot to write from and the worker count to know how many contiguous slots to
+/// fill.  Packing here — rather than at slot-assignment time — keeps the bare
+/// base slot visible to the partitioner's slot bookkeeping (`collect_slots`).
+///
 /// All other kind variants are returned unchanged.
-fn translate_func_kind(kind: Value) -> Value {
+fn translate_func_kind(kind: Value, n_consumers: u32) -> Value {
     let Some(func_obj) = kind.get("Func").and_then(|v| v.as_object()) else {
         return kind;
     };
     let func = func_obj.get("func").cloned().unwrap_or(Value::Null);
-    let arg  = func_obj.get("arg").cloned().unwrap_or(Value::Null);
-    json!({ "WasmVoid": { "func": func, "arg": arg } })
+    let arg_val = func_obj.get("arg").cloned().unwrap_or(Value::Null);
+
+    // Fan-out node: pack (base | n_consumers << 16) so the guest gets both.
+    if func_obj.contains_key("out_base") && n_consumers > 0 {
+        if let Some(base) = arg_val.as_u64() {
+            let packed = (base & 0xFFFF) | ((n_consumers as u64) << 16);
+            return json!({ "WasmVoid": { "func": func, "arg": packed } });
+        }
+    }
+    json!({ "WasmVoid": { "func": func, "arg": arg_val } })
 }
 
 /// Rewrite `upstream_nodes: ["A", "B"]` inside routing-node kind JSON to
