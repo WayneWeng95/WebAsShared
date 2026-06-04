@@ -346,6 +346,7 @@ mod tests {
         let hints = partitioner::PlacementHints {
             capacity: cluster_capacity(&view),
             host_limit: host_limits(&view),
+            random: false,
         };
 
         // 5 auto-nodes; host 0 can take up to 7, host 1 up to 1.
@@ -355,6 +356,8 @@ mod tests {
                 deps: vec![],
                 node_id: None,
                 output_slot: None,
+                fanout: None,
+                placement: None,
                 barrier_group: None,
                 kind: serde_json::json!({"Func": {"slot": i}}),
             })

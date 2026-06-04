@@ -112,7 +112,19 @@ pub struct MetricsPayload {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmitJobPayload {
+    /// The submitted DAG JSON — either a raw `SymbolicDag` (`nodes` key) or an
+    /// already-partitioned `ClusterDag` (`node_dags` key). The coordinator
+    /// resolves which it is, partitions symbolic DAGs against the live cluster,
+    /// and applies the mode transform below before assigning per-node work.
     pub cluster_dag_json: String,
+    /// Execution mode + Python runtime injected by the coordinator's transform.
+    /// Defaulted so older clients (which pre-transformed) still deserialize.
+    #[serde(default)]
+    pub python_mode: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub python_script: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub python_wasm: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

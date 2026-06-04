@@ -196,26 +196,57 @@ fn handle_submit(
         serde_json::from_value(msg.payload).context("parse SubmitJob payload")?;
 
     // Snapshot capacity + live membership before acquiring any further locks.
-    let (placement_hints, live_nodes): (PlacementHints, usize) = {
+    // `live_ids` is the set of physical nodes participating in this job: the
+    // coordinator (node 0) plus every connected worker — an ARBITRARY subset, not
+    // a contiguous prefix. The partitioner works in a dense logical space
+    // 0..live_ids.len(); we map logical id `i` → physical node `live_ids[i]` when
+    // building the RDMA mesh and delivering per-node DAGs.
+    let (placement_hints, live_ids): (PlacementHints, Vec<u32>) = {
         let s = state.lock().unwrap();
         let connected: std::collections::HashSet<u32> = s.workers.keys().copied().collect();
-        let live = contiguous_live_count(&connected);
-        // Warn if any worker is online but beyond the contiguous prefix (an
-        // interior node is down) — it won't be used this run.
-        let beyond: Vec<u32> = connected.iter().copied().filter(|&id| id as usize >= live).collect();
-        if !beyond.is_empty() {
-            println!("[coordinator] note: worker(s) {:?} online but an interior node is offline; \
-                      using only the contiguous live set 0..{}", beyond, live);
-        }
+        let live_ids = live_node_ids(&connected, config.node_id);
         let hints = PlacementHints {
             capacity: scheduler::cluster_capacity(&s.scx_view),
             host_limit: scheduler::host_limits(&s.scx_view),
             random: false,
         };
-        (hints, live)
+        (hints, live_ids)
     };
 
-    let cluster_dag = resolve_dag(&payload.cluster_dag_json, &placement_hints, live_nodes)?;
+    // Resolve the submitted DAG against the live cluster: a raw SymbolicDag is
+    // partitioned here (where live-node scaling / SCX placement / converge run),
+    // a pre-partitioned ClusterDag passes through. Then apply the mode transform
+    // (Func→WasmVoid for Rust, →PyFunc for Python) — this must happen after
+    // partitioning, since the partitioner always emits the native WasmVoid kind.
+    let (resolved_json, partitioned) =
+        resolve_dag(&payload.cluster_dag_json, &placement_hints, &live_ids)?;
+    if payload.python_mode {
+        println!("[coordinator] Python mode — transforming partitioned DAG for PyFunc execution");
+    }
+    let transformed_json = crate::dag_transform::transform_cluster_dag(
+        &resolved_json,
+        payload.python_mode,
+        payload.python_script.as_deref(),
+        payload.python_wasm.as_deref(),
+    )
+    .context("transform partitioned ClusterDag for execution mode")?;
+    let mut cluster_dag = ClusterDag::from_json(&transformed_json)?;
+
+    // When we partitioned a SymbolicDag, its node ids are a dense LOGICAL space
+    // (0..N). Map them onto the actual live PHYSICAL nodes: logical `i` →
+    // `live_ids[i]`. A pre-partitioned ClusterDag already carries explicit
+    // physical ids (dense 0.. matching the cluster IP roster) and is left as-is.
+    let logical_to_physical: Option<&[u32]> = if partitioned {
+        // Remap shared-input source ids (also logical) to physical.
+        for si in &mut cluster_dag.shared_inputs {
+            if let Some(&phys) = live_ids.get(si.source_node as usize) {
+                si.source_node = phys;
+            }
+        }
+        Some(live_ids.as_slice())
+    } else {
+        None
+    };
 
     let job_id = format!("job_{}", chrono_simple_id());
 
@@ -245,7 +276,37 @@ fn handle_submit(
         }
     }
 
-    let per_node_dags = cluster_dag.split(&config.cluster.ips)?;
+    // Build the IP list the split sees, indexed by LOGICAL node id. For the
+    // partitioned path that's the live nodes' IPs in `live_ids` order (so the
+    // RDMA mesh entry `i` points at physical node `live_ids[i]`); otherwise the
+    // raw cluster roster.
+    let split_ips: Vec<String> = match logical_to_physical {
+        Some(map) => map
+            .iter()
+            .map(|&phys| {
+                config.cluster.ips.get(phys as usize).cloned().ok_or_else(|| {
+                    anyhow::anyhow!("live node {} has no configured IP in cluster roster", phys)
+                })
+            })
+            .collect::<Result<_>>()?,
+        None => config.cluster.ips.clone(),
+    };
+
+    let per_node_dags_logical = cluster_dag.split(&split_ips)?;
+
+    // Rekey logical → physical so AssignJob delivery, the local-executor lookup,
+    // and result collection all address the real node ids. (Identity map when
+    // the DAG was already physical.)
+    let per_node_dags: HashMap<u32, String> = match logical_to_physical {
+        Some(map) => per_node_dags_logical
+            .into_iter()
+            .map(|(logical, dag)| {
+                let phys = *map.get(logical as usize).unwrap_or(&logical);
+                (phys, dag)
+            })
+            .collect(),
+        None => per_node_dags_logical,
+    };
 
     // Workers that actually receive a per-node DAG this run (excluding self).
     // Result collection must wait for EXACTLY these — not every connected node —
@@ -587,23 +648,35 @@ fn print_cluster_status(state: &CoordinatorState, self_metrics: &metrics::NodeMe
     }
 }
 
-/// Accept either a pre-partitioned ClusterDag or a raw SymbolicDag.
+/// Accept either a pre-partitioned ClusterDag or a raw SymbolicDag and return
+/// the resolved ClusterDag-shaped JSON (still in unified-kind form — the caller
+/// applies the execution-mode transform) plus whether it was partitioned here.
 ///
 /// Detection is by key presence:
-/// - `node_dags` present → already a ClusterDag, use as-is.
+/// - `node_dags` present → already a ClusterDag, use as-is (returns `false`).
 /// - `nodes` present     → SymbolicDag; partition it server-side using live
 ///                         capacity hints so the placer can colocate sandboxes
-///                         on the least-loaded hosts.
-fn resolve_dag(dag_json: &str, capacity: &PlacementHints, live_nodes: usize) -> Result<ClusterDag> {
+///                         on the least-loaded hosts (returns `true`).
+///
+/// `live_ids` are the physical node ids participating in this job, ascending.
+/// The partitioner emits a dense logical space `0..effective`; the SCX hints
+/// (keyed by physical id) are remapped into that logical space here, and the
+/// caller maps logical ids back to `live_ids[i]` for delivery.
+fn resolve_dag(
+    dag_json: &str,
+    capacity: &PlacementHints,
+    live_ids: &[u32],
+) -> Result<(String, bool)> {
     let probe: serde_json::Value =
         serde_json::from_str(dag_json).context("parse submitted DAG JSON")?;
 
     if probe.get("node_dags").is_some() {
         // Already partitioned — its node layout is fixed; we can't rescale it.
-        return ClusterDag::from_json(dag_json);
+        return Ok((dag_json.to_string(), false));
     }
 
     if probe.get("nodes").is_some() {
+        let live = live_ids.len();
         let mut symbolic = SymbolicDag::from_json(dag_json)?;
         // Resolve how many nodes to partition across against the live cluster:
         //   - total_nodes omitted     → use ALL available nodes.
@@ -611,56 +684,63 @@ fn resolve_dag(dag_json: &str, capacity: &PlacementHints, live_nodes: usize) -> 
         //   - total_nodes >  live     → clamp to what's available and warn.
         let effective = match symbolic.total_nodes {
             None => {
-                println!("[coordinator] total_nodes not set — using all {} available node(s)", live_nodes);
-                live_nodes.max(1)
+                println!("[coordinator] total_nodes not set — using all {} available node(s) {:?}", live, live_ids);
+                live.max(1)
             }
-            Some(d) if d > live_nodes => {
-                println!("[coordinator] requested total_nodes={} but only {} node(s) online — using {}",
-                         d, live_nodes, live_nodes);
-                live_nodes.max(1)
+            Some(d) if d > live => {
+                println!("[coordinator] requested total_nodes={} but only {} node(s) online {:?} — using {}",
+                         d, live, live_ids, live);
+                live.max(1)
             }
             Some(d) => {
-                println!("[coordinator] partitioning across {} node(s) ({} online)", d, live_nodes);
+                println!("[coordinator] partitioning across {} node(s) ({} online {:?})", d, live, live_ids);
                 d.max(1)
             }
         };
         symbolic.total_nodes = Some(effective);
-        // Clamp the SCX-derived hints to the nodes actually in this partition
-        // (0..effective).  cluster_capacity/host_limit are keyed by *connected*
-        // node ids, which can exceed `effective` when total_nodes < live — left
-        // unclamped, the placer could pick a "best host" outside the partition
-        // and assign an auto node to a non-existent node_id.
+        // Remap the SCX-derived hints (keyed by PHYSICAL node id) into the dense
+        // LOGICAL space 0..effective the placer operates in: logical id `i`
+        // corresponds to physical node `live_ids[i]`. Nodes beyond `effective`
+        // (when total_nodes < live) are dropped, so the placer never picks a host
+        // outside the partition.
         let clamped = PlacementHints {
-            capacity: capacity.capacity.iter()
-                .filter(|(&id, _)| (id as usize) < effective)
-                .map(|(&id, &c)| (id, c)).collect(),
-            host_limit: capacity.host_limit.iter()
-                .filter(|(&id, _)| (id as usize) < effective)
-                .map(|(&id, &l)| (id, l)).collect(),
+            capacity: live_ids.iter().take(effective).enumerate()
+                .filter_map(|(logical, phys)| capacity.capacity.get(phys).map(|&c| (logical as u32, c)))
+                .collect(),
+            host_limit: live_ids.iter().take(effective).enumerate()
+                .filter_map(|(logical, phys)| capacity.host_limit.get(phys).map(|&l| (logical as u32, l)))
+                .collect(),
             random: capacity.random,
         };
         let hints = if clamped.capacity.is_empty() { None } else { Some(&clamped) };
         let cluster_value = partitioner::partition(&symbolic, hints)
             .context("partition SymbolicDag")?;
         let cluster_json = serde_json::to_string(&cluster_value)?;
-        return ClusterDag::from_json(&cluster_json);
+        return Ok((cluster_json, true));
     }
 
     bail!("submitted JSON is neither a ClusterDag (has node_dags) nor a SymbolicDag (has nodes)")
 }
 
-/// Count of contiguous live nodes starting at node 0 (the coordinator, always
-/// present).  Returns the largest `k` such that node ids `0..k` are all online.
+/// The physical node ids participating in a job, ascending: the coordinator
+/// (`coordinator_id`, always present) plus every currently-connected worker.
 ///
-/// We require a contiguous prefix because the partitioner emits node ids
-/// `0..total_nodes`; if an *interior* node is down (e.g. node 1 offline but 2
-/// online) we stop at the gap rather than place work on a dead node.
-fn contiguous_live_count(connected: &std::collections::HashSet<u32>) -> usize {
-    let mut k = 1u32; // node 0 (self) always counts
-    while connected.contains(&k) {
-        k += 1;
+/// Workers may be an ARBITRARY subset — e.g. node 1 offline while node 2 is up
+/// yields `[0, 2]`. The partitioner still emits a dense logical space
+/// `0..len`; the coordinator maps logical id `i` to physical node `result[i]`
+/// when building the RDMA mesh and delivering per-node DAGs, so a gap in the
+/// physical ids no longer wastes the nodes above it.
+///
+/// (The coordinator is assumed to be node 0, the smallest id — so `result[0]`
+/// is always the coordinator, which runs logical node 0's DAG locally.)
+fn live_node_ids(connected: &std::collections::HashSet<u32>, coordinator_id: u32) -> Vec<u32> {
+    let mut ids: Vec<u32> = connected.iter().copied().collect();
+    if !ids.contains(&coordinator_id) {
+        ids.push(coordinator_id);
     }
-    k as usize
+    ids.sort_unstable();
+    ids.dedup();
+    ids
 }
 
 // ── RDMA port / GID constants (same as the Executor mesh) ────────────────────
@@ -928,4 +1008,32 @@ fn chrono_simple_id() -> String {
         .map(|d| d.as_millis())
         .unwrap_or(0);
     format!("{}", ts)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::live_node_ids;
+    use std::collections::HashSet;
+
+    fn ids(slice: &[u32]) -> HashSet<u32> {
+        slice.iter().copied().collect()
+    }
+
+    #[test]
+    fn coordinator_always_present_even_with_no_workers() {
+        assert_eq!(live_node_ids(&ids(&[]), 0), vec![0]);
+    }
+
+    #[test]
+    fn workers_need_not_be_contiguous() {
+        // node 1 offline, node 2 up → node 2 is still used (logical 1 → phys 2).
+        assert_eq!(live_node_ids(&ids(&[2]), 0), vec![0, 2]);
+        assert_eq!(live_node_ids(&ids(&[3, 5]), 0), vec![0, 3, 5]);
+    }
+
+    #[test]
+    fn sorted_deduped_and_coordinator_not_double_counted() {
+        // connected set already containing the coordinator id must not duplicate.
+        assert_eq!(live_node_ids(&ids(&[0, 2, 1]), 0), vec![0, 1, 2]);
+    }
 }

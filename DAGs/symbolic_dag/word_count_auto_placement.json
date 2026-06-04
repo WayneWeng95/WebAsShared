@@ -22,13 +22,12 @@
   ],
   "shm_path_prefix": "/dev/shm/rdma_wc_ap",
   "log_level": "info",
-  "total_nodes": 1,
   "transfer": true,
   "placement_policy": "pack",
   "nodes": [
     {
       "id": "load", "placement": "all", "deps": [],
-      "kind": { "Input": { "path": "TestData/corpus_large.txt", "prefetch": true } }
+      "kind": { "Input": { "path": "TestData/corpus.txt", "prefetch": true } }
     },
     {
       "id": "distribute", "placement": "all", "deps": ["load"],

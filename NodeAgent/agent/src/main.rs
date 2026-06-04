@@ -215,26 +215,16 @@ fn cmd_submit(args: &[String]) -> Result<()> {
         println!("Mode: Python (distributed){}", if aot_mode { " (AOT)" } else { "" });
     }
 
-    // SymbolicDag detection: "total_nodes" is not a ClusterDag field.
-    let cluster_dag_raw = if raw_json.contains("\"total_nodes\"") {
-        println!("[submit] detected SymbolicDag — running Partitioner");
-        let sym = partitioner::SymbolicDag::from_json(&raw_json)?;
-        let partitioned = partitioner::partition(&sym, None)?;
-        serde_json::to_string(&partitioned).context("serialize partitioned DAG")?
-    } else {
-        raw_json
-    };
-
-    // Always transform: converts unified Func nodes to native kinds (WasmVoid or PyFunc).
-    let cluster_dag_json = dag_transform::transform_cluster_dag(
-        &cluster_dag_raw,
-        python_mode,
-        python_script.as_deref(),
-        python_wasm.as_deref(),
-    )?;
-
-    // Validate the ClusterDag before sending.
-    let _cluster_dag = cluster_dag::ClusterDag::from_json(&cluster_dag_json)?;
+    // The client no longer partitions or transforms the DAG: doing so blindly
+    // (with no live-cluster knowledge) would force a fixed node layout and make
+    // the coordinator's live-node scaling / SCX placement / converge logic dead
+    // code. Instead we ship the DAG as-is — a raw SymbolicDag or a
+    // pre-partitioned ClusterDag — and let the coordinator resolve it against
+    // the live cluster and apply the mode transform. We only sanity-check that
+    // it parses as JSON so obvious typos fail fast on the client.
+    serde_json::from_str::<serde_json::Value>(&raw_json)
+        .with_context(|| format!("DAG file is not valid JSON: {}", dag_path))?;
+    let cluster_dag_json = raw_json;
 
     let coord_addr = format!("{}:{}", config.coordinator_ip(), config.cluster.agent_port);
     println!("Submitting job to coordinator at {}...", coord_addr);
@@ -248,7 +238,12 @@ fn cmd_submit(args: &[String]) -> Result<()> {
         &mut stream,
         &protocol::make_message(
             protocol::MessageKind::SubmitJob,
-            &protocol::SubmitJobPayload { cluster_dag_json },
+            &protocol::SubmitJobPayload {
+                cluster_dag_json,
+                python_mode,
+                python_script,
+                python_wasm,
+            },
         )?,
     )?;
 
