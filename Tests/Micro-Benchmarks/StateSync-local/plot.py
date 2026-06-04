@@ -213,8 +213,9 @@ def print_speedup(data, op, metric="mean", baseline="shm-zerocopy"):
 def main():
     ap = argparse.ArgumentParser(description="Plot StateSync benchmark results")
     ap.add_argument("--csv", default="results.csv")
-    ap.add_argument("--outdir", default="figs")
-    ap.add_argument("--format", default="png", choices=["png", "pdf", "svg"])
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "Graph")))
+    ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--readers", type=int, default=None,
                     help="which fan-out degree to plot (default: lowest in CSV)")
     ap.add_argument("--figsize", default="9,3",

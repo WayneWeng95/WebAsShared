@@ -19,8 +19,8 @@ plt.rcParams.update({"xtick.labelsize": TICK, "ytick.labelsize": TICK,
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default=os.path.join(HERE, "results.csv"))
-    ap.add_argument("--outdir", default=os.path.join(HERE, "figs"))
-    ap.add_argument("--format", default="png", choices=["png", "pdf", "svg"])
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Graph")))
+    ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     args = ap.parse_args()
 
     rows = sorted((r for r in csv.DictReader(open(args.csv))), key=lambda r: int(r["size_mb"]))

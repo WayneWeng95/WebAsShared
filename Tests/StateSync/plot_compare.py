@@ -36,10 +36,10 @@ DEFAULT_ENGINE = os.path.join(HERE, "results_local.csv")
 # The series we compare, in presentation order (slow -> fast).
 SERIES = ["redis-local", "shm-copy", "shm-zerocopy", "shm-zerocopy-engine"]
 LABEL = {
-    "redis-local":         "Redis (local)",
-    "shm-copy":            "Shared memory (copy)",
-    "shm-zerocopy":        "Shared memory (zero-copy)",
-    "shm-zerocopy-engine": "Zero-copy routing (WasMem)",
+    "redis-local":         "Cloudburst (Redis local)",
+    "shm-copy":            "Faasm (Shared memory copy)",
+    "shm-zerocopy":        "RMMAP (Shared memory zero-copy)",
+    "shm-zerocopy-engine": "WasMem (Zero-copy memory routing)",
 }
 COLOR = {
     "redis-local":         "#edae49",   # amber  (matches StateSync-local)
@@ -184,10 +184,10 @@ def main():
     ap = argparse.ArgumentParser(description="Compare engine zero-copy vs StateSync-local baselines")
     ap.add_argument("--baseline-csv", default=DEFAULT_BASELINE)
     ap.add_argument("--engine-csv", default=DEFAULT_ENGINE)
-    ap.add_argument("--outdir", default=os.path.join(HERE, "figs"))
-    ap.add_argument("--format", default="png", choices=["png", "pdf", "svg"])
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Graph")))
+    ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--readers", type=int, default=1)
-    ap.add_argument("--metric", choices=["p50", "mean"], default="p50")
+    ap.add_argument("--metric", choices=["p50", "mean"], default="mean")
     ap.add_argument("--figsize", default="9,3",
                     help="combined-panel size in inches W,H (matches StateSync-local; default 9,3)")
     args = ap.parse_args()

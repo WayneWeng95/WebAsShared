@@ -36,12 +36,12 @@ plt.rcParams.update({
 
 ORDER = ["s3-disk", "s3", "cloudburst-cold", "cloudburst-warm", "redis-remote", "rdma-shm"]
 LABEL = {
-    "s3-disk":         "S3 (disk)",
-    "s3":              "S3 (RAM)",
-    "redis-remote":    "Redis (remote)",
-    "cloudburst-cold": "Cloudburst (cold)",
-    "cloudburst-warm": "Cloudburst (warm)",
-    "rdma-shm":        "Shared memory + RDMA",
+    # "s3-disk":         "Step Function (S3 disk)",
+    "s3":              "AWS Step Function (S3 RAM)",
+    "redis-remote":    "Pheromone (Redis remote)",
+    # "cloudburst-cold": "Cloudburst (Redis local)",
+    "cloudburst-warm": "Cloudburst (Redis local)",
+    "rdma-shm":        "RTSFaaS (RDMA shared memory)",
 }
 COLOR = {
     "s3-disk": "#8c1d40", "s3": "#d1495b", "redis-remote": "#e8843c",
@@ -75,8 +75,16 @@ def load(paths):
     return data
 
 
-def approaches_in(data):
+def all_approaches(data):
+    """Every approach present in the data, in canonical ORDER (for archival)."""
     return [a for a in ORDER if a in data] + [a for a in data if a not in ORDER]
+
+
+def approaches_in(data):
+    """Approaches to DISPLAY (plots + speedup), in canonical order — only those
+    with an active LABEL entry, so commenting a case out of LABEL drops it from
+    every figure.  (write_merged still archives all approaches.)"""
+    return [a for a in all_approaches(data) if a in LABEL]
 
 
 FIELDS = ["approach", "size_bytes", "iters",
@@ -88,7 +96,7 @@ def write_merged(data, path):
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)
         w.writerow(FIELDS)
-        for a in approaches_in(data):
+        for a in all_approaches(data):
             for _, r in data[a]:
                 w.writerow([r.get(k, "") for k in FIELDS])
     print(f"[plot] merged -> {path}")
@@ -171,8 +179,8 @@ def plot_panel(data, outpath, figsize, metric, yscale="log"):
 
     fig.tight_layout()
     handles, labels = axL.get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=min(len(labels), 3),
-               fontsize=LEGEND_SIZE, framealpha=0.9, bbox_to_anchor=(0.5, 1.0))
+    fig.legend(handles, labels, loc="lower center", ncol=2,
+               fontsize=LEGEND_SIZE, frameon=False, bbox_to_anchor=(0.5, 1.0))
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"[plot] wrote {outpath}")
@@ -220,8 +228,9 @@ def main():
     ap = argparse.ArgumentParser(description="Plot StateSync-remote results")
     ap.add_argument("--csv", nargs="+", default=None,
                     help="result CSVs (default: *_results.csv in cwd)")
-    ap.add_argument("--outdir", default="figs")
-    ap.add_argument("--format", default="png", choices=["png", "pdf", "svg"])
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "Graph")))
+    ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--figsize", default="9,3")
     ap.add_argument("--metric", choices=["mean", "p50"], default="mean")
     ap.add_argument("--yscale", choices=["linear", "log"], default="log",

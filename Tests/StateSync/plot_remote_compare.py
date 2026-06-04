@@ -31,10 +31,10 @@ DEFAULT_OURS = os.path.join(HERE, "results_remote.csv")
 # rdma-shm rows from OUR results CSV so they show as a distinct group.
 KEEP = ["redis-remote", "cloudburst-warm", "rdma-shm", "rdma-shm-ours"]
 LABEL = {
-    "redis-remote":    "Redis (remote)",
-    "cloudburst-warm": "Cloudburst",
-    "rdma-shm":        "Shared memory + RDMA",
-    "rdma-shm-ours":   "WasMem",
+    "redis-remote":    "Pheromone (Redis remote)",
+    "cloudburst-warm": "Cloudburst (Redis local)",
+    "rdma-shm":        "RTSFaaS (Shared memory + RDMA)",
+    "rdma-shm-ours":   "WasMem (Shared memory + RDMA)",
 }
 COLOR = {"redis-remote": "#e8843c", "cloudburst-warm": "#6a4c93",
          "rdma-shm": "#1d7a3e", "rdma-shm-ours": "#2057c7"}
@@ -98,8 +98,8 @@ def main():
                     help="committed remote results (redis-remote + reference rdma-shm)")
     ap.add_argument("--ours-csv", default=DEFAULT_OURS,
                     help="our measured rdma-shm (results_remote.csv)")
-    ap.add_argument("--outdir", default=os.path.join(HERE, "figs"))
-    ap.add_argument("--format", default="png", choices=["png", "pdf", "svg"])
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Graph")))
+    ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--metric", choices=["mean", "p50"], default="mean")
     ap.add_argument("--figsize", default="9,3")
     args = ap.parse_args()
@@ -124,7 +124,7 @@ def main():
         axL.plot([idx[s] for s in xs], [float(data[a][s][f"lat_{m}_us"]) for s in xs], **style(a))
     axL.set_yscale("log")
     axis(axL, sizes)
-    axL.set_ylabel(f"{stat} one-way latency (µs, log)", fontsize=YLABEL_SIZE)
+    axL.set_ylabel(f"{stat} latency (µs, log)", fontsize=YLABEL_SIZE)
 
     for a in aps:                                  # right: throughput
         xs = sorted(data[a])
