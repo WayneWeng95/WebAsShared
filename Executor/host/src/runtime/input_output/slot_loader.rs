@@ -219,6 +219,75 @@ impl SlotLoader {
         Ok((count, consumed))
     }
 
+    /// Load a **line-aligned fractional slice** `[lo, hi)` of `path` into `slot`.
+    ///
+    /// Used for data-parallel sharding: every node stages the FULL file but each
+    /// processes only its fraction, so the union across N nodes covers the file
+    /// exactly once (result == single-node, not N×) and per-node SHM holds only
+    /// `file_len/N` of input.
+    ///
+    /// `lo`/`hi` are fractions in `[0, 1]` (clamped).  The byte window
+    /// `[lo·len, hi·len)` is snapped to line boundaries with the canonical
+    /// MapReduce split rule: a node owns the lines that **begin** within its
+    /// window.  Concretely the real start advances past the next `\n` after
+    /// `lo·len` (unless `lo·len == 0`), and the real end advances past the next
+    /// `\n` after `hi·len` (unless `hi·len` is already EOF).  Because adjacent
+    /// nodes share the boundary (`hi_i == lo_{i+1}`), every line is read by
+    /// exactly one node — no splits, gaps, or overlaps.
+    pub fn load_slice(&self, path: &Path, slot: u32, lo: f64, hi: f64) -> Result<usize> {
+        let loaded = mmap_file(path).map_err(|e| anyhow!("SlotLoader: {}", e))?;
+        let data = loaded.as_bytes();
+        let total = data.len();
+        if total == 0 {
+            return Ok(0);
+        }
+
+        let frac_to_byte = |f: f64| -> usize {
+            ((f.clamp(0.0, 1.0)) * total as f64).floor() as usize
+        };
+        // First byte at or after `p` that starts a fresh line: the byte just past
+        // the next `\n` (or EOF if none).  `p == 0` is already a line start.
+        let next_line_start = |p: usize| -> usize {
+            if p == 0 { return 0; }
+            if p >= total { return total; }
+            match data[p..].iter().position(|&b| b == b'\n') {
+                Some(rel) => p + rel + 1,
+                None => total,
+            }
+        };
+
+        let raw_start = frac_to_byte(lo);
+        let raw_end = frac_to_byte(hi);
+        let start = next_line_start(raw_start);
+        let end = if raw_end >= total { total } else { next_line_start(raw_end) };
+
+        if start >= end {
+            println!(
+                "[SlotLoader] slice '{}' [{:.4}..{:.4}) → bytes [{}..{}) EMPTY → slot {}",
+                path.display(), lo, hi, start, end.max(start), slot,
+            );
+            return Ok(0);
+        }
+
+        let mut count = 0usize;
+        for line in data[start..end].split(|&b| b == b'\n').filter(|l| !l.is_empty()) {
+            self.append_record(slot, line)?;
+            count += 1;
+        }
+        println!(
+            "[SlotLoader] slice '{}' [{:.4}..{:.4}) → bytes [{}..{}) ({} bytes, {} records) → slot {}",
+            path.display(), lo, hi, start, end, end - start, count, slot,
+        );
+        Ok(count)
+    }
+
+    /// Spawn a background thread to load a fractional slice into `slot`
+    /// (slice-aware variant of [`prefetch`](Self::prefetch)).
+    pub fn prefetch_slice(splice_addr: usize, path: PathBuf, slot: u32, lo: f64, hi: f64) -> PrefetchHandle {
+        let handle = thread::spawn(move || SlotLoader::new(splice_addr).load_slice(&path, slot, lo, hi));
+        PrefetchHandle { slot, handle }
+    }
+
     /// Memory-map `path` and write the entire file as a single record into
     /// `slot`.  Use for binary payloads where line-splitting is inappropriate.
     pub fn load_as_single_record(&self, path: &Path, slot: u32) -> Result<()> {

@@ -353,19 +353,33 @@ pub(super) fn execute_node(
                 };
                 // Fire off the load in a background thread; the executor will
                 // join this handle before the first node that lists us as a dep.
-                let handle = SlotLoader::prefetch(splice_addr, PathBuf::from(path), slot);
+                let handle = match p.slice {
+                    Some([lo, hi]) => {
+                        println!("  Input ← \"{}\" slot {} [prefetch started, slice {:.4}..{:.4}]", path, slot, lo, hi);
+                        log(&format!("input prefetch started: '{}' → slot {} slice {:.4}..{:.4}", path, slot, lo, hi));
+                        SlotLoader::prefetch_slice(splice_addr, PathBuf::from(path), slot, lo, hi)
+                    }
+                    None => {
+                        println!("  Input ← \"{}\" slot {} [prefetch started]", path, slot);
+                        log(&format!("input prefetch started: '{}' → slot {}", path, slot));
+                        SlotLoader::prefetch(splice_addr, PathBuf::from(path), slot)
+                    }
+                };
                 prefetch_handles.insert(node.id.clone(), handle);
-                println!("  Input ← \"{}\" slot {} [prefetch started]", path, slot);
-                log(&format!("input prefetch started: '{}' → slot {}", path, slot));
             } else {
                 let path = if !p.paths.is_empty() {
                     p.paths[run_index % p.paths.len()].as_str()
                 } else {
                     p.path.as_str()
                 };
-                let count = SlotLoader::new(splice_addr)
-                    .load(Path::new(path), slot)
-                    .map_err(|e| anyhow!("[{}] input load failed: {}", node.id, e))?;
+                let count = match p.slice {
+                    Some([lo, hi]) => SlotLoader::new(splice_addr)
+                        .load_slice(Path::new(path), slot, lo, hi)
+                        .map_err(|e| anyhow!("[{}] input slice load failed: {}", node.id, e))?,
+                    None => SlotLoader::new(splice_addr)
+                        .load(Path::new(path), slot)
+                        .map_err(|e| anyhow!("[{}] input load failed: {}", node.id, e))?,
+                };
                 println!("  Input ← \"{}\" slot {} ({} records)", path, slot, count);
                 log(&format!("input loaded '{}' → slot {} ({} records)", path, slot, count));
             }

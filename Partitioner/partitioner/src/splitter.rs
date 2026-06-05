@@ -68,7 +68,7 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
     let total_nodes = dag.total_nodes.unwrap_or(1).max(1);
     // ── 0. Expand placement:"all" nodes, then fanout nodes ───────────────────
     let (after_all, auto_shared_inputs) = expand_all_placements(dag.nodes.clone(), total_nodes);
-    let mut nodes: Vec<SymbolicNode> = expand_fanout(after_all);
+    let (mut nodes, fanout_worker_ids): (Vec<SymbolicNode>, HashSet<String>) = expand_fanout(after_all);
     // Hint priority: live hints (coordinator) > placement_policy > raw hints > default.
     let policy_hints: Option<PlacementHints> = dag.placement_policy.as_ref()
         .map(|p| policies::resolve_policy(p, total_nodes));
@@ -96,6 +96,14 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         effective_hints,
         dag.max_colocation,
     );
+
+    // ── 0a'. Data-parallel input sharding ─────────────────────────────────────
+    // Now that every node has a final machine, stamp each replicated `load`
+    // Input with a line-aligned fractional slice weighted by the map workers on
+    // its machine, so the N nodes process disjoint shards (result == 1×, not N×).
+    let shared_paths: HashSet<String> =
+        auto_shared_inputs.iter().map(|s| s.path.clone()).collect();
+    assign_input_slices(&mut nodes, total_nodes, &fanout_worker_ids, &shared_paths);
 
     // ── 0b. Slot assignment ───────────────────────────────────────────────────
     assign_slots(&mut nodes)?;
@@ -627,10 +635,15 @@ fn expand_all_placements(
 
 /// Expand nodes with `fanout: N` into N identical copies named `{id}_0` … `{id}_{N-1}`.
 /// Any other node listing the template id in its `deps` gets all N copies substituted in.
-fn expand_fanout(nodes: Vec<SymbolicNode>) -> Vec<SymbolicNode> {
+///
+/// Returns the expanded node list plus the set of ids that are fanout worker
+/// copies — used to weight each machine's data-parallel input slice by the
+/// number of map workers placed on it (see `assign_input_slices`).
+fn expand_fanout(nodes: Vec<SymbolicNode>) -> (Vec<SymbolicNode>, HashSet<String>) {
     // Map: template_id → list of expanded ids
     let mut expansions: HashMap<String, Vec<String>> = HashMap::new();
     let mut expanded: Vec<SymbolicNode> = Vec::new();
+    let mut worker_ids: HashSet<String> = HashSet::new();
 
     for node in nodes {
         if let Some(n) = node.fanout {
@@ -638,8 +651,9 @@ fn expand_fanout(nodes: Vec<SymbolicNode>) -> Vec<SymbolicNode> {
             expansions.insert(node.id.clone(), ids.clone());
             for id in ids {
                 let mut copy = node.clone();
-                copy.id = id;
+                copy.id = id.clone();
                 copy.fanout = None;
+                worker_ids.insert(id);
                 expanded.push(copy);
             }
         } else {
@@ -660,7 +674,71 @@ fn expand_fanout(nodes: Vec<SymbolicNode>) -> Vec<SymbolicNode> {
         node.deps = new_deps;
     }
 
-    expanded
+    (expanded, worker_ids)
+}
+
+/// Stamp each per-machine data-parallel `Input` replica with a line-aligned
+/// fractional `slice: [lo, hi]` so the N nodes together cover the file exactly
+/// once (result == single-node, not N×) and each node's SHM holds only its
+/// shard.  The slice width on machine `m` is proportional to the number of
+/// fanout map workers placed there: `weight_m = maps_on_m / total_maps`; the
+/// host resolves the fractions to byte offsets against the actual file at load
+/// time.  Only Inputs whose file is replicated to every node (`shared_paths`,
+/// i.e. `placement:"all"` inputs) are sliced; single-machine Inputs load whole.
+fn assign_input_slices(
+    nodes: &mut [SymbolicNode],
+    total_nodes: usize,
+    worker_ids: &HashSet<String>,
+    shared_paths: &HashSet<String>,
+) {
+    if total_nodes <= 1 || shared_paths.is_empty() {
+        return; // single node (or nothing replicated): load the whole file.
+    }
+
+    // Per-machine map-worker counts → weights.  Fall back to equal weights when
+    // the DAG has no fanout workers at all (uniform split).
+    let mut weights = vec![0.0f64; total_nodes];
+    for node in nodes.iter() {
+        if let (Some(m), true) = (node.node_id, worker_ids.contains(&node.id)) {
+            if (m as usize) < total_nodes {
+                weights[m as usize] += 1.0;
+            }
+        }
+    }
+    if weights.iter().all(|&w| w == 0.0) {
+        weights.iter_mut().for_each(|w| *w = 1.0);
+    }
+    let total_w: f64 = weights.iter().sum();
+    if total_w == 0.0 {
+        return;
+    }
+
+    // Cumulative fraction boundaries per machine: machine m owns [pre/W, (pre+w)/W).
+    let mut prefix = vec![0.0f64; total_nodes + 1];
+    for m in 0..total_nodes {
+        prefix[m + 1] = prefix[m] + weights[m];
+    }
+
+    for node in nodes.iter_mut() {
+        let Some(m) = node.node_id else { continue };
+        let m = m as usize;
+        let Some(input_obj) = node.kind.get("Input").and_then(|v| v.as_object()) else { continue };
+        let is_shared = input_obj
+            .get("path")
+            .and_then(|v| v.as_str())
+            .map(|p| shared_paths.contains(p))
+            .unwrap_or(false);
+        // Don't slice chunked/binary inputs — those have their own loading paths.
+        let special = input_obj.contains_key("chunk_bytes") || input_obj.contains_key("binary");
+        if !is_shared || special || m >= total_nodes {
+            continue;
+        }
+        let lo = prefix[m] / total_w;
+        let hi = prefix[m + 1] / total_w;
+        let mut new_in = input_obj.clone();
+        new_in.insert("slice".to_string(), json!([lo, hi]));
+        node.kind = json!({ "Input": Value::Object(new_in) });
+    }
 }
 
 // ── Unit tests ────────────────────────────────────────────────────────────────

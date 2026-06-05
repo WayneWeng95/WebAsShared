@@ -49,8 +49,10 @@ STATUS / OPEN ITEMS  (updated 2026-06-04)
 
 --- TODO (next, in order) -------------------------------------------------------
 
-[~] (1) CROSS-NODE AGGREGATE DROPS A NODE'S CONTRIBUTION  — ROOT-CAUSED + FIXED
-        (code change built; NOT yet verified on the cluster)
+[x] (1) CROSS-NODE AGGREGATE DROPS A NODE'S CONTRIBUTION  — FIXED & VERIFIED
+        (verified on the live 2-node cluster 2026-06-05: 2-node count is now
+         EXACTLY 2x the single-node corpus_xlarge baseline, per-word and in
+         total_occurrences 89,403,388 -> 178,806,776. Was 1x before the fix.)
     Symptom: 2-node word_count_auto_placement returns 1x (single-node) count,
     not the sum of both nodes. map_records_received=193 (= one node's 8 maps;
     both would be ~384). Per-word counts == single-node exactly.
@@ -80,12 +82,12 @@ STATUS / OPEN ITEMS  (updated 2026-06-04)
     fixes the latent stream-recv -> StreamPipeline case (it would have been
     freed prematurely too).
 
-    TODO tomorrow: re-run the 2-node cluster and confirm the count is now 2x
-    (placement:"all" replicates the full corpus to both nodes, so a correct
-    merge = 2x today; point (2) sharding then brings it back to 1x). Byte-count
-    logging already exists in remote/sender_initiated.rs (lines 57/113) but goes
-    to println -> hidden in captured multi-node stdout; if verification is
-    unclear, route those to a file or spawn the executor with live output.
+    VERIFIED 2026-06-05 on the live cluster (coordinator=node 0=receiver had the
+    fix; worker=node 1=pure sender, unaffected by the changed branch). Submitted
+    DAGs/symbolic_dag/word_count_auto_placement.json over corpus_xlarge (500 MiB).
+    Result EXACTLY 2x the single-node baseline (each node processes the full
+    corpus under placement:"all"; point (2) sharding then brings this back to 1x).
+    Baseline saved at TestOutput/wc_singlenode_xlarge.txt.
 
 [ ] (2) DATA-PARALLEL SHARDING (replication double-counts today)
     placement:"all" makes every node load + count the FULL corpus, so a working

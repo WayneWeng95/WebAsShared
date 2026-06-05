@@ -511,6 +511,15 @@ pub struct InputParams {
     /// chunks.  Loaded by the run loop, so `prefetch`/`binary` are ignored.
     #[serde(default)]
     pub chunk_bytes: Option<usize>,
+    /// **Data-parallel slice.**  `[lo, hi]` fractions in `[0, 1]`: load only the
+    /// line-aligned byte window `[lo·len, hi·len)` of the file (see
+    /// `SlotLoader::load_slice`) instead of the whole file.  Set by the
+    /// partitioner on each per-machine `load` replica so the N nodes together
+    /// cover the file exactly once (result == single-node, not N×) while each
+    /// node's SHM holds only its shard.  Honoured by the prefetch and plain
+    /// load paths; ignored when `chunk_bytes` or `binary` is set.
+    #[serde(default)]
+    pub slice: Option<[f64; 2]>,
 }
 
 /// One stage in a `WasmGrouping`.
