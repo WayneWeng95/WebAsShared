@@ -68,6 +68,33 @@ impl SlotFlusher {
         Ok(count)
     }
 
+    /// Write record *i* of `slot` to `paths[i % paths.len()]` — one file per
+    /// record — instead of concatenating every record into a single file.
+    ///
+    /// Use when a single run produces N records that should land in N separate
+    /// files (e.g. a Pipeline emitting one processed image per round).  Records
+    /// are written verbatim (no trailing `\n`, unlike `save_slot`, since these
+    /// are typically whole binary payloads).  Returns the number of records
+    /// written.  Paths that receive no record are left untouched.
+    pub fn save_slot_split(&self, paths: &[std::path::PathBuf], slot: u32) -> Result<usize> {
+        let records = self.collect_slot(slot);
+        if paths.is_empty() {
+            return Ok(0);
+        }
+        for (i, (_origin, rec)) in records.iter().enumerate() {
+            let path = &paths[i % paths.len()];
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)?;
+            }
+            fs::File::create(path)?.write_all(rec)?;
+            println!(
+                "[SlotFlusher] slot {} record {} ({} bytes) → {}",
+                slot, i, rec.len(), path.display()
+            );
+        }
+        Ok(records.len())
+    }
+
     /// Collect all records from the default `OUTPUT_IO_SLOT` into memory without writing to disk.
     pub fn collect(&self) -> Vec<(u32, Vec<u8>)> {
         self.collect_slot(OUTPUT_IO_SLOT)

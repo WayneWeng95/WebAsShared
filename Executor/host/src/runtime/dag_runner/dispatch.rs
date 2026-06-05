@@ -185,16 +185,27 @@ pub(super) fn execute_node(
         NodeKind::Output(p) => {
             use common::OUTPUT_IO_SLOT;
             let slot = p.slot.unwrap_or(OUTPUT_IO_SLOT);
-            let path = if !p.paths.is_empty() {
-                p.paths[run_index % p.paths.len()].as_str()
-            } else {
-                p.path.as_str()
-            };
             let outputer = SlotFlusher::new(splice_addr);
-            let count = outputer.save_slot(Path::new(path), slot)
-                .map_err(|e| anyhow!("[{}] output save failed: {}", node.id, e))?;
-            println!("  Output slot {} → \"{}\" ({} records)", slot, path, count);
-            log(&format!("output slot {} saved to \"{}\" ({} records)", slot, path, count));
+            if p.split_records && p.paths.len() >= 2 {
+                // One file per record: record i → paths[i].
+                let paths: Vec<PathBuf> = p.paths.iter().map(PathBuf::from).collect();
+                let count = outputer.save_slot_split(&paths, slot)
+                    .map_err(|e| anyhow!("[{}] output split save failed: {}", node.id, e))?;
+                println!("  Output slot {} → {} file(s), split per record ({} records)",
+                         slot, p.paths.len(), count);
+                log(&format!("output slot {} split across {} paths ({} records)",
+                             slot, p.paths.len(), count));
+            } else {
+                let path = if !p.paths.is_empty() {
+                    p.paths[run_index % p.paths.len()].as_str()
+                } else {
+                    p.path.as_str()
+                };
+                let count = outputer.save_slot(Path::new(path), slot)
+                    .map_err(|e| anyhow!("[{}] output save failed: {}", node.id, e))?;
+                println!("  Output slot {} → \"{}\" ({} records)", slot, path, count);
+                log(&format!("output slot {} saved to \"{}\" ({} records)", slot, path, count));
+            }
         }
 
         // ── FreeSlots: explicit slot reset between sequential pipeline runs ──

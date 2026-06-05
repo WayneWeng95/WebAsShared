@@ -442,6 +442,13 @@ pub struct OutputParams {
     /// Source I/O slot.  Defaults to `OUTPUT_IO_SLOT` when omitted.
     #[serde(default)]
     pub slot: Option<u32>,
+    /// When `true` (and `paths` has ≥2 entries) write record *i* of the slot to
+    /// `paths[i]` — one file per record — instead of cycling one path per run.
+    /// Use for a single run that produces N records (e.g. a Pipeline with N
+    /// rounds emitting N images): record 0 → paths[0], record 1 → paths[1], … .
+    /// Extra records beyond `paths.len()` wrap (`i % paths.len()`).
+    #[serde(default)]
+    pub split_records: bool,
 }
 
 /// Explicitly free a set of stream and/or I/O slots, returning their page

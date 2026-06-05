@@ -27,6 +27,46 @@ Input file
          Output file
 ```
 
+## Recent Improvements (2026-06)
+
+Distributed correctness, capacity-aware fan-out, metrics, and streaming fixes:
+
+- **Cross-node aggregation correctness.** A multi-node `Aggregate` no longer
+  drops a remote node's contribution. The receiver was freeing a stream
+  `RemoteRecv` slot one wave before the consuming `Aggregate` read it (the
+  "no-consumers" reclaim path only tracked I/O recvs); it now keeps any recv
+  slot alive until its real consumer runs. Verified on a 2-node cluster
+  (word-count is now exact).
+- **Data-parallel input sharding.** `placement:"all"` inputs are no longer
+  replicated-and-recounted on every node (which gave an N× result). Each node
+  loads only a **line-aligned fractional slice** of the file
+  (`SlotLoader::load_slice`, MapReduce split rule — every line read by exactly
+  one node), so N nodes produce the correct **1×** result in parallel with
+  per-node SHM ≈ corpus/N. Verified exact vs the single-node baseline.
+- **Capacity-weighted fan-out + core-budget cap.** `fanout: N` on a
+  `placement:"all"` node now means **N workers across the whole cluster**,
+  apportioned by per-host capacity (a host with 80% capacity gets 80% of the
+  workers *and* 80% of the input slice). A requested fan-out is also clamped to
+  the cluster's usable core budget (`Σ max(1, cores−reserve)`), so e.g.
+  `fanout:50` on a 2×16-core cluster is capped to 28. See
+  [`Tests/Fan_out_remote/`](Tests/Fan_out_remote/) for the fan-out sweep.
+- **Per-wave timing metrics.** The executor prints a per-run, per-wave compute
+  breakdown (`[DAG][timing]`), with cross-node file staging timed separately in
+  the node-agent worker so it's excluded from compute.
+- **Memory metric fix.** `rss_bytes` was measuring the node-agent daemon
+  (~4 MiB, flat). It now sums the **private** RSS of the whole executor process
+  tree (host + every fanned-out `wasm-call` worker — each with its own wasmtime
+  runtime, JIT'd guest, and guest heap), with shared SHM subtracted per process
+  and reported once via `shm_bump_offset` (so `total = rss_bytes +
+  shm_bump_offset`, no double-counting).
+- **Streaming output / demo fixes.** New `Output` `split_records` mode writes
+  record *i* → `paths[i]` (one file per record), fixing `img_pipeline_demo`
+  (3 images → 3 files). The `StreamPipeline`/`PyPipeline` engine itself was
+  verified correct. `dag_demo`'s `FileDispatch` wasm path was corrected.
+
+See [`problems.md`](problems.md) for remaining open items and
+[`docs/updates.md`](docs/updates.md) for the full change log.
+
 ## Documentation
 
 Subsystem design notes live in [`docs/`](docs/):

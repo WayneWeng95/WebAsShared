@@ -183,7 +183,7 @@
       "deps": [],
       "kind": {
         "FileDispatch": {
-          "path": "../target/wasm32-unknown-unknown/release/guest.wasm",
+          "path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
           "workers": 4,
           "policy": { "type": "Equal" }
         }
@@ -195,7 +195,7 @@
       "deps": [],
       "kind": {
         "FileDispatch": {
-          "path": "../target/wasm32-unknown-unknown/release/guest.wasm",
+          "path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
           "workers": 4,
           "policy": { "type": "FixedSize", "max_bytes": 16384 }
         }

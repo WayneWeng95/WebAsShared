@@ -4,8 +4,7 @@
   "shm_path": "/dev/shm/img_pipeline_demo",
   "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
   "log_level": "info",
-  "mode": "reset",
-  "runs": 3,
+  "runs": 1,
 
   "nodes": [
     {
@@ -47,7 +46,8 @@
           "TestOutput/img_pipeline_out/checkerboard_processed.pgm",
           "TestOutput/img_pipeline_out/rings_processed.pgm"
         ],
-        "slot": 1
+        "slot": 1,
+        "split_records": true
       }}
     },
 
