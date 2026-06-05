@@ -165,6 +165,40 @@ STATUS / OPEN ITEMS  (updated 2026-06-04)
     Multi-node: the breakdown is in each executor's stdout/log (captured); a
     future step could thread it into the JobCompleted summary.
 
+[x] (3b) RSS METRIC MEASURED WRONG PROCESS — FIXED
+    Symptom (user): RSS doesn't change during worker/coordinator execution.
+    Cause: metrics::sample_rss read /proc/SELF/status — the node-agent DAEMON's
+    RSS (~4 MiB, constant) — not the executor subprocess that mmaps the SHM and
+    runs the workloads. Coordinator also hardcoded executor_running=false AND its
+    main loop blocks in handle.wait() during its local run, so it sampled nothing
+    during execution.
+    Fix: sample() takes executor_pid; sample_rss reads /proc/<pid>/status (falls
+    back to self when idle/exited). Worker passes exec.pid(); `run` passes
+    handle.pid(); coordinator's local-executor section replaced the blocking
+    wait() with a try_wait() poll loop that samples (pid + shm_path) every
+    metrics interval and feeds scx_view. Touches metrics.rs, worker.rs, main.rs,
+    coordinator.rs (+ extract_shm_path made pub(crate)).
+    REFINED: rss_bytes now sums the PRIVATE resident memory (VmRSS − RssShmem)
+    of the WHOLE executor process TREE — host + every fanned-out `wasm-call`
+    worker (each carries its own wasmtime runtime + JIT'd guest + guest heap,
+    which dominate: measured ~985 MiB private across 10 workers vs ~76 MiB for
+    the host alone). SHM is subtracted from every process so it's counted ZERO
+    times here and ONCE in shm_bump_offset → total job memory = rss_bytes +
+    shm_bump_offset, no double-count. sample_rss walks /proc, builds the ppid
+    tree, BFS from executor_pid. (metrics.rs)
+    VERIFIED (single-node run, 524 MiB, 10 workers): rss_bytes grows 387→531 MiB
+    during the run (was flat ~4 MiB before any fix, 76 MiB with host-only),
+    shm_bump 549 MiB, total ~1.0–1.5 GiB. Worker/coordinator use the same code;
+    live-cluster confirmation pending node-agent restart (user).
+
+--- FAN-OUT SWEEP EXPERIMENT (2026-06-05) → Tests/Fan_out_remote/ -------------
+Evaluated fanout {5,10,15,20} × corpus {52MB,524MB,1GB} on the 2-node cluster
+(16 cores/node, new cluster-total fanout + cap=28). Correctness: total_occ
+constant across fanouts per corpus (1x). Perf: optimal fanout grows with input
+size — 52MB peaks at fanout 10 then regresses (spawn overhead), 524MB plateaus
+after 10, 1GB keeps improving through 20 (14.1s→11.6s). Matches the (5) ceiling
+intuition. Harness + README + results.csv under Tests/Fan_out_remote/.
+
 [ ] (4) bring comparable frameworks onto the table (benchmark baselines).
     (user: tracked as a SEPARATE benchmark case.)
 

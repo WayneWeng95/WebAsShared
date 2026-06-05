@@ -236,7 +236,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                     remove_staged_files(&mut current_staged_files, config.node_id);
 
                     // Send idle metrics so the coordinator's snapshot is up-to-date.
-                    let idle = collector.sample(None, false, None, None);
+                    let idle = collector.sample(None, false, None, None, None);
                     let _ = send_message(
                         &mut stream,
                         &make_message(MessageKind::Metrics, &idle)?,
@@ -250,6 +250,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                         true,
                         Some(&exec.job_id),
                         Some(exec.elapsed_ms()),
+                        Some(exec.pid()),
                     );
                     let _ = metrics::append_metrics_log(&config.metrics.log_path, &m);
 
@@ -279,7 +280,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
         } else {
             // Idle — still send periodic metrics so the coordinator has fresh data.
             if last_status_print.elapsed() >= status_interval {
-                let m = collector.sample(None, false, None, None);
+                let m = collector.sample(None, false, None, None, None);
                 print_worker_status(config.node_id, &m);
                 let _ = send_message(
                     &mut stream,
@@ -451,7 +452,7 @@ fn recv_rdma_input_share(
 }
 
 /// Extract shm_path from a DAG JSON string (best-effort).
-fn extract_shm_path(dag_json: &str) -> Option<String> {
+pub(crate) fn extract_shm_path(dag_json: &str) -> Option<String> {
     let v: serde_json::Value = serde_json::from_str(dag_json).ok()?;
     v.get("shm_path")?.as_str().map(|s| s.to_string())
 }

@@ -112,7 +112,7 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
         // Periodic cluster status printout.
         if last_status_print.elapsed() >= status_interval {
             let s = state.lock().unwrap();
-            let self_sample = self_metrics.sample(None, false, s.current_job_id.as_deref(), None);
+            let self_sample = self_metrics.sample(None, false, s.current_job_id.as_deref(), None, None);
             let heartbeat_timeout = Duration::from_secs(config.timeouts.health_check_s * 3);
             print_cluster_status(&s, &self_sample, expected_workers, heartbeat_timeout);
             drop(s);
@@ -364,7 +364,7 @@ fn handle_submit(
     let job_start = Instant::now();
     if let Some(my_dag) = per_node_dags.get(&config.node_id) {
         println!("[coordinator] launching local executor");
-        let handle = ExecutorHandle::spawn(
+        let mut handle = ExecutorHandle::spawn(
             Path::new(&config.paths.executor_bin),
             Path::new(&config.paths.executor_work_dir),
             my_dag,
@@ -372,8 +372,33 @@ fn handle_submit(
             false, // capture output in multi-node mode
         )?;
 
-        // Wait for local executor to complete.
-        let result = handle.wait()?;
+        // Poll until the local executor completes, sampling metrics each tick so
+        // RSS/SHM reflect THIS node's executor during the run (a blocking wait()
+        // would freeze the coordinator's own metrics for the whole job).
+        let exec_pid = handle.pid();
+        let shm_path = crate::worker::extract_shm_path(my_dag);
+        let mut collector = metrics::MetricsCollector::new(config.node_id);
+        let interval = Duration::from_millis(config.metrics.interval_ms);
+        let mut last_sample = Instant::now() - interval; // sample immediately
+        let result = loop {
+            if let Some(r) = handle.try_wait()? {
+                break r;
+            }
+            if last_sample.elapsed() >= interval {
+                let m = collector.sample(
+                    shm_path.as_deref(), true, Some(&job_id),
+                    Some(handle.elapsed_ms()), Some(exec_pid),
+                );
+                let _ = metrics::append_metrics_log(&config.metrics.log_path, &m);
+                {
+                    let mut s = state.lock().unwrap();
+                    s.scx_view.update(config.node_id, m.scx.clone(), m.cpu_usage_pct,
+                        m.rss_bytes, true, Some(job_id.clone()), m.timestamp_ms, m.cpu_cores);
+                }
+                last_sample = Instant::now();
+            }
+            thread::sleep(Duration::from_millis(50));
+        };
         let local_ms = result.duration_ms;
         if result.success {
             println!(

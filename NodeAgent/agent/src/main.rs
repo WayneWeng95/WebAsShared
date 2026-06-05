@@ -137,6 +137,7 @@ fn cmd_run(args: &[String]) -> Result<()> {
                 true,
                 Some(&job_id),
                 Some(handle.elapsed_ms()),
+                Some(handle.pid()),
             );
             let _ = metrics::append_metrics_log(&metrics_log, &m);
 
