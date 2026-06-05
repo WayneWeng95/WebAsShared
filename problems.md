@@ -49,34 +49,43 @@ STATUS / OPEN ITEMS  (updated 2026-06-04)
 
 --- TODO (next, in order) -------------------------------------------------------
 
-[ ] (1) CROSS-NODE AGGREGATE DROPS A NODE'S CONTRIBUTION  — BLOCKER
+[~] (1) CROSS-NODE AGGREGATE DROPS A NODE'S CONTRIBUTION  — ROOT-CAUSED + FIXED
+        (code change built; NOT yet verified on the cluster)
     Symptom: 2-node word_count_auto_placement returns 1x (single-node) count,
     not the sum of both nodes. map_records_received=193 (= one node's 8 maps;
     both would be ~384). Per-word counts == single-node exactly.
-    Isolated: node 2 gets the full corpus via RDMA staging (logs confirm) AND
-    its local pipeline produces the full count in slot 159 (reproduced
-    standalone). So both pipelines are fine; the loss is purely in the
-    cross-node path: node 2 aggregate_1 -> RemoteSend(slot 159) -> node 0
-    RemoteRecv(slot 161) -> aggregate_global. Node 0's aggregate_global sees
-    only its own local slot 158; slot 161 arrives empty.
-    NOTE: present in ALL runs (incl. before the distribute fix) — NOT caused by
-    the distribute/packing work. RDMA threads ARE joined per-wave (mod.rs:618),
-    and timing suggests node 0's recv did block ~2.1s for node 2, so it likely
-    received something — need the real byte counts.
-    LEADING HYPOTHESIS: slot 159 on node 2 is reclaimed after aggregate_1's wave
-    BEFORE RemoteSend reads it, so it sends 0 bytes. build_slot_refcounts /
-    node_owned_slots may not count a RemoteSend as a *reader* of its input slot
-    (only producers/owners are counted). The local repro kept 159 alive only
-    because I added a wc_reduce reader. CHECK: does reclamation keep a slot
-    alive for a RemoteSend that reads it? (plan.rs build_slot_refcounts +
-    node_owned_slots / node_routed_upstream_slots, and the post-wave reclaim in
-    mod.rs ~635).
-    NEED: executor stdout is hidden in multi-node (captured). To confirm, make
-    the coordinator/worker spawn the executor with live output (ExecutorHandle::
-    spawn live flag) OR log RemoteSend/Recv byte counts to a file, then re-run
-    and read "[RemoteSend-SI] slot 159: N bytes" / "[RemoteRecv-SI] slot 161:
-    N bytes". N==0 on send => reclamation/pipeline; N>0 but 161 empty => link/
-    merge bug.
+
+    ROOT CAUSE (was the OPPOSITE end from the old hypothesis — it's the
+    RECEIVER, node 0, not the sender):
+    The post-wave "RemoteRecv with no downstream consumers: free immediately"
+    branch in mod.rs gated on `remote_recv_dep_counts.contains_key(id)`, but
+    that map is built ONLY for Io-kind recvs (stream recvs deliberately
+    excluded, lines ~329-349). So for the STREAM recv `rr_aggregate_1_from_1`
+    (slot 161) the map never contains it -> the "no consumers" branch always
+    fired -> free_stream_slot(161) ran one wave AFTER recv, zeroing
+    writer_heads[161] and freeing the pages. Then aggregate_global's
+    chain_onto(160, 161) saw writer_heads[161]==0 and silently skipped it
+    (chain_splicer.rs:43) -> only slot 158 merged -> 1x. The 2.1s recv block
+    was REAL (node 0 did receive node 1's bytes); node 0 then threw them away.
+    The old "sender reclaims slot 159 / RemoteSend not counted as reader"
+    hypothesis was wrong: slot 159 is the Aggregate downstream, nothing in
+    node_owned_slots frees it, so it survives to RemoteSend intact.
+
+    FIX (mod.rs): added `remote_recv_has_consumer: HashSet<String>` over ALL
+    recv nodes (Stream + Io) with >=1 dep-consumer, and gated the immediate-free
+    branch on `!remote_recv_has_consumer.contains(id)` instead of the Io-only
+    map. A stream recv with a consumer is now left for that consumer to reclaim
+    (StreamPipeline via build_slot_refcounts, or Aggregate via
+    node_routed_upstream_slots -> clear_stream_slot after the merge). This also
+    fixes the latent stream-recv -> StreamPipeline case (it would have been
+    freed prematurely too).
+
+    TODO tomorrow: re-run the 2-node cluster and confirm the count is now 2x
+    (placement:"all" replicates the full corpus to both nodes, so a correct
+    merge = 2x today; point (2) sharding then brings it back to 1x). Byte-count
+    logging already exists in remote/sender_initiated.rs (lines 57/113) but goes
+    to println -> hidden in captured multi-node stdout; if verification is
+    unclear, route those to a file or spawn the executor with live output.
 
 [ ] (2) DATA-PARALLEL SHARDING (replication double-counts today)
     placement:"all" makes every node load + count the FULL corpus, so a working

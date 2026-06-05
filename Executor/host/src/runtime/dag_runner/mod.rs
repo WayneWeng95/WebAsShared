@@ -124,7 +124,7 @@ pub use types::*;
 
 use anyhow::{anyhow, Result};
 use serde_json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs::OpenOptions;
 use wasmtime::*;
 use crate::runtime::input_output::slot_loader::{PrefetchHandle, SlotLoader};
@@ -346,6 +346,31 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
             }
         }
         counts
+    };
+
+    // Set of RemoteRecv node ids that have at least one downstream consumer
+    // (any node listing them as a dep), for BOTH Stream and Io slot kinds.
+    //
+    // The deferred/immediate free logic below only tracks Io recvs in
+    // `remote_recv_dep_counts` (stream recvs are freed by whoever consumes
+    // them: a StreamPipeline via build_slot_refcounts, or an Aggregate via
+    // node_routed_upstream_slots → clear_stream_slot).  But the "no consumers,
+    // free immediately" branch must NOT fire for a stream recv that actually
+    // has a consumer — otherwise its slot is freed one wave before the consumer
+    // (e.g. aggregate_global) reads it, silently dropping the transferred data.
+    let remote_recv_has_consumer: HashSet<String> = {
+        let recv_ids: HashSet<&str> = dag.nodes.iter()
+            .filter_map(|n| matches!(n.kind, NodeKind::RemoteRecv(_)).then_some(n.id.as_str()))
+            .collect();
+        let mut s = HashSet::new();
+        for node in &dag.nodes {
+            for dep_id in &node.deps {
+                if recv_ids.contains(dep_id.as_str()) {
+                    s.insert(dep_id.clone());
+                }
+            }
+        }
+        s
     };
 
     // Build a map from each Input node's id to (slot, number_of_direct_consumers).
@@ -735,8 +760,12 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 }
 
                 // RemoteRecv with no downstream consumers: free immediately after it runs.
+                // A recv WITH consumers is freed by the consumer instead (Io: the deferred
+                // remote_recv_dep_remaining countdown above; Stream: the consuming
+                // StreamPipeline's refcount or the Aggregate's clear_stream_slot), so the
+                // slot stays alive until that consumer has read it.
                 if let NodeKind::RemoteRecv(p) = &node.kind {
-                    if !remote_recv_dep_counts.contains_key(node.id.as_str()) {
+                    if !remote_recv_has_consumer.contains(node.id.as_str()) {
                         match p.slot_kind {
                             RemoteSlotKind::Stream => {
                                 reclaimer::free_stream_slot(splice_addr, p.slot);
