@@ -127,15 +127,25 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                         let p: StageFilesPayload =
                             serde_json::from_value(msg.payload)
                                 .context("parse StageFiles payload")?;
+                        // Time staging separately so it can be excluded from
+                        // compute when comparing per-node timings (Point 3).
+                        let stage_start = Instant::now();
+                        let mut staged_bytes: usize = 0;
                         for f in &p.files {
                             if let Some(dir) = std::path::Path::new(&f.rel_path).parent() {
                                 std::fs::create_dir_all(dir).ok();
                             }
                             std::fs::write(&f.rel_path, &f.data)
                                 .with_context(|| format!("write staged file: {}", f.rel_path))?;
-                            println!("[worker {}] staged '{}'", config.node_id, f.rel_path);
+                            staged_bytes += f.data.len();
                             current_staged_files.push(f.rel_path.clone());
                         }
+                        println!(
+                            "[worker {}] staged {} file(s), {:.1} MiB in {:.1} ms (excluded from compute)",
+                            config.node_id, p.files.len(),
+                            staged_bytes as f64 / (1024.0 * 1024.0),
+                            stage_start.elapsed().as_secs_f64() * 1e3,
+                        );
                         send_message(
                             &mut stream,
                             &make_message(

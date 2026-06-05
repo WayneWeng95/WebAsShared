@@ -20,6 +20,11 @@ pub struct PlacementHints {
     /// Per-host max sandboxes. Absent host → 1.
     #[serde(default)]
     pub host_limit: HashMap<u32, usize>,
+    /// Per-host physical core count (from each node's reported `cpu_cores`).
+    /// Used to cap a requested `fanout` against the cluster core budget
+    /// (see `cap_fanout`).  Empty → no core data → fanout cap disabled.
+    #[serde(default)]
+    pub cores: HashMap<u32, usize>,
     /// When true, each auto-node is assigned to a uniformly random host.
     /// Dep-affinity and quota tracking are both skipped.
     #[serde(default)]
@@ -294,6 +299,7 @@ mod tests {
             capacity: cap.iter().cloned().collect(),
             host_limit: lim.iter().cloned().collect(),
             random: false,
+            ..Default::default()
         }
     }
 

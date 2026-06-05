@@ -66,10 +66,9 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
     // cluster size before partitioning; the standalone CLI defaults it.  Resolve
     // a concrete count here (≥1) and use it throughout.
     let total_nodes = dag.total_nodes.unwrap_or(1).max(1);
-    // ── 0. Expand placement:"all" nodes, then fanout nodes ───────────────────
-    let (after_all, auto_shared_inputs) = expand_all_placements(dag.nodes.clone(), total_nodes);
-    let (mut nodes, fanout_worker_ids): (Vec<SymbolicNode>, HashSet<String>) = expand_fanout(after_all);
     // Hint priority: live hints (coordinator) > placement_policy > raw hints > default.
+    // Resolved BEFORE expansion because capacity-aware fanout apportionment
+    // (expand_all_placements) needs the per-host capacity weights.
     let policy_hints: Option<PlacementHints> = dag.placement_policy.as_ref()
         .map(|p| policies::resolve_policy(p, total_nodes));
     let default_hints = policies::default_hints(total_nodes);
@@ -77,6 +76,14 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         .or(policy_hints.as_ref())
         .or(dag.hints.as_ref())
         .unwrap_or(&default_hints);
+
+    // ── 0. Expand placement:"all" nodes (capacity-aware fanout), then fanout ──
+    // A placement:"all" node with `fanout: N` splits N TOTAL workers across the
+    // cluster in proportion to capacity (so a node with 80% capacity gets 80% of
+    // the workers — and, via assign_input_slices, 80% of the input slice).
+    let (after_all, auto_shared_inputs) =
+        expand_all_placements(dag.nodes.clone(), total_nodes, effective_hints);
+    let (mut nodes, fanout_worker_ids): (Vec<SymbolicNode>, HashSet<String>) = expand_fanout(after_all);
 
     // ── 0a. Converge-on-coordinator: before auto-placement, pin the convergence
     // tail (Output + its single-chain auto ancestors up to the first fan-in)
@@ -559,9 +566,65 @@ fn dag_reachable(succ_map: &HashMap<String, Vec<String>>, start: &str, target: &
 ///
 /// Returns the expanded node list and any `SharedInput` entries auto-derived from
 /// `Input` nodes with `placement: "all"` (using source_node 0).
+/// Clamp a requested `fanout` to the cluster's usable core budget:
+/// `Σ_hosts max(1, cores_host − reserve)`, reserving
+/// `PARTITIONER_FANOUT_CORES_RESERVED_PER_HOST` cores per machine for the
+/// control plane.  Prevents an over-large `fanout` (e.g. 50 on a 2×16-core
+/// cluster) from spawning more workers than the cluster can usefully run.
+///
+/// Returns `n` unchanged when no per-host core data is available (e.g. the
+/// standalone CLI with no hints), so non-cluster partitioning is unaffected.
+fn cap_fanout(n: usize, total_nodes: usize, hints: &PlacementHints) -> usize {
+    if hints.cores.is_empty() {
+        return n;
+    }
+    let reserve = node_agent_common::PARTITIONER_FANOUT_CORES_RESERVED_PER_HOST;
+    let budget: usize = (0..total_nodes as u32)
+        .filter_map(|m| hints.cores.get(&m))
+        .map(|&c| c.saturating_sub(reserve).max(1))
+        .sum();
+    if budget == 0 { n } else { n.min(budget) }
+}
+
+/// Split `n` total fanout copies across `total_nodes` machines in proportion to
+/// per-host capacity, using the largest-remainder (Hamilton) method so the parts
+/// sum to EXACTLY `n`.  Empty/zero capacity → uniform split.  A host with
+/// negligible capacity may receive 0 (it then loads an empty input slice and
+/// contributes nothing — handled downstream by the empty-aggregate / 0-byte
+/// RemoteSend paths).
+fn apportion_fanout(n: usize, total_nodes: usize, hints: &PlacementHints) -> Vec<usize> {
+    if total_nodes <= 1 {
+        return vec![n; total_nodes];
+    }
+    let mut caps: Vec<f64> = (0..total_nodes as u32)
+        .map(|m| hints.capacity.get(&m).copied().unwrap_or(0.0))
+        .collect();
+    if caps.iter().sum::<f64>() <= 0.0 {
+        caps = vec![1.0; total_nodes]; // no capacity data → uniform
+    }
+    let sum: f64 = caps.iter().sum();
+    let raw: Vec<f64> = caps.iter().map(|c| c / sum * n as f64).collect();
+    let mut counts: Vec<usize> = raw.iter().map(|r| r.floor() as usize).collect();
+    let mut remainder = n - counts.iter().sum::<usize>();
+    // Hand the leftover (from flooring) to the largest fractional parts.
+    let mut order: Vec<usize> = (0..total_nodes).collect();
+    order.sort_by(|&a, &b| {
+        let fa = raw[a] - raw[a].floor();
+        let fb = raw[b] - raw[b].floor();
+        fb.partial_cmp(&fa).unwrap_or(std::cmp::Ordering::Equal)
+    });
+    for &i in &order {
+        if remainder == 0 { break; }
+        counts[i] += 1;
+        remainder -= 1;
+    }
+    counts
+}
+
 fn expand_all_placements(
     nodes: Vec<SymbolicNode>,
     total_nodes: usize,
+    hints: &PlacementHints,
 ) -> (Vec<SymbolicNode>, Vec<crate::symbolic_dag::SharedInput>) {
     use std::collections::HashSet;
 
@@ -591,11 +654,29 @@ fn expand_all_placements(
                 }
             }
 
+            // Capacity-aware fanout: first clamp the requested N to the cluster
+            // core budget, then split it across machines by capacity (Hamilton).
+            // Non-fanout "all" nodes are unaffected.
+            let per_machine_fanout = node.fanout.map(|n| {
+                let capped = cap_fanout(n, total_nodes, hints);
+                if capped < n {
+                    eprintln!(
+                        "[partitioner] fanout for '{}' capped {} → {} (cluster core budget, {} reserved/host)",
+                        node.id, n, capped,
+                        node_agent_common::PARTITIONER_FANOUT_CORES_RESERVED_PER_HOST,
+                    );
+                }
+                apportion_fanout(capped, total_nodes, hints)
+            });
+
             for machine in 0..total_nodes as u32 {
                 let mut copy = node.clone();
                 copy.id = format!("{}_{}", node.id, machine);
                 copy.node_id = Some(machine);
                 copy.placement = None;
+                if let Some(ref counts) = per_machine_fanout {
+                    copy.fanout = Some(counts[machine as usize]);
+                }
                 // Same-machine sibling rule for "all" → "all" deps.
                 copy.deps = node
                     .deps
@@ -749,6 +830,69 @@ mod tests {
     use crate::symbolic_dag::SymbolicDag;
 
     const WORD_COUNT_SYMBOLIC: &str = include_str!("../tests/word_count_symbolic.json");
+
+    fn input_node(id: &str, machine: u32, path: &str) -> SymbolicNode {
+        SymbolicNode {
+            id: id.to_string(), deps: vec![], node_id: Some(machine),
+            output_slot: None, fanout: None, placement: None, barrier_group: None,
+            kind: json!({ "Input": { "path": path } }),
+        }
+    }
+    fn map_node(id: &str, machine: u32) -> SymbolicNode {
+        SymbolicNode {
+            id: id.to_string(), deps: vec![], node_id: Some(machine),
+            output_slot: None, fanout: None, placement: None, barrier_group: None,
+            kind: json!({ "WasmVoid": { "func": "wc_map", "arg": 0 } }),
+        }
+    }
+
+    /// Slice widths must track the per-machine map-worker count, not 50/50.
+    /// 8 maps on node 0 + 2 on node 1 → slices [0,0.8] and [0.8,1.0].
+    #[test]
+    fn input_slices_weighted_by_map_count() {
+        let path = "corpus.txt";
+        let mut nodes = vec![input_node("load_0", 0, path), input_node("load_1", 1, path)];
+        let mut worker_ids = HashSet::new();
+        for i in 0..8 { let id = format!("map_0_{i}"); worker_ids.insert(id.clone()); nodes.push(map_node(&id, 0)); }
+        for i in 0..2 { let id = format!("map_1_{i}"); worker_ids.insert(id.clone()); nodes.push(map_node(&id, 1)); }
+        let shared: HashSet<String> = std::iter::once(path.to_string()).collect();
+
+        assign_input_slices(&mut nodes, 2, &worker_ids, &shared);
+
+        let slice_of = |n: &SymbolicNode| n.kind["Input"]["slice"].clone();
+        assert_eq!(slice_of(&nodes[0]), json!([0.0, 0.8]), "node 0 (8 maps) → 0.0..0.8");
+        assert_eq!(slice_of(&nodes[1]), json!([0.8, 1.0]), "node 1 (2 maps) → 0.8..1.0");
+    }
+
+    /// fanout is clamped to the cluster core budget (Σ max(1, cores-reserve)).
+    #[test]
+    fn fanout_capped_to_core_budget() {
+        let reserve = node_agent_common::PARTITIONER_FANOUT_CORES_RESERVED_PER_HOST;
+        let mut hints = PlacementHints::default();
+        hints.cores.insert(0, 16);
+        hints.cores.insert(1, 16);
+        // 2 hosts × (16 - reserve) usable cores.
+        let budget = 2 * (16 - reserve);
+        assert_eq!(cap_fanout(50, 2, &hints), budget, "over-large fanout clamped to budget");
+        assert_eq!(cap_fanout(8, 2, &hints), 8, "fanout under budget is untouched");
+        // No core data → never capped (standalone CLI).
+        assert_eq!(cap_fanout(50, 2, &PlacementHints::default()), 50);
+    }
+
+    /// Equal map counts → even split (current placement:"all" reality).
+    #[test]
+    fn input_slices_balanced_when_maps_even() {
+        let path = "corpus.txt";
+        let mut nodes = vec![input_node("load_0", 0, path), input_node("load_1", 1, path)];
+        let mut worker_ids = HashSet::new();
+        for m in 0..2 { for i in 0..8 { let id = format!("map_{m}_{i}"); worker_ids.insert(id.clone()); nodes.push(map_node(&id, m)); } }
+        let shared: HashSet<String> = std::iter::once(path.to_string()).collect();
+
+        assign_input_slices(&mut nodes, 2, &worker_ids, &shared);
+
+        assert_eq!(nodes[0].kind["Input"]["slice"], json!([0.0, 0.5]));
+        assert_eq!(nodes[1].kind["Input"]["slice"], json!([0.5, 1.0]));
+    }
 
     #[test]
     fn partition_word_count() {

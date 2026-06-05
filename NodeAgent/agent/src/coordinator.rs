@@ -208,6 +208,7 @@ fn handle_submit(
         let hints = PlacementHints {
             capacity: scheduler::cluster_capacity(&s.scx_view),
             host_limit: scheduler::host_limits(&s.scx_view),
+            cores: scheduler::host_cores(&s.scx_view),
             random: false,
         };
         (hints, live_ids)
@@ -710,9 +711,18 @@ fn resolve_dag(
             host_limit: live_ids.iter().take(effective).enumerate()
                 .filter_map(|(logical, phys)| capacity.host_limit.get(phys).map(|&l| (logical as u32, l)))
                 .collect(),
+            cores: live_ids.iter().take(effective).enumerate()
+                .filter_map(|(logical, phys)| capacity.cores.get(phys).map(|&c| (logical as u32, c)))
+                .collect(),
             random: capacity.random,
         };
-        let hints = if clamped.capacity.is_empty() { None } else { Some(&clamped) };
+        // Keep the hints if we have EITHER capacity weights (placement) or core
+        // counts (fanout cap) — core data is present even when SCX scheduling is not.
+        let hints = if clamped.capacity.is_empty() && clamped.cores.is_empty() {
+            None
+        } else {
+            Some(&clamped)
+        };
         let cluster_value = partitioner::partition(&symbolic, hints)
             .context("partition SymbolicDag")?;
         let cluster_json = serde_json::to_string(&cluster_value)?;

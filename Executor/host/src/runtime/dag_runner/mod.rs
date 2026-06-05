@@ -125,6 +125,7 @@ pub use types::*;
 use anyhow::{anyhow, Result};
 use serde_json;
 use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 use std::fs::OpenOptions;
 use wasmtime::*;
 use crate::runtime::input_output::slot_loader::{PrefetchHandle, SlotLoader};
@@ -468,8 +469,15 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         let mut input_dep_remaining = input_dep_counts.clone();
         let mut remote_recv_dep_remaining = remote_recv_dep_counts.clone();
 
+        // Per-wave timing (compute only — staging/file-replication happens in the
+        // node-agent worker before the executor is spawned, so it is already
+        // excluded from everything measured here).  See Point (3) in problems.md.
+        let compute_start = Instant::now();
+        let mut wave_times: Vec<(usize, std::time::Duration, usize)> = Vec::with_capacity(waves.len());
+
         // Run each wave
         for (wave_idx, wave) in waves.iter().enumerate() {
+            let wave_start = Instant::now();
             // 0. Reset barrier counters for groups active in this wave.
             {
                 let splice_addr = store.data().splice_addr;
@@ -783,6 +791,29 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
             // After all per-node reclamation in this wave, check whether the
             // free list has grown past the configured threshold and trim it.
             reclaimer::trim_free_list(splice_addr);
+
+            wave_times.push((wave_idx, wave_start.elapsed(), wave.len()));
+        }
+
+        // ── Per-wave timing summary (compute only, staging excluded) ───────────
+        let compute_ms = compute_start.elapsed().as_secs_f64() * 1e3;
+        println!("[DAG][timing] ── run #{} compute breakdown (staging excluded) ──", run_count);
+        for (wi, dur, n) in &wave_times {
+            let ms = dur.as_secs_f64() * 1e3;
+            let pct = if compute_ms > 0.0 { ms / compute_ms * 100.0 } else { 0.0 };
+            let slowest = waves[*wi].iter()
+                .map(|&i| dag.nodes[i].id.as_str())
+                .collect::<Vec<_>>().join(",");
+            let label = if slowest.len() > 60 { format!("{}…", &slowest[..60]) } else { slowest };
+            println!("[DAG][timing]   wave {:>2}: {:>8.2} ms ({:>4.1}%)  {} node(s)  [{}]",
+                     wi, ms, pct, n, label);
+        }
+        println!("[DAG][timing]   TOTAL compute: {:.2} ms across {} wave(s)", compute_ms, wave_times.len());
+        if let Some(ref lg) = logger {
+            lg.info("DAG", &format!("run #{} compute {:.2} ms across {} waves", run_count, compute_ms, wave_times.len()));
+            for (wi, dur, n) in &wave_times {
+                lg.info("DAG", &format!("  wave {} {:.2} ms {} nodes", wi, dur.as_secs_f64() * 1e3, n));
+            }
         }
 
         // Drain any orphaned prefetch handles.

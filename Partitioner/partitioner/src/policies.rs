@@ -139,6 +139,7 @@ fn named_hints(policy: &NamedPolicy, total_nodes: usize, per_host_limit: Option<
                 capacity: (0..total_nodes as u32).map(|i| (i, w)).collect(),
                 host_limit,
                 random: false,
+                ..Default::default()
             }
         }
 
@@ -158,6 +159,7 @@ fn named_hints(policy: &NamedPolicy, total_nodes: usize, per_host_limit: Option<
                     .collect(),
                 host_limit,
                 random: false,
+                ..Default::default()
             }
         }
 
@@ -169,6 +171,7 @@ fn named_hints(policy: &NamedPolicy, total_nodes: usize, per_host_limit: Option<
                 capacity: HashMap::new(),
                 host_limit: (0..total_nodes as u32).map(|i| (i, spread_limit)).collect(),
                 random: false,
+                ..Default::default()
             }
         }
 
@@ -176,6 +179,7 @@ fn named_hints(policy: &NamedPolicy, total_nodes: usize, per_host_limit: Option<
             capacity: HashMap::new(),
             host_limit: host_limit,
             random: true,
+            ..Default::default()
         },
     }
 }
@@ -196,7 +200,7 @@ fn weighted_hints(
     let host_limit = per_host_limit
         .map(|lim| (0..total_nodes as u32).map(|i| (i, lim)).collect())
         .unwrap_or_default();
-    PlacementHints { capacity, host_limit, random: false }
+    PlacementHints { capacity, host_limit, random: false, ..Default::default() }
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

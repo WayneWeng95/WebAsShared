@@ -103,6 +103,20 @@ pub fn host_limits(view: &ScxClusterView) -> HashMap<u32, usize> {
         .collect()
 }
 
+/// Return each host's raw physical core count (from its reported `cpu_cores`).
+///
+/// Unlike `host_limits` this does NOT discount for current CPU busy %, so it
+/// reflects the machine's full capacity.  Used to cap a requested `fanout`
+/// against the cluster core budget.  Hosts that reported 0 cores are omitted.
+pub fn host_cores(view: &ScxClusterView) -> HashMap<u32, usize> {
+    view.snapshots
+        .iter()
+        .filter_map(|(&id, status)| {
+            if status.cpu_cores == 0 { None } else { Some((id, status.cpu_cores as usize)) }
+        })
+        .collect()
+}
+
 /// Return per-host capacity weights normalized so they sum to 1.0.
 ///
 /// Capacity is `1.0 - load_score`, so 1.0 means fully idle and 0.0 means
@@ -347,6 +361,7 @@ mod tests {
             capacity: cluster_capacity(&view),
             host_limit: host_limits(&view),
             random: false,
+            ..Default::default()
         };
 
         // 5 auto-nodes; host 0 can take up to 7, host 1 up to 1.

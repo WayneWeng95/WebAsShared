@@ -4,4 +4,4 @@ pub mod advisor;
 
 pub use scx_client::{ScxNodeSnapshot, ScxNumaStats, ScxStatsClient};
 pub use scx_cluster::{NodeStatus, ScxClusterView};
-pub use advisor::{cluster_capacity, host_limits, score_nodes};
+pub use advisor::{cluster_capacity, host_cores, host_limits, score_nodes};

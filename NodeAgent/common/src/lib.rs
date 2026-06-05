@@ -104,3 +104,10 @@ pub const ADVISOR_W_JOB_RUNNING: f64 = 0.25;
 /// pinned `node_id`s and per-machine (`placement: "all"`) nodes are untouched.
 /// A SymbolicDag may override this per-DAG via `"converge_on_coordinator": bool`.
 pub const PARTITIONER_CONVERGE_ON_COORDINATOR: bool = true;
+
+/// Cores reserved per host when capping a requested `fanout` against the
+/// cluster's physical core budget.  A node with `fanout: N` can never expand to
+/// more than `Σ_hosts max(1, cores_host − this)` workers, leaving headroom on
+/// every machine for the control plane (node-agent, RDMA threads, OS).  The
+/// requested fanout is clamped to that budget before capacity apportionment.
+pub const PARTITIONER_FANOUT_CORES_RESERVED_PER_HOST: usize = 2;
