@@ -45,3 +45,7 @@ removed from this file. One-line trace below; details are in git history.
 
 
 after the worker dropped, wait for 30s,if job submitted, excluding it from calculated the job partitioning. after 30s not responses make it out from the cluster for scheduling decision. (Do it later, not important now)
+
+Additional:
+
+Steaming workload fan-out scenarios. and how to deal with the locality awareness (maybe adding a hint mechanism so the user could give hints on which part may transfer less data and its better to consider break the topology here for multi-node deployment) for dealing with steam pipelines. 
