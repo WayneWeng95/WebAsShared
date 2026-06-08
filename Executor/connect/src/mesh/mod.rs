@@ -50,6 +50,14 @@ pub(in crate::mesh) const BASE_PORT:  u16 = 7490;
 pub(in crate::mesh) const MAX_NODES:  u16 = common::MAX_MESH_NODES as u16;
 /// Base TCP port for conn-2 (reverse-direction ctrl only).
 pub(in crate::mesh) const BASE_PORT2: u16 = BASE_PORT + MAX_NODES * MAX_NODES;
+/// Base TCP ports for the dedicated *streaming* control lane (conn-3 / conn-4).
+/// Used only by `StreamPipeline` / `PyPipeline` `rdma_send` / `rdma_recv`, so a
+/// pipelined transfer never shares a control stream with a concurrent
+/// `RemoteSend` / `RemoteRecv` / atomic between the same node pair (which would
+/// otherwise cross over — they are matched by arrival order, not identity).
+/// All non-streaming transfers keep using conn-1 / conn-2 unchanged.
+pub(in crate::mesh) const BASE_PORT3: u16 = BASE_PORT2 + MAX_NODES * MAX_NODES;
+pub(in crate::mesh) const BASE_PORT4: u16 = BASE_PORT3 + MAX_NODES * MAX_NODES;
 
 // ── Internal peer state ────────────────────────────────────────────────────────
 
@@ -59,6 +67,11 @@ pub(in crate::mesh) struct PeerLink {
     pub(in crate::mesh) ctrl_as_sender:   Arc<Mutex<TcpStream>>,
     /// TCP stream for when the PEER is the sender to us (conn-2).
     pub(in crate::mesh) ctrl_as_receiver: Arc<Mutex<TcpStream>>,
+    /// Dedicated *streaming* control streams (conn-3 / conn-4), used only by
+    /// pipeline `rdma_send` / `rdma_recv` so they never share a control stream
+    /// with a concurrent `RemoteSend` / `RemoteRecv` to the same peer.
+    pub(in crate::mesh) ctrl_as_sender_stream:   Arc<Mutex<TcpStream>>,
+    pub(in crate::mesh) ctrl_as_receiver_stream: Arc<Mutex<TcpStream>>,
     pub(in crate::mesh) remote_slot_addr: u64,  // base + self.id * SLOT_SIZE
     pub(in crate::mesh) remote_mr_base:   u64,  // full MR base
     pub(in crate::mesh) remote_rkey:      u32,
@@ -177,6 +190,31 @@ impl MeshNode {
             .unwrap_or_else(|| panic!("no connection to peer {}", peer_id));
         RecvChannel {
             ctrl: Arc::clone(&link.ctrl_as_receiver),
+        }
+    }
+
+    /// `send_channel` over the dedicated *streaming* control lane (conn-3/4).
+    /// Used by pipeline `rdma_send` so it never shares a control stream with a
+    /// concurrent `RemoteSend` to the same peer.  The QP and MR are shared with
+    /// the regular channel — only the control stream differs.
+    pub fn send_channel_stream(&self, peer_id: usize) -> SendChannel {
+        let link = self.peers.get(&peer_id)
+            .unwrap_or_else(|| panic!("no connection to peer {}", peer_id));
+        SendChannel {
+            ctrl:           Arc::clone(&link.ctrl_as_sender_stream),
+            qp:             Arc::clone(&link.qp),
+            remote_mr_base: link.remote_mr_base,
+            remote_rkey:    link.remote_rkey,
+            lkey:           self.mr.lkey(),
+        }
+    }
+
+    /// `recv_channel` over the dedicated *streaming* control lane (conn-3/4).
+    pub fn recv_channel_stream(&self, peer_id: usize) -> RecvChannel {
+        let link = self.peers.get(&peer_id)
+            .unwrap_or_else(|| panic!("no connection to peer {}", peer_id));
+        RecvChannel {
+            ctrl: Arc::clone(&link.ctrl_as_receiver_stream),
         }
     }
 

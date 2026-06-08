@@ -54,11 +54,24 @@ INPUT_IO_SLOT      = 0    # common::INPUT_IO_SLOT
 #   io_tails[512]        AtomicU64 @ 37024, size 4096
 #   barriers[64]         AtomicU32 @ 41120, size 256
 _SB_BUMP         = 4
+_SB_REGISTRY_LOCK = 16     # registry_lock  AtomicU32 @ 16
+_SB_NEXT_ATOMIC  = 20      # next_atomic_idx AtomicU32 @ 20
 _SB_WRITER_HEADS = 160
 _SB_WRITER_TAILS = 16544
 _SB_IO_HEADS     = 32928
 _SB_IO_TAILS     = 37024
 _SLOT_STRIDE     = 8       # bytes per slot atomic (was 4 before widening to u64)
+
+# Named-atomic registry + arena (must match common/src/lib.rs).
+#   REGISTRY_OFFSET    = SUPERBLOCK_SIZE                  (Superblock rounded to a page)
+#   ATOMIC_ARENA_OFFSET= REGISTRY_OFFSET + 1 MiB + 2 pages(RDMA scratch)
+# RegistryEntry (repr(C), 64 bytes): name[52] @0, index u32 @52, payload_* @56.
+# Atomic values are AtomicU64 at ATOMIC_ARENA_OFFSET + index*8.
+# These literals are verified against the live registry by Tests/Streaming.
+_REGISTRY_OFFSET     = 45056      # SUPERBLOCK_SIZE
+_ATOMIC_ARENA_OFFSET = 1101824    # REGISTRY_OFFSET + 1 MiB + 8 KiB
+_REG_ENTRY_SIZE      = 64
+_REG_NAME_LEN        = 52
 
 # Page layout (repr(C, align(4096))):
 #   next_offset u64 @ 0   (PageId — widened from u32 for extended-pool support)
@@ -116,6 +129,73 @@ def _read_bytes(off: int, n: int) -> bytes:
 def _write_bytes(off: int, data: bytes) -> None:
     _f.seek(off)
     _f.write(data)
+
+
+# ── Named atomics (registry) ──────────────────────────────────────────────────
+#
+# Mirrors the Rust guest `get_named_atomic` / host `host_resolve_atomic`: a name
+# is resolved to a u32 index into the atomic arena via a linear scan of the SHM
+# registry.  For `PyPipeline` the host pre-registers the per-slot read watermark
+# (`stream_hi_{slot}`) and cursor (`pipe_cursor_{slot}`) atomics before any
+# worker runs, so the lookup path is hit; a create fallback (best-effort, no
+# CAS) exists only for completeness and is not exercised under PyPipeline.
+
+_atomic_idx_cache = {}
+
+
+def _resolve_atomic(name: str) -> int:
+    """Resolve a named atomic to its arena index (registering it if absent)."""
+    cached = _atomic_idx_cache.get(name)
+    if cached is not None:
+        return cached
+    _init()
+    key = name.encode("ascii")[:_REG_NAME_LEN]
+    count = _ru32(_SB_NEXT_ATOMIC)
+    for i in range(count):
+        base = _REGISTRY_OFFSET + i * _REG_ENTRY_SIZE
+        nm = _read_bytes(base, _REG_NAME_LEN).split(b"\x00", 1)[0]
+        if nm == key:
+            idx = _ru32(base + _REG_NAME_LEN)
+            _atomic_idx_cache[name] = idx
+            return idx
+    # Create fallback (host normally pre-creates these for PyPipeline).
+    base = _REGISTRY_OFFSET + count * _REG_ENTRY_SIZE
+    _write_bytes(base, key.ljust(_REG_NAME_LEN, b"\x00"))
+    _wu32(base + _REG_NAME_LEN, count)        # index
+    _wu32(base + _REG_NAME_LEN + 4, 0)        # payload_offset
+    _wu32(base + _REG_NAME_LEN + 8, 0)        # payload_len
+    _wu32(_SB_NEXT_ATOMIC, count + 1)
+    _atomic_idx_cache[name] = count
+    return count
+
+
+def atomic_get(name: str) -> int:
+    """Read the u64 value of a named atomic."""
+    return _ru64(_ATOMIC_ARENA_OFFSET + _resolve_atomic(name) * 8)
+
+
+def atomic_set(name: str, value: int) -> None:
+    """Write the u64 value of a named atomic."""
+    _wu64(_ATOMIC_ARENA_OFFSET + _resolve_atomic(name) * 8, value)
+
+
+def pipe_read_window(in_slot: int, total: int):
+    """Per-stage read window for a PyPipeline consumer keyed by its input slot.
+
+    Returns `(start, end)` into `read_all_stream_records(in_slot)`.  `end` is
+    bounded by the host-published watermark `stream_hi_{in_slot}` (sentinel:
+    raw 0 = unset → unbounded), preventing a pipelined consumer from racing into
+    the next round's concurrently-produced records.  Mirrors the Rust
+    `pipe_read_window` in workloads/stream_pipeline.rs.
+    """
+    start = atomic_get("pipe_cursor_%d" % in_slot)
+    raw = atomic_get("stream_hi_%d" % in_slot)
+    end = total if raw == 0 else min(raw - 1, total)
+    return min(start, end), end
+
+
+def pipe_set_cursor(in_slot: int, end: int) -> None:
+    atomic_set("pipe_cursor_%d" % in_slot, end)
 
 
 # ── Page-chain reader ─────────────────────────────────────────────────────────

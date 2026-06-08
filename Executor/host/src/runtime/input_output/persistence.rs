@@ -224,6 +224,42 @@ pub(crate) fn read_io_records(base: usize, sb: &Superblock, slot: usize) -> Vec<
     read_chain_records(base, sb.io_heads[slot].load(Ordering::Acquire) as ShmOffset)
 }
 
+/// Counts the committed records in stream `slot` without copying payloads.
+///
+/// Walks the same length-prefixed page chain as [`read_stream_records`] but
+/// skips record bodies, so it is cheap enough to call once per slot per
+/// pipeline tick.  Used by `StreamPipeline` to publish a per-slot read
+/// watermark (the count committed *before* the current tick) so a consumer
+/// stage cannot race ahead into records the next round's producer is
+/// concurrently appending to the same slot.
+pub(crate) fn count_stream_records(base: usize, sb: &Superblock, slot: usize) -> usize {
+    count_chain_records(base, sb.writer_heads[slot].load(Ordering::Acquire) as ShmOffset)
+}
+
+/// Count-only variant of [`read_chain_records`]: walks the chain, reading each
+/// record's 4-byte length + 4-byte origin header and skipping the payload.
+fn count_chain_records(base: usize, head: ShmOffset) -> usize {
+    if head == 0 { return 0; }
+    let mut reader = PageReader::new(base, head);
+    let mut n = 0usize;
+    let mut scratch = [0u8; 512];
+    loop {
+        let mut len_buf = [0u8; 4];
+        if !reader.read(&mut len_buf) { break; }
+        let record_len = u32::from_le_bytes(len_buf) as usize;
+        let mut origin_buf = [0u8; 4];
+        if !reader.read(&mut origin_buf) { break; }
+        let mut remaining = record_len;
+        while remaining > 0 {
+            let take = remaining.min(scratch.len());
+            if !reader.read(&mut scratch[..take]) { return n; }
+            remaining -= take;
+        }
+        n += 1;
+    }
+    n
+}
+
 /// Core page-chain walker: given a `head` offset, returns every length-prefixed record as (origin, payload).
 fn read_chain_records(base: usize, head: ShmOffset) -> Vec<(u32, Vec<u8>)> {
     if head == 0 { return Vec::new(); }

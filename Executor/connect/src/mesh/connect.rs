@@ -22,8 +22,8 @@ use crate::rdma::memory_region::MemoryRegion;
 use crate::rdma::queue_pair::QueuePair;
 
 use super::{
-    BASE_PORT, BASE_PORT2, CQ_SIZE, GID_INDEX, MAX_NODES, RDMA_PORT, SLOT_SIZE,
-    MeshNode, PeerLink, rand_psn,
+    BASE_PORT, BASE_PORT2, BASE_PORT3, BASE_PORT4, CQ_SIZE, GID_INDEX, MAX_NODES,
+    RDMA_PORT, SLOT_SIZE, MeshNode, PeerLink, rand_psn,
 };
 
 impl MeshNode {
@@ -105,7 +105,11 @@ impl MeshNode {
         //   conn-2 (port BASE_PORT2 + node_id*MAX_NODES + j): plain TCP
         //          → our ctrl_as_receiver[j]
 
-        type ThreadMsg = Result<(usize, QueuePair, QpInfo, std::net::TcpStream, std::net::TcpStream)>;
+        // Tuple order: (j, qp, remote, ctrl_as_sender, ctrl_as_receiver,
+        //               ctrl_as_sender_stream, ctrl_as_receiver_stream).
+        type ThreadMsg = Result<(usize, QueuePair, QpInfo,
+            std::net::TcpStream, std::net::TcpStream,
+            std::net::TcpStream, std::net::TcpStream)>;
         let (tx, rx) = mpsc::channel::<ThreadMsg>();
 
         for j in (node_id + 1)..total {
@@ -113,21 +117,36 @@ impl MeshNode {
             let local_info = make_info(qp.qpn(), psn);
             let port1 = BASE_PORT  + node_id as u16 * MAX_NODES + j as u16;
             let port2 = BASE_PORT2 + node_id as u16 * MAX_NODES + j as u16;
+            // conn-3 → ctrl_as_sender_stream, conn-4 → ctrl_as_receiver_stream
+            // (dedicated streaming lane; both plain TCP like conn-2).
+            let port3 = BASE_PORT3 + node_id as u16 * MAX_NODES + j as u16;
+            let port4 = BASE_PORT4 + node_id as u16 * MAX_NODES + j as u16;
             let tx    = tx.clone();
 
             thread::spawn(move || {
-                let res = (|| -> Result<(usize, QueuePair, QpInfo, std::net::TcpStream, std::net::TcpStream)> {
+                let res = (|| -> Result<(usize, QueuePair, QpInfo,
+                    std::net::TcpStream, std::net::TcpStream,
+                    std::net::TcpStream, std::net::TcpStream)> {
                     let (tx2, rx2) = mpsc::channel::<Result<std::net::TcpStream>>();
                     thread::spawn(move || { tx2.send(exchange::server_ctrl_only(port2)).ok(); });
+                    let (tx3, rx3) = mpsc::channel::<Result<std::net::TcpStream>>();
+                    thread::spawn(move || { tx3.send(exchange::server_ctrl_only(port3)).ok(); });
+                    let (tx4, rx4) = mpsc::channel::<Result<std::net::TcpStream>>();
+                    thread::spawn(move || { tx4.send(exchange::server_ctrl_only(port4)).ok(); });
 
                     let (remote, ctrl_as_sender) = exchange::server_exchange(port1, &local_info)?;
                     let ctrl_as_receiver = rx2.recv()
                         .map_err(|_| anyhow!("ctrl-2 server thread died"))??;
+                    let ctrl_as_sender_stream = rx3.recv()
+                        .map_err(|_| anyhow!("ctrl-3 server thread died"))??;
+                    let ctrl_as_receiver_stream = rx4.recv()
+                        .map_err(|_| anyhow!("ctrl-4 server thread died"))??;
 
                     qp.to_init(RDMA_PORT)?;
                     qp.to_rtr(&remote, RDMA_PORT, GID_INDEX)?;
                     qp.to_rts(psn)?;
-                    Ok((j, qp, remote, ctrl_as_sender, ctrl_as_receiver))
+                    Ok((j, qp, remote, ctrl_as_sender, ctrl_as_receiver,
+                        ctrl_as_sender_stream, ctrl_as_receiver_stream))
                 })();
                 tx.send(res).ok();
             });
@@ -149,9 +168,15 @@ impl MeshNode {
             let local_info = make_info(qp.qpn(), psn);
             let port1 = BASE_PORT  + k as u16 * MAX_NODES + node_id as u16;
             let port2 = BASE_PORT2 + k as u16 * MAX_NODES + node_id as u16;
+            // conn-3 → ctrl_as_receiver_stream, conn-4 → ctrl_as_sender_stream
+            // (mirror of the server side's sender/receiver streaming split).
+            let port3 = BASE_PORT3 + k as u16 * MAX_NODES + node_id as u16;
+            let port4 = BASE_PORT4 + k as u16 * MAX_NODES + node_id as u16;
 
             let (remote, ctrl_as_receiver) = exchange::client_exchange(ips[k], port1, &local_info)?;
             let ctrl_as_sender = exchange::client_ctrl_only(ips[k], port2)?;
+            let ctrl_as_receiver_stream = exchange::client_ctrl_only(ips[k], port3)?;
+            let ctrl_as_sender_stream   = exchange::client_ctrl_only(ips[k], port4)?;
 
             qp.to_init(RDMA_PORT)?;
             qp.to_rtr(&remote, RDMA_PORT, GID_INDEX)?;
@@ -161,6 +186,8 @@ impl MeshNode {
                 qp:               Arc::new(Mutex::new(qp)),
                 ctrl_as_sender:   Arc::new(Mutex::new(ctrl_as_sender)),
                 ctrl_as_receiver: Arc::new(Mutex::new(ctrl_as_receiver)),
+                ctrl_as_sender_stream:   Arc::new(Mutex::new(ctrl_as_sender_stream)),
+                ctrl_as_receiver_stream: Arc::new(Mutex::new(ctrl_as_receiver_stream)),
                 remote_slot_addr: remote.addr + (node_id * SLOT_SIZE) as u64,
                 remote_mr_base:   remote.addr,
                 remote_rkey:      remote.rkey,
@@ -169,11 +196,14 @@ impl MeshNode {
 
         // Collect server thread results.
         for msg in rx {
-            let (j, qp, remote, ctrl_as_sender, ctrl_as_receiver) = msg?;
+            let (j, qp, remote, ctrl_as_sender, ctrl_as_receiver,
+                 ctrl_as_sender_stream, ctrl_as_receiver_stream) = msg?;
             peers.insert(j, PeerLink {
                 qp:               Arc::new(Mutex::new(qp)),
                 ctrl_as_sender:   Arc::new(Mutex::new(ctrl_as_sender)),
                 ctrl_as_receiver: Arc::new(Mutex::new(ctrl_as_receiver)),
+                ctrl_as_sender_stream:   Arc::new(Mutex::new(ctrl_as_sender_stream)),
+                ctrl_as_receiver_stream: Arc::new(Mutex::new(ctrl_as_receiver_stream)),
                 remote_slot_addr: remote.addr + (node_id * SLOT_SIZE) as u64,
                 remote_mr_base:   remote.addr,
                 remote_rkey:      remote.rkey,

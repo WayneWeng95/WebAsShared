@@ -47,6 +47,79 @@ fn reset_guest_slot_cursor(splice_addr: usize, slot: usize, slot_kind: RemoteSlo
     // Atomic not yet registered — cursor is implicitly 0, nothing to reset.
 }
 
+// ─── Per-slot read watermark (per-round race guard) ───────────────────────────
+//
+// In the pipelined wave schedule, stage S (producing round R) and stage S+1
+// (consuming round R-1) run *concurrently* within a tick, and adjacent stages
+// share a fixed stream slot.  A consumer that reads "all records since its
+// cursor" would race ahead into the records the next round's producer is
+// concurrently appending to the same slot — scrambling the per-round boundary
+// (only the cumulative total survived).
+//
+// The host is the only party that runs sequentially *between* ticks, so it
+// publishes a per-slot watermark: before each tick's scatter it stores
+// `stream_hi_{slot}` = (committed record count of `slot` as of the tick start)
+// + 1.  Consumer stages read only up to that watermark, so they see exactly the
+// records their producer committed in previous ticks and never the round being
+// produced concurrently.  The `+1` is a sentinel: a raw value of 0 means
+// "unset" (non-pipeline callers), which the guest treats as unbounded — so the
+// same workload code is correct under both `WasmGrouping` (serial) and
+// `StreamPipeline` (pipelined).
+
+/// Find-or-create the named SHM atomic in the registry and return its arena
+/// index.  Mirrors the spinlock protocol of `host_resolve_atomic` (worker.rs)
+/// so a worker process resolving the same name lands on the same index.
+fn register_or_get_atomic(splice_addr: usize, name: &str) -> usize {
+    use std::sync::atomic::Ordering;
+    let mut key = [0u8; 52];
+    let src = name.as_bytes();
+    let n = src.len().min(52);
+    key[..n].copy_from_slice(&src[..n]);
+
+    let sb       = unsafe { &*(splice_addr as *const Superblock) };
+    let reg_base = (splice_addr + REGISTRY_OFFSET as usize) as *mut RegistryEntry;
+
+    while sb.registry_lock
+        .compare_exchange(0, 1, Ordering::Acquire, Ordering::Relaxed)
+        .is_err()
+    {
+        std::hint::spin_loop();
+    }
+    let count = sb.next_atomic_idx.load(Ordering::Relaxed);
+    let mut idx = u32::MAX;
+    for i in 0..count {
+        let e = unsafe { &*reg_base.add(i as usize) };
+        if e.name == key { idx = e.index; break; }
+    }
+    if idx == u32::MAX {
+        idx = count;
+        unsafe {
+            core::ptr::write(reg_base.add(count as usize), RegistryEntry {
+                name: key,
+                index: idx,
+                payload_offset: common::AtomicShmOffset::new(0),
+                payload_len: std::sync::atomic::AtomicU32::new(0),
+            });
+        }
+        sb.next_atomic_idx.store(count + 1, Ordering::Relaxed);
+    }
+    sb.registry_lock.store(0, Ordering::Release);
+    idx as usize
+}
+
+/// Store `val` into the atomic-arena slot at `idx`.
+fn store_atomic(splice_addr: usize, idx: usize, val: u64) {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let ptr = (splice_addr + atomic_shm_offset(idx) as usize) as *mut AtomicU64;
+    unsafe { (*ptr).store(val, Ordering::Release) };
+}
+
+/// Committed record count of stream `slot` (cheap, count-only chain walk).
+fn slot_record_count(splice_addr: usize, slot: usize) -> usize {
+    let sb = unsafe { &*(splice_addr as *const Superblock) };
+    crate::runtime::input_output::persistence::count_stream_records(splice_addr, sb, slot)
+}
+
 // ─── StreamPipeline executor ──────────────────────────────────────────────────
 
 /// Execute a `StreamPipeline` node.
@@ -111,6 +184,23 @@ pub(super) fn execute_stream_pipeline(
         rounds, depth, slot_chain.join(" › "), depth
     );
 
+    // ── Per-round race guard: per-slot read watermarks ────────────────────────
+    // Each consumer stage reads its input slot (`arg0`) bounded by a watermark
+    // the host refreshes every tick.  Register the watermark + per-slot cursor
+    // atomics once and reset them to 0 so this run starts clean (correct for
+    // multi-run / Reset mode, where the same fixed slots are reused).
+    let mut hi_idx: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut cursor_idx: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for stage in &params.stages {
+        let slot = stage.arg0;
+        let cur = register_or_get_atomic(splice_addr, &format!("pipe_cursor_{}", slot));
+        store_atomic(splice_addr, cur, 0);
+        cursor_idx.insert(slot, cur);
+        let hi = register_or_get_atomic(splice_addr, &format!("stream_hi_{}", slot));
+        store_atomic(splice_addr, hi, 0);
+        hi_idx.insert(slot, hi);
+    }
+
     let ts = || {
         use std::time::{SystemTime, UNIX_EPOCH};
         let ms = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().subsec_millis();
@@ -137,7 +227,7 @@ pub(super) fn execute_stream_pipeline(
             if let (Some(rdma), Some(m)) = (&params.rdma_recv, mesh) {
                 if tick == 0 {
                     println!("    [{}] tick {} waiting for rdma_recv round 0 ...", node_id, tick);
-                    let ch = m.recv_channel(rdma.peer);
+                    let ch = m.recv_channel_stream(rdma.peer);
                     execute_remote_recv(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol, m)
                         .map_err(|e| anyhow!("[{}] rdma_recv tick 0: {}", node_id, e))?;
                     println!("    [{}] rdma_recv round 0 into slot {} done  (+{}ms)", node_id, rdma.slot, ts());
@@ -196,6 +286,18 @@ pub(super) fn execute_stream_pipeline(
             .collect();
         println!("    [{}] tick {} stages: [{}]", node_id, tick, stage_desc.join(", "));
 
+        // ── Publish read watermarks (BEFORE scatter, so they reflect the
+        //    pre-tick committed counts).  A consumer of round R thus sees only
+        //    the records its producer committed in earlier ticks, never round
+        //    R+1 that the producer appends concurrently in this tick.
+        for &(s_idx, _) in &active {
+            let slot = params.stages[s_idx].arg0;
+            if let Some(&hi) = hi_idx.get(&slot) {
+                let cnt = slot_record_count(splice_addr, slot as usize);
+                store_atomic(splice_addr, hi, cnt as u64 + 1); // +1 sentinel: 0 = unset
+            }
+        }
+
         // Scatter: write all commands first — workers wake and run concurrently.
         for &(s_idx, a1) in &active {
             workers[s_idx].send(params.stages[s_idx].arg0, a1)
@@ -223,7 +325,7 @@ pub(super) fn execute_stream_pipeline(
                     let slot   = buf_slot.unwrap(); // set above when free_after
                     let sk     = rdma.slot_kind;
                     let proto  = rdma.protocol;
-                    let ch        = m.send_channel(rdma.peer);
+                    let ch        = m.send_channel_stream(rdma.peer);
                     let mesh_arc  = m.clone();
                     let node_s    = node_id.to_string();
                     let tid       = tick;
@@ -245,7 +347,7 @@ pub(super) fn execute_stream_pipeline(
                     // Synchronous send (free_after=false — slot accumulates
                     // across rounds; background send would race with stages).
                     println!("    [{}] tick {} sending rdma_send round {} ...", node_id, tick, round);
-                    let ch = m.send_channel(rdma.peer);
+                    let ch = m.send_channel_stream(rdma.peer);
                     execute_remote_send(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol, m)
                         .map_err(|e| anyhow!("[{}] rdma_send tick {}: {}", node_id, tick, e))?;
                     println!("    [{}] rdma_send round {} from slot {} done  (+{}ms)",
@@ -267,11 +369,20 @@ pub(super) fn execute_stream_pipeline(
                     RemoteSlotKind::Io     => reclaimer::free_io_slot(splice_addr, rdma.slot),
                 }
                 reset_guest_slot_cursor(splice_addr, rdma.slot, rdma.slot_kind);
+                // The recv slot is freed and refilled with exactly the next round
+                // each tick, so a watermark-based consumer (pipe_read_window) must
+                // also restart its window from 0 — otherwise its `pipe_cursor`
+                // keeps climbing while the slot count resets, and every round
+                // after the first reads an empty window.  (No-op for read_next
+                // stages, which use the cursor reset just above.)
+                if let Some(&cur) = cursor_idx.get(&(rdma.slot as u32)) {
+                    store_atomic(splice_addr, cur, 0);
+                }
 
                 let slot   = rdma.slot;
                 let sk     = rdma.slot_kind;
                 let proto  = rdma.protocol;
-                let ch        = m.recv_channel(rdma.peer);
+                let ch        = m.recv_channel_stream(rdma.peer);
                 let mesh_arc  = m.clone();
                 let node_s    = node_id.to_string();
                 let nr        = next_round;
@@ -369,6 +480,22 @@ pub(super) fn execute_py_pipeline(
         rounds, depth, slot_chain.join(" › "), depth
     );
 
+    // ── Per-round race guard: per-slot read watermarks (see execute_stream_pipeline).
+    // PyPipeline stages read their input slot `arg`; refresh `stream_hi_{arg}`
+    // each tick to the pre-scatter committed count so a Python consumer cannot
+    // race ahead into the next round's concurrently-produced records.
+    let mut hi_idx: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    let mut cursor_idx: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+    for stage in &params.stages {
+        let slot = stage.arg;
+        let cur = register_or_get_atomic(splice_addr, &format!("pipe_cursor_{}", slot));
+        store_atomic(splice_addr, cur, 0);
+        cursor_idx.insert(slot, cur);
+        let hi = register_or_get_atomic(splice_addr, &format!("stream_hi_{}", slot));
+        store_atomic(splice_addr, hi, 0);
+        hi_idx.insert(slot, hi);
+    }
+
     let ts = || {
         use std::time::{SystemTime, UNIX_EPOCH};
         SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().subsec_millis()
@@ -386,7 +513,7 @@ pub(super) fn execute_py_pipeline(
             if let (Some(rdma), Some(m)) = (&params.rdma_recv, mesh) {
                 if tick == 0 {
                     println!("    [{}] tick {} waiting for rdma_recv round 0 ...", node_id, tick);
-                    let ch = m.recv_channel(rdma.peer);
+                    let ch = m.recv_channel_stream(rdma.peer);
                     execute_remote_recv(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol, m)
                         .map_err(|e| anyhow!("[{}] rdma_recv tick 0: {}", node_id, e))?;
                     println!("    [{}] rdma_recv round 0 into slot {} done  (+{}ms)", node_id, rdma.slot, ts());
@@ -439,6 +566,15 @@ pub(super) fn execute_py_pipeline(
             .collect();
         println!("    [{}] tick {} stages: [{}]", node_id, tick, stage_desc.join(", "));
 
+        // Publish read watermarks BEFORE scatter (pre-tick committed counts).
+        for &(s_idx, _) in &active {
+            let slot = params.stages[s_idx].arg;
+            if let Some(&hi) = hi_idx.get(&slot) {
+                let cnt = slot_record_count(splice_addr, slot as usize);
+                store_atomic(splice_addr, hi, cnt as u64 + 1); // +1 sentinel: 0 = unset
+            }
+        }
+
         // Scatter: write all commands first — workers wake and run concurrently.
         for &(s_idx, a2) in &active {
             workers[s_idx].call_async(&params.stages[s_idx].func, params.stages[s_idx].arg, a2)
@@ -464,7 +600,7 @@ pub(super) fn execute_py_pipeline(
                     let slot   = buf_slot.unwrap();
                     let sk     = rdma.slot_kind;
                     let proto  = rdma.protocol;
-                    let ch        = m.send_channel(rdma.peer);
+                    let ch        = m.send_channel_stream(rdma.peer);
                     let mesh_arc  = m.clone();
                     let node_s    = node_id.to_string();
                     let tid       = tick;
@@ -483,7 +619,7 @@ pub(super) fn execute_py_pipeline(
                 } else {
                     // Synchronous send (free_after=false).
                     println!("    [{}] tick {} sending rdma_send round {} ...", node_id, tick, round);
-                    let ch = m.send_channel(rdma.peer);
+                    let ch = m.send_channel_stream(rdma.peer);
                     execute_remote_send(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol, m)
                         .map_err(|e| anyhow!("[{}] rdma_send tick {}: {}", node_id, tick, e))?;
                     println!("    [{}] rdma_send round {} from slot {} done  (+{}ms)",
@@ -501,11 +637,16 @@ pub(super) fn execute_py_pipeline(
                     RemoteSlotKind::Io     => reclaimer::free_io_slot(splice_addr, rdma.slot),
                 }
                 reset_guest_slot_cursor(splice_addr, rdma.slot, rdma.slot_kind);
+                // Watermark consumer restart (see execute_stream_pipeline): the
+                // recv slot is refilled with exactly the next round each tick.
+                if let Some(&cur) = cursor_idx.get(&(rdma.slot as u32)) {
+                    store_atomic(splice_addr, cur, 0);
+                }
 
                 let slot   = rdma.slot;
                 let sk     = rdma.slot_kind;
                 let proto  = rdma.protocol;
-                let ch        = m.recv_channel(rdma.peer);
+                let ch        = m.recv_channel_stream(rdma.peer);
                 let mesh_arc  = m.clone();
                 let node_s    = node_id.to_string();
                 let nr        = next_round;

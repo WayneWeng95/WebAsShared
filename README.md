@@ -60,9 +60,23 @@ Distributed correctness, capacity-aware fan-out, metrics, and streaming fixes:
   and reported once via `shm_bump_offset` (so `total = rss_bytes +
   shm_bump_offset`, no double-counting).
 - **Streaming output / demo fixes.** New `Output` `split_records` mode writes
-  record *i* → `paths[i]` (one file per record), fixing `img_pipeline_demo`
-  (3 images → 3 files). The `StreamPipeline`/`PyPipeline` engine itself was
-  verified correct. `dag_demo`'s `FileDispatch` wasm path was corrected.
+  record *i* → `paths[i]` (one file per record). `dag_demo`'s `FileDispatch`
+  wasm path was corrected, and `img_pipeline_demo.json` was un-broken (it used a
+  removed `Pipeline` node kind → now a `StreamPipeline`, output verified
+  byte-identical to the non-pipelined baseline).
+
+- **StreamPipeline / PyPipeline per-round race fixed + tested.** The
+  software-pipelined schedule runs stage *S* (producing round *R*) concurrently
+  with stage *S+1* (consuming round *R-1*) on a shared stream slot; consumers
+  that read "all records since their cursor" raced into the next round's
+  concurrently-appended records, so per-round batching was non-deterministic
+  (only the cumulative total survived). The host now publishes a per-slot read
+  watermark (`stream_hi_{slot}` = the pre-tick committed count) before each
+  tick's scatter, and consumers bound their read to it (`pipe_read_window`);
+  cursors are keyed by input slot so they reset between runs. Same fix on the
+  Python path. New [`Tests/Streaming/`](Tests/Streaming/) asserts per-round
+  correctness against analytic **and** non-pipelined baselines, determinism,
+  slot lifecycle, reset/multi-run, `split_records`, and Rust/Python parity.
 
 See [`problems.md`](problems.md) for remaining open items and
 [`docs/updates.md`](docs/updates.md) for the full change log.
