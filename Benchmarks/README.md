@@ -14,7 +14,7 @@ benchmarks/
 ├── RTSFaaS/      MediaReview, SocialNetwork   (+ Env/ configs, dir.sh)
 ├── Cloudburst/   predserving.py, mobilenet.py, summa.py   (+ utils.py, server.py)
 ├── Roadrunner/   image-resize, fanout-wasm, fanout-container
-└── Faasm/        README.md only — workloads live in external experiment-* repos
+└── Faasm/        README.md only — ATC '20 evaluation code not present locally
 ```
 
 | System | Copied workloads | Domain |
@@ -23,7 +23,7 @@ benchmarks/
 | **RTSFaaS** | MediaReview, SocialNetwork | transactional stateful apps |
 | **Cloudburst** | predserving, mobilenet, summa | ML serving + distributed matmul |
 | **Roadrunner** | image-resize, fanout-wasm, fanout-container | Wasm data delivery |
-| **Faasm** | *(none local)* | HPC / MPI / OpenMP / SGX |
+| **Faasm** | *(none local)* | Wasm stateful serverless: ML + Python runtime + cold-start |
 
 ## Notes on the copies (dependencies)
 

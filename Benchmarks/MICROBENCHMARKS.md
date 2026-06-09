@@ -101,18 +101,24 @@ measurement harnesses are documented here.
 
 ---
 
-## Faasm — external `experiment-*` repos (nothing to copy locally)
+## Faasm — ATC '20 evaluation (nothing to copy locally)
 
-The local `faasm/` checkout contains only unit/dist **tests** (`tests/`), not the paper workloads.
-The actual workloads live in separate repositories referenced from `faasm/docs/index.rst`:
+The local `faasm/` checkout contains only unit/dist **tests** (`tests/`), not the paper workloads —
+and it is the later GRANNY-era codebase, not the ATC '20 evaluation code. None of Faasm's workloads
+could be copied. See `benchmarks/Faasm/README.md` for the full per-§ breakdown and headline results;
+the items below are the parts of the ATC '20 evaluation that are *micro-benchmark*-shaped.
 
-| Repo | Category | Workloads |
-|------|----------|-----------|
-| `experiment-microbench` | **Micro-benchmark** | C++ and Python micro-benchmarks isolating runtime/host-interface overhead (function call, state access, chaining). |
-| `experiment-mpi` | Application (HPC) | MPI: LAMMPS (molecular dynamics) + ParRes Kernels. |
-| `experiment-openmp` | Application (HPC) | OpenMP: CovidSim + LULESH + ParRes Kernels. |
-| `experiment-sgx` | Application | SGX image-processing pipeline. |
+| Workload (paper §) | Category | What it measures |
+|--------------------|----------|------------------|
+| **Polybench/C** (§6.4b) | **Micro-benchmark** | ~22 compute kernels compiled to WebAssembly — per-kernel runtime overhead vs. native, isolating the Wasm/Faaslet execution cost from any state movement. |
+| **Python Performance Benchmarks** (§6.4c) | **Micro-benchmark** | ~23 CPython benchmarks run inside a Faaslet vs. native CPython — dynamic-language runtime overhead. |
+| **Faaslet vs. container cold-start** (§6.5) | **Micro-benchmark** | No-op init: init time, CPU cycles, PSS/RSS footprint, and host capacity for Docker vs. Faaslets vs. Proto-Faaslets (plus a Python no-op restoring a pre-initialised CPython snapshot). |
 
-Only `experiment-microbench` is a micro-benchmark; the others are application workloads but are
-**not present in this tree**, so none of Faasm's workloads could be copied. See
-`benchmarks/Faasm/README.md` for the pointer details.
+The remaining ATC '20 experiments are **application workloads**, not micro-benchmarks: distributed
+**ML training** (HOGWILD! SGD on Reuters RCV1, §6.2), **ML inference** (TensorFlow Lite + MobileNet,
+§6.3), and divide-and-conquer **matrix multiplication** (Python + NumPy, §6.4a). They would belong in
+the copied-workloads set, but none are checked out locally.
+
+> Note: the GRANNY-era `faasm/experiment-*` repos referenced in `faasm/docs/index.rst`
+> (MPI/LAMMPS, OpenMP/CovidSim+LULESH, SGX) are a *newer, different* HPC workload set — **not** the
+> ATC '20 experiments — and are likewise not present in this tree.
