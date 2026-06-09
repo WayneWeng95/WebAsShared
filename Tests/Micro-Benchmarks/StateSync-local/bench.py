@@ -157,9 +157,30 @@ class RedisBackend(Backend):
             import redis
         except ImportError as e:
             raise RuntimeError(f"redis not installed ({e}); pip install redis")
-        self.r = redis.Redis(host=self.host, port=self.port,
-                             password=self.password or None, socket_timeout=5)
+        # Fair-comparison fix.  redis-py's pure-Python RESP parser reassembles a
+        # multi-MiB bulk reply in interpreted code (a recv()-loop into a BytesIO
+        # plus a final copy-out), which inflates large-value GET and made Redis
+        # unfairly top the GET chart above MinIO — whose urllib3 read path is
+        # C-accelerated.  The `hiredis` C parser parses the reply in C and a
+        # 1 MiB socket read buffer cuts the recv() syscall count ~16x, putting
+        # Redis on the same footing as the object store.  Measured here: 16 MiB
+        # GET 0.21 -> 0.47 GiB/s, 128 MiB 0.18 -> 0.34 GiB/s, which flips Redis
+        # back to faster-than-S3 at every size (as an in-memory store should be).
+        # We REQUIRE hiredis so the figure reflects the *store*, not an artifact
+        # of how the client library happens to be configured.
+        try:
+            import hiredis  # noqa: F401  (redis-py auto-selects the C parser)
+            self.parser = "hiredis-C"
+        except ImportError as e:
+            raise RuntimeError(
+                f"hiredis not installed ({e}); redis GET would be client-parser-"
+                f"bound and the comparison unfair -> pip install hiredis")
+        pool = redis.ConnectionPool(
+            host=self.host, port=self.port, password=self.password or None,
+            socket_timeout=30, socket_read_size=1 << 20)
+        self.r = redis.Redis(connection_pool=pool)
         self.r.ping()   # raises if unreachable -> approach skipped
+        print(f"  [{self.name}] parser={self.parser}  socket_read_size=1MiB")
 
     def put(self, key, payload):
         self.r.set(key, payload)

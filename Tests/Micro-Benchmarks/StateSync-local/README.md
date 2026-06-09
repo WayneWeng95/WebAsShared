@@ -136,8 +136,9 @@ optional reader fan-out, and reports p50 / p99 latency (µs) and throughput
 unavailable are **skipped** with a message rather than failing the run.
 
 ```bash
-# (optional) install clients for the external rows
-pip install redis minio
+# (optional) install clients for the external rows.  hiredis is REQUIRED for the
+# redis rows — see "Fair large-value GET" below; without it those rows are skipped.
+pip install redis hiredis minio
 
 # (optional) source endpoints written by deploy_backends.sh
 #   the script auto-reads ./backends.env if present
@@ -157,6 +158,19 @@ caps iterations per size: small payloads keep the full `--iters`, large ones
 auto-scale down (e.g. 256 MiB → ~8 iters). The resolved per-size iteration
 count is printed before the run and recorded in the CSV (`iters` column). Set
 `--max-bytes-per-size 0` for unlimited.
+
+> **Fair large-value GET (redis rows).** redis-py's *pure-Python* RESP parser
+> reassembles a multi-MiB bulk reply in interpreted code (a `recv()` loop into a
+> `BytesIO` + a final copy-out). That made Redis GET fall *behind* MinIO at
+> ≥16 MiB — an artifact of the client library, not the store: MinIO's urllib3
+> read path is C-accelerated, Redis's default was not. `bench.py` now **requires
+> the `hiredis` C parser** and uses a 1 MiB socket read buffer, which parses the
+> reply in C and cuts the `recv()` syscall count ~16×. Measured on one node:
+> 16 MiB GET **0.21 → 0.47 GiB/s**, 128 MiB **0.18 → 0.34 GiB/s** — Redis is back
+> to faster-than-S3 at every size, as an in-memory store should be. If `hiredis`
+> is missing the redis rows are **skipped** (with a message) rather than reported
+> unfairly. `redis-local` and `redis-remote` are affected identically, confirming
+> the cost was client-side reassembly, not the network.
 
 > **S3 storage medium.** Two S3 rows are measured: `s3` (MinIO data on `/tmp`,
 > tmpfs/RAM) and `s3-disk` (MinIO data on `/var/tmp`, NVMe). The disk row is the

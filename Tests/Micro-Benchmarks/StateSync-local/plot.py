@@ -43,12 +43,12 @@ plt.rcParams.update({
 # ── Approach presentation order + styling (gradient: remote -> local -> ours) ──
 ORDER = ["s3-disk", "s3", "redis-remote", "redis-local", "shm-copy", "shm-zerocopy"]
 LABEL = {
-    "s3-disk":      "S3 (disk)",
-    "s3":           "S3 (RAM)",
-    "redis-remote": "Redis (remote)",
-    "redis-local":  "Redis (local)",
-    "shm-copy":     "Shared memory (copy)",
-    "shm-zerocopy": "Shared memory (zero-copy)",
+    # "s3-disk":      "S3 (disk)",
+    "s3":           "AWS Step Functions (Minio/S3)",
+    "redis-remote": "SONIC (Redis remote)",
+    "redis-local":  "Cloudburst (Redis local)",
+    "shm-copy":     "Faasm (Shared memory copy)",
+    # "shm-zerocopy": "Roadrunner (Shared memory zero-copy)",
 }
 COLOR = {
     "s3-disk":      "#8c1d40",   # dark red
@@ -59,8 +59,12 @@ COLOR = {
     "shm-zerocopy": "#1d7a3e",   # green (ours)
 }
 MARKER = {
-    "s3-disk": "o", "s3": "s", "redis-remote": "^",
-    "redis-local": "v", "shm-copy": "D", "shm-zerocopy": "*",
+    "s3-disk": "o", 
+    "s3": "s", 
+    "redis-remote": "^",
+    "redis-local": "v", 
+    "shm-copy": "D", 
+    "shm-zerocopy": "*",
 }
 
 
@@ -105,8 +109,11 @@ def load(path, readers_filter):
 
 
 def approaches_in(data):
-    """ORDER first, then any extra approaches present in the CSV."""
-    return [a for a in ORDER if a in data] + [a for a in data if a not in ORDER]
+    """ORDER first, then any extra approaches present in the CSV — restricted to
+    those with a LABEL entry, so commenting out a LABEL line drops that approach
+    from every plot and legend (even if it's still in the CSV)."""
+    present = [a for a in ORDER if a in data] + [a for a in data if a not in ORDER]
+    return [a for a in present if a in LABEL]
 
 
 def style(a):
@@ -120,7 +127,8 @@ def plot_latency_panel(data, outpath, figsize, metric="mean"):
     all_sizes = sorted({s for a in data for s, _ in data[a]})
     idx = {s: i for i, s in enumerate(all_sizes)}
     fig, axes = plt.subplots(1, 2, figsize=figsize)
-    for ax, op in zip(axes, ("put", "get")):
+    op_label = {"get": "Read", "put": "Write"}
+    for ax, op in zip(axes, ("get", "put")):       # read (GET) left, write (PUT) right
         for a in approaches_in(data):
             xs = [idx[s] for s, _ in data[a]]
             val = [float(r[f"{op}_{metric}_us"]) for _, r in data[a]]
@@ -130,15 +138,21 @@ def plot_latency_panel(data, outpath, figsize, metric="mean"):
         ax.set_xticks(range(len(all_sizes)))
         ax.set_xticklabels([fmt_size(s) for s in all_sizes], fontsize=TICK_SIZE)
         ax.set_xlabel("state size")
-        ax.set_ylabel(f"{stat} {op.upper()} latency (µs, log)", fontsize=YLABEL_SIZE)
+        ax.set_ylabel(f"{stat} {op_label[op]} latency (µs, log)", fontsize=YLABEL_SIZE)
         ax.grid(True, which="both", ls=":", alpha=0.4)
     # Lay out the panels, then place one shared legend entirely ABOVE them
     # (its bottom edge anchored at the figure top) so it can't overlap the axes.
     # bbox_inches="tight" expands the saved canvas to include it.
     fig.tight_layout()
     handles, labels = axes[0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=3, fontsize=LEGEND_SIZE,
-               framealpha=0.9, bbox_to_anchor=(0.5, 1.0))
+    # Reorder into a column-major 2-col grid:  AWS | SONIC (top row),
+    #                                          Cloudburst | Faasm (bottom row).
+    legend_order = ["s3", "redis-local", "redis-remote", "shm-copy"]
+    rank = {LABEL[a]: i for i, a in enumerate(legend_order) if a in LABEL}
+    keys = sorted(range(len(labels)), key=lambda k: rank.get(labels[k], len(rank)))
+    handles, labels = [handles[k] for k in keys], [labels[k] for k in keys]
+    fig.legend(handles, labels, loc="lower center", ncol=2, fontsize=LEGEND_SIZE,
+               frameon=False, bbox_to_anchor=(0.5, 1.0))
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"[plot] wrote {outpath}")
@@ -159,7 +173,7 @@ def plot_throughput(data, op, outpath, figsize):
     ax.set_xlabel("state size")
     ax.set_ylabel(f"{op.upper()} throughput (GiB/s, log)", fontsize=YLABEL_SIZE)
     ax.grid(True, which="both", ls=":", alpha=0.4)
-    ax.legend(fontsize=LEGEND_SIZE, framealpha=0.9)
+    ax.legend(fontsize=LEGEND_SIZE, ncol=2, frameon=False)
     fig.tight_layout()
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -185,7 +199,7 @@ def plot_bars(data, op, outpath, figsize, metric="mean"):
     stat = "Mean" if metric == "mean" else "Median"
     ax.set_ylabel(f"{stat} {op.upper()} latency (µs, log)", fontsize=YLABEL_SIZE)
     ax.grid(True, axis="y", which="both", ls=":", alpha=0.4)
-    ax.legend(fontsize=LEGEND_SIZE, ncol=2, framealpha=0.9)
+    ax.legend(fontsize=LEGEND_SIZE, ncol=2, frameon=False)
     fig.tight_layout()
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close(fig)
@@ -199,8 +213,8 @@ def print_speedup(data, op, metric="mean", baseline="shm-zerocopy"):
     base = {s: float(r[f"{op}_{metric}_us"]) for s, r in data[baseline]}
     all_sizes = sorted({s for a in data for s, _ in data[a]})
     others = [a for a in approaches_in(data) if a != baseline]
-    print(f"\n=== {op.upper()} {metric} speedup of {LABEL[baseline]} vs others (×) ===")
-    hdr = f"{'size':>8}  " + "".join(f"{LABEL[a]:>22}" for a in others)
+    print(f"\n=== {op.upper()} {metric} speedup of {LABEL.get(baseline, baseline)} vs others (×) ===")
+    hdr = f"{'size':>8}  " + "".join(f"{LABEL.get(a, a):>22}" for a in others)
     print(hdr)
     for s in all_sizes:
         cells = []

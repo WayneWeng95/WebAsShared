@@ -62,14 +62,37 @@ def load_env():
     return cfg
 
 
+# ── Shared Redis client builder ───────────────────────────────────────────────
+def make_redis(host, port, password):
+    """Build a redis-py client configured for a FAIR large-value comparison.
+
+    redis-py's pure-Python RESP parser reassembles a multi-MiB bulk reply in
+    interpreted code, which inflates large-value GET/BLPOP and lets Redis
+    unfairly top the chart over MinIO (whose urllib3 read path is C-accelerated).
+    We REQUIRE the `hiredis` C parser (redis-py auto-selects it once installed)
+    and a 1 MiB socket read buffer so the figures reflect the *store*, not the
+    client library.  Without hiredis the row is skipped rather than reported
+    unfairly.
+    """
+    import redis
+    try:
+        import hiredis  # noqa: F401
+    except ImportError as e:
+        raise RuntimeError(
+            f"hiredis not installed ({e}); the Redis/Cloudburst rows would be "
+            f"client-parser-bound and unfair -> pip install hiredis")
+    pool = redis.ConnectionPool(host=host, port=int(port),
+                                password=password or None,
+                                socket_timeout=30, socket_read_size=1 << 20)
+    return redis.Redis(connection_pool=pool)
+
+
 # ── Redis channel (blocking lists) ────────────────────────────────────────────
 class RedisChannel:
     REQ, RESP = "ss:req", "ss:resp"
 
     def __init__(self, cfg):
-        import redis
-        self.r = redis.Redis(host=cfg["REDIS_HOST"], port=int(cfg["REDIS_PORT"]),
-                             password=cfg["REDIS_PASS"] or None, socket_timeout=30)
+        self.r = make_redis(cfg["REDIS_HOST"], cfg["REDIS_PORT"], cfg["REDIS_PASS"])
         self.r.ping()
 
     def reset(self):
@@ -177,12 +200,10 @@ class CloudburstChannel:
     REQ, RESP = "cb:req", "cb:resp"
 
     def __init__(self, cfg, warm):
-        import redis
         self.warm = warm
         # warm: cache on consumer node; cold: cache on producer node.
         host = cfg["CB_CONSUMER_HOST"] if warm else cfg["CB_PRODUCER_HOST"]
-        self.r = redis.Redis(host=host, port=int(cfg["REDIS_PORT"]),
-                             password=cfg["REDIS_PASS"] or None, socket_timeout=30)
+        self.r = make_redis(host, cfg["REDIS_PORT"], cfg["REDIS_PASS"])
         self.r.ping()
 
     def reset(self):

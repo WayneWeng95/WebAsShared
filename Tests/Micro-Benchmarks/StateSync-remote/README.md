@@ -59,6 +59,14 @@ remote study only needs the disk S3 and Redis, so bring them up on node B with:
 The RDMA approach needs no daemon — it uses the cluster's RDMA fabric directly
 via a small harness built on `connect::RdmaRemote` (see below).
 
+> **Fair large-value transfer (redis/cloudburst rows).** Install `hiredis`
+> alongside `redis` (`pip install redis hiredis minio`). The blocking-list
+> ping-pong carries the payload as a multi-MiB list element; redis-py's
+> pure-Python RESP parser reassembles it in interpreted code and unfairly
+> inflates the Redis/Cloudburst rows at ≥16 MiB. `bench_remote.py` now requires
+> the `hiredis` C parser + a 1 MiB socket read buffer (see the same note in
+> `../StateSync-local/README.md`); without `hiredis` those rows are skipped.
+
 ## Measurement model
 
 Latency is a **ping-pong round-trip on node A**, reported as one-way = RTT / 2

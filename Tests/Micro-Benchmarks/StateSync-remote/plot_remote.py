@@ -37,22 +37,36 @@ plt.rcParams.update({
 ORDER = ["s3-disk", "s3", "cloudburst-cold", "cloudburst-warm", "redis-remote", "rdma-shm"]
 LABEL = {
     # "s3-disk":         "Step Function (S3 disk)",
-    "s3":              "AWS Step Function (S3 RAM)",
-    "redis-remote":    "Pheromone (Redis remote)",
+    "s3":              "AWS Step Function (Minio/S3)",
+    "redis-remote":    "SONIC (Redis remote)",
     # "cloudburst-cold": "Cloudburst (Redis local)",
     "cloudburst-warm": "Cloudburst (Redis local)",
     "rdma-shm":        "RTSFaaS (RDMA shared memory)",
 }
 COLOR = {
-    "s3-disk": "#8c1d40", "s3": "#d1495b", "redis-remote": "#e8843c",
-    "cloudburst-cold": "#5b8fb9", "cloudburst-warm": "#6a4c93",
-    "rdma-shm": "#1d7a3e",
+    "s3-disk": "#8c1d40", "s3": "#d1495b", 
+    "redis-remote": "#e8843c",
+    "cloudburst-cold": "#5b8fb9", 
+    "cloudburst-warm": "#edae49",
+    "rdma-shm": "#2a9d8f",
 }
+# COLOR = {
+#     "s3-disk":      "#8c1d40",   # dark red
+#     "s3":           "#d1495b",   # red
+#     "redis-remote": "#e8843c",   # orange
+#     "redis-local":  "#edae49",   # amber
+#     "shm-copy":     "#2a9d8f",   # teal
+#     "shm-zerocopy": "#1d7a3e",   # green
+# }
 MARKER = {
-    "s3-disk": "o", "s3": "s", "redis-remote": "^",
-    "cloudburst-cold": "D", "cloudburst-warm": "X",
-    "rdma-shm": "*",
+    "s3-disk": "o", 
+    "s3": "s", 
+    "redis-remote": "^",
+    "cloudburst-cold": "*", 
+    "cloudburst-warm": "v",
+    "rdma-shm": "D",
 }
+
 
 
 def fmt_size(n):
