@@ -54,19 +54,19 @@ pip install --break-system-packages redis minio matplotlib
 
 # ── Step 3: Rust environment setup ──────────────────────────
 info "Setting up Rust environment..."
-source "$ROOT/scripts/rust.sh"
+source "$ROOT/Scripts/rust.sh"
 
 # ── Step 4: Install wasmtime (for Python/WASM execution) ───
 info "Installing wasmtime..."
-bash "$ROOT/scripts/install_wasmtime.sh"
+bash "$ROOT/Scripts/install_wasmtime.sh"
 
 # ── Step 5: Claude Code setup ──────────────────────────────
 info "Running Claude Code setup..."
-bash "$ROOT/scripts/claude-code-setup.sh"
+bash "$ROOT/Scripts/claude-code-setup.sh"
 
 # ── Step 6: Build all projects ──────────────────────────────
 info "Building all projects..."
-bash "$ROOT/build.sh"
+bash "$ROOT/Scripts/build.sh"
 
 echo ""
 info "Node initialization complete!"
