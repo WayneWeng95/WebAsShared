@@ -135,9 +135,111 @@ p50 / p99 and GiB/s. CSV schema (shared by both harnesses):
 ./plot_remote.py
 ```
 
+## Multi-node bandwidth (`rdma_bw`)
+
+`rdma_latency` measures a **ping-pong RTT/2** — its GiB/s is dragged below the
+wire because each transfer pays a host memcpy + a TCP done-signal in the timed
+path. `rdma_bw` is the bandwidth companion: it streams many **pipelined,
+one-directional** one-sided RDMA WRITEs (the `ib_write_bw` model — no per-write
+memcpy or TCP), so the number reflects the wire. It is built on the same
+`connect::RdmaRemote` primitive as the `rdma-shm` row.
+
+> **Hardware ceiling (measured on this cluster).** Each node has **one 10 GbE
+> experiment port** (ConnectX-3 Pro, `eno1d1`; `ethtool` tops out at
+> `10000baseKR` — there is no 40 G mode). So a single link maxes at **~1.13
+> GiB/s**, and the only way to show bandwidth *scaling* is multiple links whose
+> ports don't overlap. Loopback `ib_write_bw` and `rdma_bw` both hit ~3.8 GiB/s
+> (intra-HCA, PCIe-bound) — confirming the verbs path is not the limit.
+
+### Network lanes (both ports of the ConnectX-3 Pro)
+
+The card (`mlx4_0`) exposes **two physical 10 GbE ports**, but only one is a
+usable experiment fabric:
+
+| | Lane A | Lane B |
+|---|---|---|
+| netdev | `eno1` | `eno1d1` |
+| RDMA port | port 1 | **port 2** ← `rdma_bw` / `rdma_latency` use this (`RDMA_PORT=2`, `GID_INDEX=2`) |
+| IP / subnet | `128.110.218.1/21` | `10.10.1.2/24` |
+| role | control / management (SSH) | experiment fabric |
+| link mode | `10000baseKR`, ACTIVE/LinkUp | `10000baseKR`, ACTIVE/LinkUp |
+| wire speed | **10 Gb/s (~1.13 GiB/s)** | **10 Gb/s (~1.13 GiB/s)** |
+| RDMA loopback | 4.30 GiB/s (verbs/PCIe, intra-HCA) | 3.93 GiB/s (verbs/PCIe, intra-HCA) |
+| peers | 128.110.x (routed) | `10.10.1.{1,3,4}` all reachable |
+
+Both lanes are genuine 10 GbE — `ethtool` advertises nothing above `10000baseKR`
+on either, so neither has a 40 G mode. The two ports share one **PCIe 3.0 x8
+(~63 Gbps)** link, which has ample headroom for both at once (~20 Gbps ≈ 2.26
+GiB/s aggregate; one port already pushed ~31 Gbps in loopback) — the card is not
+the bottleneck. **But Lane A is the CloudLab control/management network**
+(different subnet, routed, carries SSH), not a clean isolated data fabric, so in
+practice each node has **one** experiment lane. To truly double per-node
+bandwidth you'd need CloudLab to provision a *second experiment LAN* and bind
+RDMA port 1 to it; absent that, per-node bandwidth is capped at one 10 GbE lane
+and aggregate scaling comes from **multiple nodes** (the disjoint-pairs pattern
+below), not dual-lane on a single node.
+
+> **What actually sets the ceiling.** It is the **10 GbE link rate of a single
+> port (~1.13 GiB/s)** — the only thing in the whole chain running at 10 Gb/s.
+> Everything upstream is far faster: PCIe 3.0 x8 (~63 Gbps) and the HCA/verbs
+> path (~31 Gbps, 3.8 GiB/s loopback). The *lanes* (the two ports) do not raise
+> or lower that per-link ceiling — they only set how many 10 G ceilings can run
+> in parallel (1 port ≈ 1.13 GiB/s; 2 ports ≈ 2.26 GiB/s aggregate, PCIe
+> permitting). So a single link can't go faster than its port's link rate; the
+> only way to grow aggregate bandwidth is to **add more independent 10 G links
+> across nodes** — each its own 1.13 GiB/s ceiling, and they sum. In short: the
+> port's link rate creates the ceiling; the number of lanes/nodes just
+> multiplies how many of those ceilings run at once.
+
+Build once: `cargo build --release -p connect --example rdma_bw`
+(binary at `../../../Executor/target/release/examples/rdma_bw`).
+
+Two composable roles — `recv` (sink) and `send` (source, one stream per IP,
+reports per-link + aggregate GiB/s, upserts into a shared `bw.csv` by `--tag`):
+
+```bash
+BW=../../../Executor/target/release/examples/rdma_bw
+
+# (1) pair — single-link line rate (expect ≈ 1.0–1.1 GiB/s, ~80–95% of 10 GbE)
+#   NODE B:  $BW recv 7900
+#   NODE A:  $BW send 10.10.1.1 --tag pair --csv bw.csv
+
+# (2) fan-out 1->N — one sender's egress port shared across N peers
+#     (aggregate stays ≈ one port; each peer ≈ 1/N)
+#   NODES B,C,D:  $BW recv 7900
+#   NODE  A:      $BW send 10.10.1.1 10.10.1.3 10.10.1.4 --tag fanout3 --csv bw.csv
+
+# (3) incast N->1 — N senders into one receiver's ingress port
+#     (each sender ≈ 1/N; SUM ≈ one port). Receiver accepts N on one port:
+#   NODE B:        $BW recv 7900 3
+#   NODES A,C,D:   $BW send 10.10.1.1 --tag incast --csv bw.csv
+#     (each sender writes its own 'incast'+host row; combine by summing per-size)
+
+# (4) disjoint pairs — the SCALING result: independent pairs on distinct nodes
+#     don't share a port, so aggregate ≈ P × single-link. Run two pairs at once:
+#   NODE B: $BW recv 7900     NODE D: $BW recv 7900
+#   NODE A: $BW send 10.10.1.1 --tag pairs2 --csv bw.csv
+#   NODE C: $BW send 10.10.1.4 --tag pairs2 --csv bw.csv   # sum the two ≈ 2.2 GiB/s
+
+# plot (NODE A): aggregate + per-link GiB/s vs size, with the 10 GbE ceiling line
+./plot_bw.py --csv bw.csv     # -> ../../Graph/bandwidth_remote.pdf, bandwidth_per_link.pdf
+```
+
+The story the figures tell: **fan-out / incast are capped at one port** (≈1.1
+GiB/s — the bottleneck is the shared node's NIC), while **disjoint pairs scale
+linearly** (each added pair adds ~1.1 GiB/s of fabric bandwidth). That contrast
+— not a faster single link — is how RDMA aggregate bandwidth grows with nodes on
+a 10 GbE-per-port fabric.
+
 ## Status
 
-Harness complete and validated (RDMA loopback + Redis/Cloudburst loopback;
-S3 wired). Real 3-node run collected for s3-disk, redis-remote, cloudburst, and
-rdma-shm. `plot_remote.py` merges all `*_results.csv` into `results.csv` and
-renders `figs/latency_throughput_remote.png` + `latency_remote_bars.png`.
+Latency harness complete and validated (RDMA loopback + Redis/Cloudburst
+loopback; S3 wired). Real 3-node run collected for s3-disk, redis-remote,
+cloudburst, and rdma-shm. `plot_remote.py` merges all `*_results.csv` into
+`results.csv` and renders `figs/latency_throughput_remote.png` +
+`latency_remote_bars.png`.
+
+Bandwidth harness (`rdma_bw` + `plot_bw.py`) built and validated on a single
+node: 1-stream loopback = 3.81 GiB/s @128 MiB (matches `ib_write_bw` 3.83); a
+2-stream run shares the HCA at 4.06 GiB/s aggregate / 2.03 each (the shared-port
+behavior fan-out will show cross-node). Ready for the 4-node run.

@@ -70,7 +70,15 @@ pub fn server_exchange(tcp_port: u16, local: &QpInfo) -> Result<(QpInfo, TcpStre
     let listener = TcpListener::bind(("0.0.0.0", tcp_port))
         .map_err(|e| anyhow!("bind {}:{}: {}", "0.0.0.0", tcp_port, e))?;
     println!("[exchange] server listening on :{}", tcp_port);
+    server_exchange_on(&listener, local)
+}
 
+/// Accept ONE client from an already-bound listener and swap QP info.
+///
+/// Lets a server accept multiple clients on a single port (call this once per
+/// expected client) — used by the multi-stream RDMA bandwidth benchmark's
+/// incast role.  Same wire protocol as [`server_exchange`].
+pub fn server_exchange_on(listener: &TcpListener, local: &QpInfo) -> Result<(QpInfo, TcpStream)> {
     let (mut stream, peer) = listener.accept()
         .map_err(|e| anyhow!("accept: {}", e))?;
     println!("[exchange] client connected from {}", peer);

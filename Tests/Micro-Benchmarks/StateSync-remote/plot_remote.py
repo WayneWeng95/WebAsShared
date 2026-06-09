@@ -167,29 +167,105 @@ def plot_throughput(data, outpath, figsize):
     print(f"[plot] wrote {outpath}")
 
 
-def plot_panel(data, outpath, figsize, metric, yscale="log"):
-    """Latency (left) + throughput (right) side by side, one shared legend on top."""
+# Approach whose throughput sits in the upper band of the broken axis (the one
+# that dwarfs the store-based rows).  The lower band holds everyone else.
+HIGH_BAND = "rdma-shm"
+
+# This cluster's per-port wire ceiling: ConnectX-3 Pro at 10 GbE (ethtool tops
+# out at 10000baseKR — no 40 G mode).  10 Gb/s / 8 / 1024^3 ≈ 1.16 GiB/s raw
+# line rate — the hardware bandwidth limit a single link can approach.
+PORT_CEILING_GIBPS = 10e9 / 8 / (1024 ** 3)
+
+
+def plot_panel(data, outpath, figsize, metric, yscale="log", ceiling=PORT_CEILING_GIBPS):
+    """Latency (left) + throughput (right) side by side, one shared legend on top.
+
+    The throughput axis is LINEAR with a *broken* y-axis: an upper band for the
+    high-bandwidth approach (`HIGH_BAND`) and a lower band — on its own expanded
+    scale — for the store-based rows, so every series is readable at its true
+    GiB/s instead of being compressed by a log axis.  Falls back to a single
+    linear axis if the two groups don't separate cleanly.
+    """
     all_sizes = sorted({s for a in data for s, _ in data[a]})
     idx = {s: i for i, s in enumerate(all_sizes)}
     stat = "Mean" if metric == "mean" else "Median"
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=figsize)
+    disp = approaches_in(data)
 
-    for a in approaches_in(data):                      # left: latency
-        xs = [idx[s] for s, _ in data[a]]
-        ys = [float(r[f"lat_{metric}_us"]) for _, r in data[a]]
-        axL.plot(xs, ys, **style(a))
+    def gibps(a):
+        return [float(r["gibps"]) for _, r in data[a]]
+
+    def xs_of(a):
+        return [idx[s] for s, _ in data[a]]
+
+    high_vals = [v for a in disp if a == HIGH_BAND for v in gibps(a)]
+    low_vals  = [v for a in disp if a != HIGH_BAND for v in gibps(a)]
+    # Only break the axis when the high series sits clearly above the rest.
+    can_break = bool(high_vals) and bool(low_vals) and min(high_vals) > max(low_vals) * 1.1
+
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.25], hspace=0.12, wspace=0.34)
+
+    # ── Left: latency (single axis, spans both rows) ──────────────────────────
+    axL = fig.add_subplot(gs[:, 0])
+    for a in disp:
+        axL.plot(xs_of(a), [float(r[f"lat_{metric}_us"]) for _, r in data[a]], **style(a))
     axL.set_yscale(yscale)
     _xaxis(axL, all_sizes)
     unit = "µs, log" if yscale == "log" else "µs"
     axL.set_ylabel(f"{stat} latency ({unit})", fontsize=YLABEL_SIZE)
 
-    for a in approaches_in(data):                      # right: throughput
-        xs = [idx[s] for s, _ in data[a]]
-        ys = [float(r["gibps"]) for _, r in data[a]]
-        axR.plot(xs, ys, **style(a))
-    axR.set_yscale("log")
-    _xaxis(axR, all_sizes)
-    axR.set_ylabel("Throughput (GiB/s, log)", fontsize=YLABEL_SIZE)
+    # ── Right: throughput (broken linear axis) ────────────────────────────────
+    if can_break:
+        axT = fig.add_subplot(gs[0, 1])                 # upper band: HIGH_BAND
+        axB = fig.add_subplot(gs[1, 1], sharex=axT)     # lower band: store rows
+        for ax in (axT, axB):
+            for a in disp:
+                ax.plot(xs_of(a), gibps(a), **style(a))
+            ax.grid(True, which="both", ls=":", alpha=0.4)
+        axB.set_ylim(0, max(low_vals) * 1.25)
+        top = max(high_vals) * 1.08
+        if ceiling and ceiling > 0:
+            top = max(top, ceiling * 1.16)             # headroom above the line
+        axT.set_ylim(min(high_vals) * 0.85, top)
+
+        # Machine bandwidth ceiling (10 GbE line rate).  Label sits just UNDER
+        # the dashed line, in the empty gap above the highest series, so it never
+        # collides with the top spine or the data points.
+        if ceiling and ceiling > 0:
+            axT.axhline(ceiling, ls="--", color="#777", lw=1.4)
+            axT.text(0.02, ceiling * 0.98, f"10 GbE line rate (~{ceiling:.2f} GiB/s)",
+                     color="black", fontsize=13, va="top", ha="left",
+                     transform=axT.get_yaxis_transform())
+
+        # Hide the facing spines / ticks and draw the diagonal break marks.
+        axT.spines["bottom"].set_visible(False)
+        axB.spines["top"].set_visible(False)
+        axT.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
+        axB.set_xticks(range(len(all_sizes)))
+        axB.set_xticklabels([fmt_size(s) for s in all_sizes], fontsize=TICK_SIZE)
+        axB.set_xlabel("state size")
+        d = 0.015
+        kw = dict(transform=axT.transAxes, color="k", clip_on=False, lw=1)
+        axT.plot((-d, +d), (-d, +d), **kw); axT.plot((1 - d, 1 + d), (-d, +d), **kw)
+        kw.update(transform=axB.transAxes)
+        axB.plot((-d, +d), (1 - d, 1 + d), **kw); axB.plot((1 - d, 1 + d), (1 - d, 1 + d), **kw)
+
+        # One y-label, centred on the break between the two bands.
+        axB.set_ylabel("Throughput (GiB/s)", fontsize=YLABEL_SIZE)
+        axB.yaxis.set_label_coords(-0.16, 1.04)
+    else:
+        axR = fig.add_subplot(gs[:, 1])
+        for a in disp:
+            axR.plot(xs_of(a), gibps(a), **style(a))
+        _xaxis(axR, all_sizes)
+        axR.set_ylabel("Throughput (GiB/s)", fontsize=YLABEL_SIZE)
+        if ceiling and ceiling > 0:
+            lo, hi = axR.get_ylim()
+            axR.set_ylim(lo, max(hi, ceiling * 1.16))
+            axR.axhline(ceiling, ls="--", color="#777", lw=1.4)
+            axR.text(0.02, ceiling * 0.98, f"10 GbE line rate (~{ceiling:.2f} GiB/s)",
+                     color="black", fontsize=13, va="top", ha="left",
+                     transform=axR.get_yaxis_transform())
 
     fig.tight_layout()
     handles, labels = axL.get_legend_handles_labels()
@@ -249,6 +325,9 @@ def main():
     ap.add_argument("--metric", choices=["mean", "p50"], default="mean")
     ap.add_argument("--yscale", choices=["linear", "log"], default="log",
                     help="y-axis for latency_remote (default log; linear emphasizes large-size blow-up)")
+    ap.add_argument("--ceiling-gibps", type=float, default=PORT_CEILING_GIBPS,
+                    help="machine bandwidth ceiling drawn on the throughput panel "
+                         "(default 10 GbE line rate ~1.16 GiB/s; 0 to hide)")
     ap.add_argument("--merged-csv", default="results.csv",
                     help="combined CSV to (re)write from the inputs; '' to skip")
     args = ap.parse_args()
@@ -272,7 +351,7 @@ def main():
     os.makedirs(args.outdir, exist_ok=True)
     ext = args.format
     plot_panel(data, os.path.join(args.outdir, f"latency_throughput_remote.{ext}"),
-               figsize, args.metric, args.yscale)
+               figsize, args.metric, args.yscale, args.ceiling_gibps)
     plot_bars(data, os.path.join(args.outdir, f"latency_remote_bars.{ext}"), figsize, args.metric)
     print_speedup(data, args.metric)
 

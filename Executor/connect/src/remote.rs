@@ -93,6 +93,22 @@ impl RdmaRemote {
         })
     }
 
+    /// **Server (multi-stream)**: accept one client from an already-bound
+    /// `TcpListener` and set up the RDMA connection.  Call once per expected
+    /// client to serve several streams on a single port (the bandwidth
+    /// benchmark's incast role).  Equivalent to [`serve`] but does not bind.
+    pub fn serve_on(listener: &std::net::TcpListener, state_size: usize) -> Result<Self> {
+        let (ctx, mr, qp, psn, local_info) = Self::setup_context(state_size)?;
+        let (remote, ctrl) = exchange::server_exchange_on(listener, &local_info)?;
+        Self::transition_qp(&ctx, &qp, psn, &remote)?;
+        Ok(RdmaRemote {
+            ctx, mr, qp, ctrl,
+            remote_addr: remote.addr,
+            remote_rkey: remote.rkey,
+            state_size,
+        })
+    }
+
     /// **Client**: connect to `host:tcp_port` and set up the RDMA connection.
     ///
     /// `state_size`: bytes to allocate for the local source buffer.
@@ -138,6 +154,47 @@ impl RdmaRemote {
             println!("[RdmaRemote] peer write signal received");
         }
         Ok(())
+    }
+
+    /// **Client (bandwidth)**: stream `iters` back-to-back one-sided RDMA WRITEs
+    /// of `size` bytes into the peer's MR, pipelined to a fixed window depth.
+    ///
+    /// Unlike [`write_state`], this does NOT memcpy fresh data per iteration and
+    /// does NOT send a per-write TCP signal — the registered buffer is sent
+    /// as-is and only the HCA's send queue is exercised.  This isolates the raw
+    /// one-directional wire bandwidth (the `ib_write_bw` measurement model) for
+    /// the multi-node bandwidth benchmark; the caller times around this call.
+    /// All writes target the same remote offset (the bytes are overwritten —
+    /// integrity is irrelevant to a throughput test).
+    pub fn stream_write(&mut self, size: usize, iters: usize) -> Result<()> {
+        if iters == 0 {
+            return Ok(());
+        }
+        let n = size.min(self.state_size) as u32;
+        // Keep up to `depth` WRITEs in flight; every WR is signaled so each
+        // completion lets us refill the window by one (a simple, correct
+        // sliding window).  Bounded by the QP send-queue depth.
+        let depth = 128.min(iters);
+        for _ in 0..depth {
+            self.qp.post_rdma_write(&self.mr, n, self.remote_addr, self.remote_rkey)?;
+        }
+        let mut posted = depth;
+        let mut completed = 0;
+        while completed < iters {
+            self.qp.poll_one_blocking()?;
+            completed += 1;
+            if posted < iters {
+                self.qp.post_rdma_write(&self.mr, n, self.remote_addr, self.remote_rkey)?;
+                posted += 1;
+            }
+        }
+        Ok(())
+    }
+
+    /// **Client (bandwidth)**: tell the receiver the whole stream is finished,
+    /// so it can stop waiting and tear down.  Pairs with [`wait_peer_write`].
+    pub fn signal_done(&mut self) -> Result<()> {
+        exchange::send_done(&mut self.ctrl)
     }
 
     /// Read the current contents of this node's registered memory region.
