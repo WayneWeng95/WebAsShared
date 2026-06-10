@@ -44,9 +44,50 @@ removed from this file. One-line trace below; details are in git history.
 
 --- TODO ------------------------------------------------------------------------
 
-[ ] Bring comparable frameworks onto the table (benchmark baselines).
-    Tracked as a SEPARATE benchmark case. The fan-out sweep harness in
-    Tests/Fan_out_remote/ is a starting point for the measurement side.
+PRIORITY ORDER (set 2026-06-10):
+  1. Mode 2 — streaming / per-round RDMA output return (active next).
+  2. Streaming fan-out + locality awareness (hint mechanism).
+  3. Cross-node streaming test harness (deterministic analytic lockstep + Python).
+  4. [FUTURE WORK] Worker-drop scheduling grace period.
+  Separate track, ongoing (outside this order): benchmark baselines.
+
+[x] RDMA OUTPUT-RETURN, Mode 1 (batch) — DONE + cluster-verified 2026-06-10.
+    A worker's output is returned to the coordinator (node 0) over RDMA just by
+    placing the Output node on node 0 with a cross-machine dep on the worker's
+    producer; the Partitioner auto-injects the RemoteSend/RemoteRecv pair. Two
+    splitter.rs fixes: (a) cross_edge_slot_kind() picks slot_kind Io when the source
+    is the terminal OUTPUT_IO_SLOT(1) (io_heads, length-prefixed records → Output
+    split_records), Stream otherwise; (b) the §5d wave-0 guard now also treats a
+    StreamPipeline's embedded rdma_send as a "send to peer P", so the return
+    RemoteRecv is sequenced AFTER the local source pipeline (else it sits in wave 0
+    and deadlocks — RDMA threads join at end of their own wave, mod.rs:652).
+    Also: Partitioner StreamPipeline output-slot registration (slot_assigner.rs) so
+    these DAGs partition at all. DAG: DAGs/symbolic_dag/img_pipeline_return.json.
+    Verified 3/3 images byte-identical on node 0 (gradient=683910b9,
+    checker/rings=c36c7705). NOTE: partitioner placement is RNG-nondeterministic;
+    regression-check structure, not bytes.
+
+[ ] (1) Mode 2 — STREAMING / per-round output return (ACTIVE NEXT).
+    Worker's final StreamPipeline relays each round's output via embedded rdma_send
+    back to node 0; node 0 runs a sink that writes each round as it arrives.
+    Needs: (a) a per-round write sink on node 0 — a streaming Output draining the
+    recv stream-slot to paths[round] (building on watch_stream), rather than
+    split_records flushing once at the end; (b) node-0 sink-only topology (push the
+    input via a one-shot RemoteSend{Io} / shared_inputs so node 0's only pipeline is
+    the sink) — two StreamPipelines can't run concurrently on one host (mod.rs runs
+    non-RDMA nodes serially; only RemoteSend/Recv/atomics get threads). Defer the
+    scheduler change (run StreamPipelines as threads) unless node 0 must be source
+    AND streaming-sink simultaneously.
+    OPEN DESIGN Q: per-round = one file per round (paths[round]) vs append all rounds
+    into one growing output — drives whether to extend Output or add a sink kind.
+
+[ ] (2) STREAMING FAN-OUT + LOCALITY AWARENESS.
+    Streaming-workload fan-out scenarios + a user hint mechanism: let the user hint
+    which edges transfer less data so the partitioner breaks the topology there for
+    multi-node deployment.
+
+[ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto
+    the table. Tests/Fan_out_remote/ is the starting point for the measurement side.
 
 [~] CROSS-NODE streaming processing — IN PROGRESS (loopback-verified single-path;
     multi-path fix landing).
@@ -104,7 +145,7 @@ removed from this file. One-line trace below; details are in git history.
         that DO run).
 
     Still TODO:
-    [ ] Cross-node streaming TEST HARNESS (Tests/Streaming, 2-node loopback):
+    [ ] (3) Cross-node streaming TEST HARNESS (Tests/Streaming, 2-node loopback):
         lockstep rounds, per-tick hand-off correctness (no dropped/duplicated
         rounds), result matches single-node baseline. Rust + Python.
         PARTIAL: Tests/Streaming_CrossNode/ has the hand-split node0/node1 image
@@ -125,8 +166,7 @@ removed from this file. One-line trace below; details are in git history.
         all still MISSING split_records — latent same-bug.
 
 
-after the worker dropped, wait for 30s,if job submitted, excluding it from calculated the job partitioning. after 30s not responses make it out from the cluster for scheduling decision. (Do it later, not important now)
-
-Additional:
-
-Steaming workload fan-out scenarios. and how to deal with the locality awareness (maybe adding a hint mechanism so the user could give hints on which part may transfer less data and its better to consider break the topology here for multi-node deployment) for dealing with steam pipelines. 
+[ ] (4) [FUTURE WORK] Worker-drop scheduling grace period.
+    After a worker drops, wait 30s: if a job was submitted, exclude that worker from
+    job partitioning; after 30s with no response, remove it from the cluster for
+    scheduling decisions. (Deferred — not important now.)
