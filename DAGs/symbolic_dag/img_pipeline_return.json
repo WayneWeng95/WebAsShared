@@ -1,0 +1,76 @@
+{
+  "_comment": [
+    "SymbolicDag: cross-node image pipeline with the OUTPUT RETURNED to node 0.",
+    "",
+    "node 0: load_images -> img_src (decode+rotate+grayscale, RDMA-stream each round to node 1)",
+    "node 1: img_dst (equalize+blur+export -> OUTPUT_IO_SLOT 1, RDMA-recv each round)",
+    "node 0: save_images (Output split_records) -- depends on img_dst ON NODE 1.",
+    "",
+    "Because save_images (node 0) depends on img_dst (node 1) and img_dst's output is",
+    "the terminal OUTPUT_IO_SLOT (1), the Partitioner auto-injects a return edge:",
+    "  rs_img_dst_to_0  RemoteSend  { slot:1, slot_kind:Io }  on node 1",
+    "  rr_img_dst_from_1 RemoteRecv { slot:<recv>, slot_kind:Io } on node 0",
+    "and repoints save_images at the recv slot. The 3 processed images (length-prefixed",
+    "I/O records) are returned to node 0 and split_records fans record i -> paths[i].",
+    "No explicit free nodes: slot 1 is auto-reclaimed after its consumer (the injected",
+    "RemoteSend) completes, so the send can't race a premature free."
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_img_ret",
+  "log_level": "info",
+  "total_nodes": 2,
+  "transfer": true,
+
+  "nodes": [
+    {
+      "id": "load_images", "node_id": 0, "deps": [],
+      "kind": { "Input": {
+        "paths": [
+          "TestData/img_gradient.ppm",
+          "TestData/img_checkerboard.ppm",
+          "TestData/img_rings.ppm"
+        ],
+        "slot": 10,
+        "binary": true
+      }}
+    },
+
+    {
+      "id": "img_src", "node_id": 0, "deps": ["load_images"],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_load_ppm",  "arg0": 10, "arg1": 20 },
+          { "func": "img_rotate",    "arg0": 20, "arg1": 30 },
+          { "func": "img_grayscale", "arg0": 30, "arg1": 40 }
+        ],
+        "rdma_send": { "peer": 1, "slot": 40, "slot_kind": "Stream", "free_after": true }
+      }}
+    },
+
+    {
+      "id": "img_dst", "node_id": 1, "deps": [],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_equalize",   "arg0": 40, "arg1": 50 },
+          { "func": "img_blur",       "arg0": 50, "arg1": 60 },
+          { "func": "img_export_ppm", "arg0": 60, "arg1": 1  }
+        ],
+        "rdma_recv": { "peer": 0, "slot": 40, "slot_kind": "Stream" }
+      }}
+    },
+
+    {
+      "id": "save_images", "node_id": 0, "deps": ["img_dst"],
+      "kind": { "Output": {
+        "paths": [
+          "TestOutput/rdma_img_return_out/gradient_processed.pgm",
+          "TestOutput/rdma_img_return_out/checkerboard_processed.pgm",
+          "TestOutput/rdma_img_return_out/rings_processed.pgm"
+        ],
+        "slot": 1,
+        "split_records": true
+      }}
+    }
+  ]
+}

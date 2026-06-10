@@ -221,7 +221,7 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         let recv_node = json!({
             "id": recv_id,
             "deps": [],
-            "kind": { "RemoteRecv": { "slot": edge.recv_slot, "slot_kind": "Stream", "peer": edge.src_machine } }
+            "kind": { "RemoteRecv": { "slot": edge.recv_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.src_machine } }
         });
         machine_nodes.get_mut(&edge.dest_machine).unwrap().push(recv_node);
     }
@@ -279,7 +279,7 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         let send_node = json!({
             "id": send_id,
             "deps": [src_id],
-            "kind": { "RemoteSend": { "slot": edge.src_slot, "slot_kind": "Stream", "peer": edge.dest_machine } }
+            "kind": { "RemoteSend": { "slot": edge.src_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.dest_machine } }
         });
         machine_nodes
             .get_mut(&edge.src_machine)
@@ -410,6 +410,21 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
     out.insert("node_dags".into(), Value::Object(node_dags));
 
     Ok(Value::Object(out))
+}
+
+/// Slot kind for an auto-injected cross-edge RemoteSend/RemoteRecv.
+///
+/// The slot model reserves slot 0 (INPUT_IO_SLOT) and slot 1 (OUTPUT_IO_SLOT) as
+/// I/O slots and allocates every stream slot at ≥2. A cross-edge whose source is
+/// the terminal OUTPUT_IO_SLOT is an *output return* (e.g. a worker's processed
+/// records flowing back to the coordinator's `Output`), which lives in the I/O
+/// record store (`io_heads`, length-prefixed records read by `read_io_records` /
+/// `Output { split_records }`). Every other cross-edge carries an intermediate
+/// stream slot. `Input` nodes are never cross-edge sources (the splitter rejects
+/// that), so OUTPUT_IO_SLOT is the only I/O slot that can appear here.
+fn cross_edge_slot_kind(src_slot: u32) -> &'static str {
+    const OUTPUT_IO_SLOT: u32 = 1;
+    if src_slot == OUTPUT_IO_SLOT { "Io" } else { "Stream" }
 }
 
 /// Rewrite `Output { slot }` to use the RecvSlot when the dep is on another machine.
