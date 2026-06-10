@@ -227,7 +227,7 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
     crate::shm::register_shm_for_growth(file.try_clone()?, splice_addr);
 
     let wasm_path = dag.wasm_path.as_deref().unwrap_or(WASM_PATH);
-    let module = Module::from_file(&engine, wasm_path)?;
+    let module = crate::runtime::worker::load_guest_module(&engine, wasm_path)?;
     let instance = linker.instantiate(&mut store, &module)?;
     let py_script = dag.python_script.as_deref().unwrap_or("");
     let py_wasm   = dag.python_wasm.as_deref();

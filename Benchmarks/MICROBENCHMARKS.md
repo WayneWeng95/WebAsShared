@@ -101,24 +101,34 @@ measurement harnesses are documented here.
 
 ---
 
-## Faasm — ATC '20 evaluation (nothing to copy locally)
+## Faasm (ATC '20) — `faasm/func/` @ tag `v0.2.4`
 
-The local `faasm/` checkout contains only unit/dist **tests** (`tests/`), not the paper workloads —
-and it is the later GRANNY-era codebase, not the ATC '20 evaluation code. None of Faasm's workloads
-could be copied. See `benchmarks/Faasm/README.md` for the full per-§ breakdown and headline results;
-the items below are the parts of the ATC '20 evaluation that are *micro-benchmark*-shaped.
+The local `faasm/` checkout is at the ATC '20-era tag **`v0.2.4`**, where the paper §6 workloads
+ship in-tree under `faasm/func/`. The application workloads (§6.2 ML training, §6.3 TF Lite
+inference, §6.4a matrix multiply) were copied into `benchmarks/Faasm/`. The remaining §6 items are
+compute/overhead micro-benchmarks and are documented here only.
 
-| Workload (paper §) | Category | What it measures |
-|--------------------|----------|------------------|
-| **Polybench/C** (§6.4b) | **Micro-benchmark** | ~22 compute kernels compiled to WebAssembly — per-kernel runtime overhead vs. native, isolating the Wasm/Faaslet execution cost from any state movement. |
-| **Python Performance Benchmarks** (§6.4c) | **Micro-benchmark** | ~23 CPython benchmarks run inside a Faaslet vs. native CPython — dynamic-language runtime overhead. |
-| **Faaslet vs. container cold-start** (§6.5) | **Micro-benchmark** | No-op init: init time, CPU cycles, PSS/RSS footprint, and host capacity for Docker vs. Faaslets vs. Proto-Faaslets (plus a Python no-op restoring a pre-initialised CPython snapshot). |
+> Note: the newer GRANNY-era `main` (v0.33.0) deletes `func/` and moves a *different*, newer HPC set
+> (MPI/LAMMPS, OpenMP/CovidSim+LULESH, SGX) to external `experiment-*` repos. Those are **not** the
+> ATC '20 experiments; this section describes the actual 2020 paper micro-benchmarks.
 
-The remaining ATC '20 experiments are **application workloads**, not micro-benchmarks: distributed
-**ML training** (HOGWILD! SGD on Reuters RCV1, §6.2), **ML inference** (TensorFlow Lite + MobileNet,
-§6.3), and divide-and-conquer **matrix multiplication** (Python + NumPy, §6.4a). They would belong in
-the copied-workloads set, but none are checked out locally.
+### §6.4b — Polybench/C — `func/polybench/`
+- **What it tests:** ~22 Polybench compute kernels (datamining, linear-algebra BLAS/kernels/solvers,
+  medley, stencils; ~31 `.c` files in-tree) compiled to WebAssembly and run in a Faaslet.
+- **Metric:** per-kernel execution overhead **vs. native** — isolates the WASM/Faaslet compute cost
+  with no state or chaining involved.
+- **Helper:** `bin/build_polybench_native.sh` builds the native baseline.
 
-> Note: the GRANNY-era `faasm/experiment-*` repos referenced in `faasm/docs/index.rst`
-> (MPI/LAMMPS, OpenMP/CovidSim+LULESH, SGX) are a *newer, different* HPC workload set — **not** the
-> ATC '20 experiments — and are likewise not present in this tree.
+### §6.4c — Python Performance Benchmarks — `func/python/bench_*.py`
+- **What it tests:** 24 standard Python micro-benchmarks (`bench_nbody`, `bench_float`,
+  `bench_raytrace`, `bench_json_*`, `bench_pickle`, …) run under CPython compiled to WASM.
+- **Metric:** per-benchmark overhead **vs. native** CPython — isolates interpreter-in-Faaslet cost.
+
+### §6.5 — cold-start no-op — `func/demo/noop.c`, `func/python/noop.py`
+- **What it tests:** a trivial no-op function used for the **Faaslets vs. containers** cold-start
+  comparison — init time, CPU cycles, PSS/RSS footprint, host capacity (Docker vs. Faaslet vs.
+  Proto-Faaslet; the Python no-op restores a pre-initialised CPython snapshot).
+- **Metric:** initialisation latency, per-instance memory footprint, instances per host.
+
+**Why not copied:** each isolates a single primitive (compute overhead / interpreter overhead /
+init cost), not a realistic application — same boundary applied to the other systems above.

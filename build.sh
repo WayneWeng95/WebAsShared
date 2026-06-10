@@ -60,6 +60,13 @@ cd "$ROOT/Executor/guest"
 cargo +nightly build --release $FEATURES
 
 echo ""
+echo "=== AOT-precompiling guest.wasm → guest.cwasm ==="
+# Skips per-subprocess Cranelift JIT at run time (big win for fan-out workloads).
+"$ROOT/Executor/target/release/host" compile \
+    "$ROOT/Executor/target/$WASM_TARGET/release/guest.wasm" \
+    "$ROOT/Executor/target/$WASM_TARGET/release/guest.cwasm"
+
+echo ""
 echo "=== Building Partitioner ==="
 cd "$ROOT/Partitioner"
 cargo build --release
@@ -74,5 +81,6 @@ echo ""
 echo "=== Build complete ==="
 echo "  host:       $ROOT/Executor/target/release/host"
 echo "  guest.wasm: $ROOT/Executor/target/$WASM_TARGET/release/guest.wasm"
+echo "  guest.cwasm:$ROOT/Executor/target/$WASM_TARGET/release/guest.cwasm (AOT)"
 echo "  partitioner:$ROOT/Partitioner/target/release/partition"
 echo "  node-agent: $ROOT/node-agent"

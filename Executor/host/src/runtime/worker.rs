@@ -27,6 +27,42 @@ pub fn create_wasmtime_engine() -> Result<Engine> {
     Engine::new(&config)
 }
 
+/// Load a guest module, picking the fast path automatically:
+///   * `*.cwasm` → `Module::deserialize_file` (AOT — skips Cranelift JIT entirely).
+///     The `.cwasm` MUST have been produced by `precompile_guest` with the same
+///     engine `Config` (wasmtime embeds a version/config hash and rejects a
+///     mismatch on deserialize), so this is safe for our own build artifacts.
+///   * anything else → `Module::from_file` (JIT-compile the `.wasm`).
+///
+/// Every `wasm-call` subprocess loads the module fresh, so for a fan-out of N
+/// workers the JIT cost is paid N times; the AOT path turns that into a cheap
+/// mmap + relocate per process.
+pub fn load_guest_module(engine: &Engine, wasm_path: &str) -> Result<Module> {
+    if wasm_path.ends_with(".cwasm") {
+        // SAFETY: the file is a trusted build artifact produced by our own
+        // `host compile` step with an identical engine Config.
+        unsafe { Module::deserialize_file(engine, wasm_path) }
+            .map_err(|e| anyhow::anyhow!("deserialize precompiled module '{}': {}", wasm_path, e))
+    } else {
+        Module::from_file(engine, wasm_path)
+            .map_err(|e| anyhow::anyhow!("compile module '{}': {}", wasm_path, e))
+    }
+}
+
+/// AOT-compile a guest `.wasm` into a `.cwasm` using the SAME engine config the
+/// workers use, so the artifact deserializes cleanly. Called by `host compile`.
+pub fn precompile_guest(wasm_path: &str, out_path: &str) -> Result<()> {
+    let engine = create_wasmtime_engine()?;
+    let wasm = std::fs::read(wasm_path)
+        .map_err(|e| anyhow::anyhow!("read '{}': {}", wasm_path, e))?;
+    let serialized = engine.precompile_module(&wasm)
+        .map_err(|e| anyhow::anyhow!("precompile '{}': {}", wasm_path, e))?;
+    std::fs::write(out_path, &serialized)
+        .map_err(|e| anyhow::anyhow!("write '{}': {}", out_path, e))?;
+    println!("compiled {} → {} ({} bytes)", wasm_path, out_path, serialized.len());
+    Ok(())
+}
+
 /// Allocates the WASM shared memory, maps the SHM file into it at `TARGET_OFFSET`,
 /// and registers the two host imports (`host_remap`, `host_resolve_atomic`) with the linker.
 /// Returns the `Memory` handle needed for direct host-side reads after WASM execution.
@@ -248,7 +284,7 @@ pub fn run_wasm_loop(shm_path: &str, wasm_path: &str, func: &str) -> Result<()> 
     });
     let mut linker = Linker::new(&engine);
     setup_vma_environment(&mut store, &mut linker, &file)?;
-    let module = Module::from_file(&engine, wasm_path)?;
+    let module = load_guest_module(&engine, wasm_path)?;
     let instance = linker.instantiate(&mut store, &module)?;
     let f = instance
         .get_typed_func::<(u32, u32), ()>(&mut store, func)
@@ -285,7 +321,7 @@ pub fn run_wasm_call(shm_path: &str, wasm_path: &str, func: &str, ret_type: &str
     });
     let mut linker = Linker::new(&engine);
     let memory = setup_vma_environment(&mut store, &mut linker, &file)?;
-    let module = Module::from_file(&engine, wasm_path)?;
+    let module = load_guest_module(&engine, wasm_path)?;
     let instance = linker.instantiate(&mut store, &module)?;
 
     match ret_type {

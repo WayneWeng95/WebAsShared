@@ -5,6 +5,8 @@ Copies of the **application workloads** from the five comparison systems, gather
 (what each one is and what it measures).
 
 Source overview: [`../benchmark_workloads.md`](../benchmark_workloads.md).
+Final comparison set (7 workloads, all 5 systems): [`WORKLOAD_SELECTION.md`](./WORKLOAD_SELECTION.md).
+Execution plan (workload-by-workload, WordCount first): [`TEST_PLAN.md`](./TEST_PLAN.md).
 
 ## What's here (application workloads, copied)
 
@@ -14,7 +16,7 @@ benchmarks/
 ├── RTSFaaS/      MediaReview, SocialNetwork   (+ Env/ configs, dir.sh)
 ├── Cloudburst/   predserving.py, mobilenet.py, summa.py   (+ utils.py, server.py)
 ├── Roadrunner/   image-resize, fanout-wasm, fanout-container
-└── Faasm/        README.md only — ATC '20 evaluation code not present locally
+└── Faasm/        ml-training-sgd, tflite-inference, matrix-multiply
 ```
 
 | System | Copied workloads | Domain |
@@ -23,7 +25,7 @@ benchmarks/
 | **RTSFaaS** | MediaReview, SocialNetwork | transactional stateful apps |
 | **Cloudburst** | predserving, mobilenet, summa | ML serving + distributed matmul |
 | **Roadrunner** | image-resize, fanout-wasm, fanout-container | Wasm data delivery |
-| **Faasm** | *(none local)* | Wasm stateful serverless: ML + Python runtime + cold-start |
+| **Faasm** | ml-training-sgd (HOGWILD! SGD), tflite-inference (MobileNet), matrix-multiply | ATC '20 stateful serverless (WASM/Faaslet) |
 
 ## Notes on the copies (dependencies)
 
@@ -41,6 +43,11 @@ These were lifted out of their repos, so some need their original context to act
   `roadrunner/experiments/evaluation/`; not copied (large/generated).
 - **RMMap** — workload dirs include their data files and `service.yaml`/`Dockerfile`; they target a
   Knative + RDMA cluster (see original `RMMap/docs/exp.md`).
+- **Faasm** — these are **Faaslet (WASM) functions** from the ATC '20 tree (`faasm/` is checked out
+  at `v0.2.4`). They build with the Faasm WASM toolchain against the runtime/libs in `../faasm`, not
+  standalone. `tflite-inference` needs its model/data uploaded as Faasm state first
+  (`driver/tensorflow.py`); `matrix-multiply` depends on the runtime's `SparseMatrixFileSerialiser`
+  and recursive-chaining host calls (not copied). See `Faasm/README.md`.
 
 ## Classification boundary
 

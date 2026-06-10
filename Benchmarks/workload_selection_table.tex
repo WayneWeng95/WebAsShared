@@ -1,0 +1,45 @@
+% Selected application workloads for cross-system comparison.
+% Standalone, compilable on Overleaf as-is (pdfLaTeX).
+% To drop into an existing paper, copy only the table* environment below
+% and make sure the preamble loads: booktabs, tabularx, multirow, array.
+
+\documentclass[10pt]{article}
+
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage[margin=1in]{geometry}
+
+% Left-aligned ragged X column so descriptions wrap without justification gaps.
+\newcolumntype{L}{>{\raggedright\arraybackslash}X}
+
+\begin{document}
+
+\begin{table*}[t]
+  \centering
+  \caption{Selected application workloads for cross-system comparison (7 workloads, all 5 systems).}
+  \label{tab:selected-workloads}
+  \renewcommand{\arraystretch}{1.25}
+  \begin{tabularx}{\textwidth}{@{}c l l l L@{}}
+    \toprule
+    \textbf{\#} & \textbf{Workload} & \textbf{System} & \textbf{Family} & \textbf{Description} \\
+    \midrule
+    1 & Image-resize / fanout & Roadrunner & Data delivery & One-to-many image-resizing data delivery to WebAssembly functions; directly validates our zero-copy transport claim. \\
+    \addlinespace
+    2 & WordCount & RMMap / Faasm / Cloudburst & Data-parallel text & Word-frequency counting over text; the universal data-parallel baseline. Native to RMMap (our closest head-to-head on serialization/deserialization-free state transfer) and ported cleanly as a map--reduce DAG to Faasm and Cloudburst. \\
+    \addlinespace
+    3 & FINRA & RMMap / Faasm / Cloudburst & Multi-stage stateful DAG & Multi-stage financial-compliance audit workflow passing intermediate state between stages---the inter-stage state movement that page-chain splicing targets. Native to RMMap (the primary baseline); ported to Faasm and Cloudburst as matched function-composition pipelines. \\
+    \addlinespace
+    4 & Matrix multiplication & RMMap / Faasm / Cloudburst & Distributed compute & Divide-and-conquer dense matrix multiply via recursive function chaining, mapping onto our fan-out and aggregate routing and stressing cross-node block transfer over RDMA. Native to Faasm (divide-and-conquer) and Cloudburst (SUMMA); also ported to RMMap, whose serialization-free RDMA path the large block transfers showcase. \\
+    \addlinespace
+    5 & ML training & RMMap / Faasm / Cloudburst & Distributed training & Multi-stage distributed model training; we use RMMap's \texttt{ml-pipeline} as the primary baseline---our closest twin (RDMA, serialization-free state transfer)---with Faasm (HOGWILD! SGD) and a stretch Cloudburst port (distributed SGD over Redis via its averaging primitives) as secondary baselines. \\
+    \addlinespace
+    6 & ML inference & RMMap / Cloudburst / Faasm & ML inference & Image-classification inference standardized on the MNIST handwritten-digit model across all three systems---chosen over MobileNet because it is the lightest to deploy and gives a uniform model for an apples-to-apples comparison (RMMap ships it natively; Cloudburst and Faasm otherwise default to MobileNet). \\
+    \addlinespace
+    7 & MediaReview & RTSFaaS & Stateful event stream & Transactional media review/rating application, re-implemented on our stream-processing model as a keyed stateful event stream over shuffled shared-memory state. \\
+    \bottomrule
+  \end{tabularx}
+\end{table*}
+
+\end{document}

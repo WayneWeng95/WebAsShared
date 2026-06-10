@@ -1,0 +1,8 @@
+size_mb,fanout,topo,func,compute_ms,delivery_ms,worker_ms,throughput_mbps,reps
+10,1,intra,noop,727.22,0.16,74.31,13.75,5
+10,10,intra,noop,1149.89,0.17,506.08,8.70,5
+10,20,intra,noop,1551.69,0.17,913.72,6.44,5
+10,40,intra,noop,2377.57,0.26,1718.19,4.21,5
+10,60,intra,noop,3147.80,0.21,2512.55,3.18,5
+10,80,intra,noop,3922.37,0.18,3284.45,2.55,5
+10,100,intra,noop,4702.32,0.18,4106.70,2.13,5

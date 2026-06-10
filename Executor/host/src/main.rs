@@ -9,7 +9,16 @@ use std::env;
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
 
-    if args.len() > 1 && args[1] == "dag" {
+    if args.len() > 1 && args[1] == "compile" {
+        // AOT-compile a guest .wasm into a .cwasm: ./host compile <in.wasm> [out.cwasm]
+        // The .cwasm deserializes much faster than JIT-compiling, cutting the
+        // per-subprocess cold-start cost paid by every WASM worker.
+        let wasm_path = args.get(2).map(String::as_str)
+            .unwrap_or_else(|| { eprintln!("usage: host compile <in.wasm> [out.cwasm]"); std::process::exit(2) });
+        let out_path = args.get(3).cloned()
+            .unwrap_or_else(|| wasm_path.trim_end_matches(".wasm").to_string() + ".cwasm");
+        runtime::worker::precompile_guest(wasm_path, &out_path)
+    } else if args.len() > 1 && args[1] == "dag" {
         // DAG mode: ./host dag <json_file>
         let json_path = args.get(2).map(String::as_str).unwrap_or("dag.json");
         runtime::dag_runner::run_dag_file(json_path)

@@ -43,10 +43,14 @@ systems under `/opt/myapp/compare_system`. Information was gathered from each pr
 ### 4. Faasm
 - **Paper:** ATC '20 — *Faasm: Lightweight Isolation for Efficient Stateful Serverless Computing*
   (Shillaker & Pietzuch, Imperial College London). [arXiv:2002.09344](https://arxiv.org/abs/2002.09344)
-- **Location:** The paper workloads are **not** shipped in this tree. The local `faasm/` checkout
-  carries only unit/dist tests (`faasm/tests/`); it is the later GRANNY-era codebase whose
-  `docs/index.rst` points at external `faasm/experiment-*` repos. The original ATC '20 evaluation
-  code is not present locally.
+- **Location:** The paper workloads **are** shipped in-tree on the ATC '20-era tags. The local
+  `faasm/` checkout is at tag **`v0.2.4`** (2020-07-15), where the §6 workloads live under
+  `faasm/func/` (`sgd/`, `tf/`, `polybench/`, `python/bench_*`, `demo/matrix.cpp`, `demo/noop.c`).
+  The application workloads (ML training, TF Lite inference, matrix multiply) are copied into
+  `benchmarks/Faasm/`; the compute/cold-start micro-benchmarks are documented in
+  `benchmarks/MICROBENCHMARKS.md`. (The newer GRANNY-era `main`, v0.33.0, deletes `func/` and points
+  `docs/index.rst` at external `experiment-*` repos — a different, newer HPC set, not the ATC '20
+  workloads.)
 - **Baseline:** **Knative** (container-based, on Kubernetes), running the *same* code via a
   Knative-specific implementation of the Faaslet host interface; Redis as the distributed KVS.
 - **Testbed:** 20 hosts (Intel Xeon E3-1220 3.1 GHz, 16 GB RAM, 1 Gbps); cold-start/footprint
@@ -90,5 +94,5 @@ systems under `/opt/myapp/compare_system`. Information was gathered from each pr
 ## Cross-System Observations
 - **ML inference** appears in three systems: RMMap (MNIST), Cloudburst (MobileNet), Faasm (TensorFlow Lite + MobileNet).
 - **Word/data processing & micro-benchmarks** appear in nearly all five — the natural common axes for comparison.
-- **RMMap, RTSFaaS, Cloudburst, Roadrunner** ship workloads inside the repo; **Faasm's** ATC '20 evaluation code is not present locally (the local checkout is the later GRANNY-era codebase).
+- **All five** ship their workloads inside the repo; Faasm's ATC '20 evaluation code is present on tag `v0.2.4` of the local `faasm/` checkout (the newer GRANNY-era `main` had removed it).
 - **RMMap, RTSFaaS, and Roadrunner** target serialization/data-transfer overhead; **Cloudburst and Faasm** target stateful computation more broadly.
