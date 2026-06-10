@@ -311,6 +311,16 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
                 if let Some(peer) = rs.get("peer").and_then(|v| v.as_u64()) {
                     sends_by_peer.entry(peer as u32).or_default().push(id);
                 }
+            } else if let Some(sp) = node["kind"].get("StreamPipeline").and_then(|v| v.as_object()) {
+                // A StreamPipeline's embedded rdma_send drives the remote side; an
+                // output-return RemoteRecv on this machine must be sequenced AFTER it
+                // (otherwise the recv blocks wave 0 before the source pipeline that
+                // feeds the remote computation ever runs → cross-node deadlock).
+                if let Some(peer) = sp.get("rdma_send")
+                    .and_then(|s| s.get("peer")).and_then(|v| v.as_u64())
+                {
+                    sends_by_peer.entry(peer as u32).or_default().push(id);
+                }
             }
         }
 
