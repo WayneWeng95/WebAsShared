@@ -40,7 +40,8 @@
           "TestOutput/rdma_img_pipeline_out/checkerboard_processed.pgm",
           "TestOutput/rdma_img_pipeline_out/rings_processed.pgm"
         ],
-        "slot": 1
+        "slot": 1,
+        "split_records": true
       }}
     },
     {
