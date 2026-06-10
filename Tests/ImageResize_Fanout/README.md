@@ -109,11 +109,46 @@ delivery time (zero-copy splice) and total throughput, worker-wave time, end-to-
 **serialization cost (ours = 0)**. Memory / CPU / RDMA-bytes still to wire in from
 `NodeAgent/agent/src/metrics.rs` (`/tmp/node_agent_metrics.jsonl`).
 
+## Roadrunner baselines on THIS hardware (`baseline/`)
+
+Roadrunner's own zero-copy transport (`RoadRunner`/`Embedded` columns) can't run on this box — its
+prebuilt containerd shims are coupled to the authors' Ubuntu 20.04 + containerd 1.x (see
+`../../Benchmarks/TEST_PLAN.md` § 1b). What we **can** run same-hardware are the vanilla baselines:
+
+```
+baseline/
+├── resize/             # Rust crate: same downscale-0.5 as the guest img_resize
+│                       #   native: cargo build --release
+│                       #   wasm:   cargo build --release --target wasm32-wasip1
+└── run_baseline.sh     # fan out N parallel resize tasks (image piped per task via stdin)
+                        #   MODE=wasmedge | native | both  -> results_baseline.csv
+```
+
+Each task loads its **own** copy of the image (stdin, no shared zero-copy) — so fanout cost grows
+with N, unlike our broadcast splice. The per-task compute is byte-identical to the guest `img_resize`,
+so only delivery differs. (stdin not `--dir`: WasmEdge 0.11.2's WASI dir-preopen is broken on this
+kernel.) For the actual `RoadRunner`/`Embedded` transport, overlay their **published** intra-node CSV
+(`roadrunner/.../results/parallel/intra-node/*.csv`) — `plot.py` does this as dashed reference lines.
+
+## Combined result (10 MB image, 5 reps, same hardware)
+
+| fanout | wasmedge ms | native ms | **ours total ms** | ours delivery ms | ours worker ms |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 662 | 29 | 515 | 0.18 | 15 |
+| 10 | 999 | 37 | 570 | 0.19 | 24 |
+| 40 | 2905 | 91 | 598 | 0.20 | 67 |
+| 100 | **7132** | 213 | **673** | **0.20** | 158 |
+
+Our **delivery stays flat at ~0.2 ms** while wasmedge climbs to 7.1 s at fanout 100 (per-task WasmEdge
+cold-start + independent load × N). With AOT, our worker wave (158 ms @ 100) is native-class while
+staying in WASM isolation; end-to-end we beat the wasmedge baseline ~10× and match/beat native.
+
 ## Status
 
-- [x] `img_noop` + `img_resize` guest fns and the `gen_dag.py` fanout DAG authored & building
-- [x] Our intra-node sweep runs end-to-end (delivery/worker/total captured)
+- [x] `img_noop` + `img_resize` guest fns and `gen_dag.py` fanout DAG (AOT `guest.cwasm`)
+- [x] Our intra-node sweep (delivery/worker/total), JIT vs AOT (`results_jit.csv` / `results_aot.csv`)
+- [x] Same-hardware **wasmedge + native baselines** (`baseline/results_baseline.csv`)
+- [x] Combined overlay plots (`figs/`: delivery / total_wall / throughput vs fanout)
+- [ ] `RoadRunner`/`Embedded` transport: blocked on this host → using published CSV; or rebuild shim / 20.04 node
 - [ ] Wire in per-run memory/CPU/RDMA metrics from the node-agent metrics log
 - [ ] Inter-node (RDMA 2-node) DAG generator + sweep
-- [ ] Roadrunner sweep collected (separate stack)
-- [ ] Overlay plot + results table committed

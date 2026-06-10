@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Remote StateSync — Redis (remote) vs Shared memory + RDMA (reference + ours).
 
-A focused, three-series version of StateSync-remote's `latency_throughput_remote`
-figure: one-way latency (left) + delivery throughput (right), same styling, with:
+A focused, multi-series version of StateSync-remote's `latency_throughput_remote`
+figure: one-way latency (left, log) + delivery throughput (right, broken linear
+axis with a 10 GbE line-rate ceiling — same panel treatment as plot_remote.py),
+with:
   - redis-remote                  baseline KV ping-pong (committed remote results)
   - Shared memory + RDMA (ref)    rdma-shm from the committed remote results
   - Shared memory + RDMA (ours)   rdma-shm we measured into ./results_remote.csv
@@ -31,14 +33,25 @@ DEFAULT_OURS = os.path.join(HERE, "results_remote.csv")
 # rdma-shm rows from OUR results CSV so they show as a distinct group.
 KEEP = ["redis-remote", "cloudburst-warm", "rdma-shm", "rdma-shm-ours"]
 LABEL = {
-    "redis-remote":    "Pheromone (Redis remote)",
+    "redis-remote":    "SONIC (Redis remote)",
     "cloudburst-warm": "Cloudburst (Redis local)",
     "rdma-shm":        "RTSFaaS (Shared memory + RDMA)",
     "rdma-shm-ours":   "WasMem (Shared memory + RDMA)",
 }
-COLOR = {"redis-remote": "#e8843c", "cloudburst-warm": "#6a4c93",
+COLOR = {"redis-remote": "#e8843c", "cloudburst-warm": "#edae49",
          "rdma-shm": "#1d7a3e", "rdma-shm-ours": "#2057c7"}
-MARKER = {"redis-remote": "^", "cloudburst-warm": "X", "rdma-shm": "*", "rdma-shm-ours": "o"}
+MARKER = {"redis-remote": "^", "cloudburst-warm": "v", "rdma-shm": "*", "rdma-shm-ours": "o"}
+
+# Series that sit in the upper band of the broken throughput axis (the RDMA
+# shared-memory rows that dwarf the store-based approaches).  Everyone else
+# lands in the lower band, on its own expanded scale.
+def is_high(a):
+    return a.startswith("rdma-shm")
+
+# This cluster's per-port wire ceiling: ConnectX-3 Pro at 10 GbE.
+# 10 Gb/s / 8 / 1024^3 ≈ 1.16 GiB/s raw line rate — the hardware limit a single
+# link can approach.  (Matches StateSync-remote/plot_remote.py.)
+PORT_CEILING_GIBPS = 10e9 / 8 / (1024 ** 3)
 
 TICK_SIZE, LABEL_SIZE, LEGEND_SIZE, YLABEL_SIZE = 16, 16, 17, 16
 plt.rcParams.update({"xtick.labelsize": TICK_SIZE, "ytick.labelsize": TICK_SIZE,
@@ -102,6 +115,9 @@ def main():
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--metric", choices=["mean", "p50"], default="mean")
     ap.add_argument("--figsize", default="9,3")
+    ap.add_argument("--ceiling-gibps", type=float, default=PORT_CEILING_GIBPS,
+                    help="machine bandwidth ceiling drawn on the throughput panel "
+                         "(default 10 GbE line rate ~1.16 GiB/s; 0 to hide)")
     args = ap.parse_args()
 
     data = load(args.baseline_csv, args.ours_csv)
@@ -116,22 +132,83 @@ def main():
     idx = {s: i for i, s in enumerate(sizes)}
     m = args.metric
     stat = "Mean" if m == "mean" else "Median"
-    figsize = tuple(float(x) for x in args.figsize.split(","))
+    figsize = tuple(float(x) for x in args.figsize.replace("x", ",").split(","))
+    ceiling = args.ceiling_gibps
 
-    fig, (axL, axR) = plt.subplots(1, 2, figsize=figsize)
-    for a in aps:                                  # left: one-way latency
-        xs = sorted(data[a])
-        axL.plot([idx[s] for s in xs], [float(data[a][s][f"lat_{m}_us"]) for s in xs], **style(a))
+    def xs_of(a):
+        return [idx[s] for s in sorted(data[a])]
+
+    def gibps(a):
+        return [float(data[a][s]["gibps"]) for s in sorted(data[a])]
+
+    high = [a for a in aps if is_high(a)]          # RDMA shared-memory (ref + ours)
+    low  = [a for a in aps if not is_high(a)]       # store-based (Redis, Cloudburst)
+    high_vals = [v for a in high for v in gibps(a)]
+    low_vals  = [v for a in low for v in gibps(a)]
+    # Only break the axis when the high band sits clearly above the rest.
+    can_break = bool(high_vals) and bool(low_vals) and min(high_vals) > max(low_vals) * 1.1
+
+    fig = plt.figure(figsize=figsize)
+    gs = fig.add_gridspec(2, 2, height_ratios=[1.0, 1.25], hspace=0.12, wspace=0.34)
+
+    # ── Left: one-way latency (single axis, spans both rows) ──────────────────
+    axL = fig.add_subplot(gs[:, 0])
+    for a in aps:
+        axL.plot(xs_of(a), [float(data[a][s][f"lat_{m}_us"]) for s in sorted(data[a])], **style(a))
     axL.set_yscale("log")
     axis(axL, sizes)
     axL.set_ylabel(f"{stat} latency (µs, log)", fontsize=YLABEL_SIZE)
 
-    for a in aps:                                  # right: throughput
-        xs = sorted(data[a])
-        axR.plot([idx[s] for s in xs], [float(data[a][s]["gibps"]) for s in xs], **style(a))
-    axR.set_yscale("log")
-    axis(axR, sizes)
-    axR.set_ylabel("Throughput (GiB/s, log)", fontsize=YLABEL_SIZE)
+    # ── Right: delivery throughput (broken linear axis when bands separate) ───
+    if can_break:
+        axT = fig.add_subplot(gs[0, 1])             # upper band: RDMA shared mem
+        axB = fig.add_subplot(gs[1, 1], sharex=axT) # lower band: store-based
+        for ax in (axT, axB):
+            for a in aps:
+                ax.plot(xs_of(a), gibps(a), **style(a))
+            ax.grid(True, which="both", ls=":", alpha=0.4)
+        axB.set_ylim(0, max(low_vals) * 1.25)
+        top = max(high_vals) * 1.08
+        if ceiling and ceiling > 0:
+            top = max(top, ceiling * 1.16)          # headroom above the line
+        axT.set_ylim(min(high_vals) * 0.85, top)
+
+        # Machine bandwidth ceiling (10 GbE line rate), label just under the line.
+        if ceiling and ceiling > 0:
+            axT.axhline(ceiling, ls="--", color="#777", lw=1.4)
+            axT.text(0.02, ceiling * 0.98, f"10 GbE line rate (~{ceiling:.2f} GiB/s)",
+                     color="black", fontsize=13, va="top", ha="left",
+                     transform=axT.get_yaxis_transform())
+
+        # Hide the facing spines / ticks and draw the diagonal break marks.
+        axT.spines["bottom"].set_visible(False)
+        axB.spines["top"].set_visible(False)
+        axT.tick_params(axis="x", which="both", bottom=False, labelbottom=False)
+        axB.set_xticks(range(len(sizes)))
+        axB.set_xticklabels([fmt_size(s) for s in sizes], fontsize=TICK_SIZE)
+        axB.set_xlabel("state size")
+        d = 0.015
+        kw = dict(transform=axT.transAxes, color="k", clip_on=False, lw=1)
+        axT.plot((-d, +d), (-d, +d), **kw); axT.plot((1 - d, 1 + d), (-d, +d), **kw)
+        kw.update(transform=axB.transAxes)
+        axB.plot((-d, +d), (1 - d, 1 + d), **kw); axB.plot((1 - d, 1 + d), (1 - d, 1 + d), **kw)
+
+        # One y-label, centred on the break between the two bands.
+        axB.set_ylabel("Throughput (GiB/s)", fontsize=YLABEL_SIZE)
+        axB.yaxis.set_label_coords(-0.16, 1.04)
+    else:
+        axR = fig.add_subplot(gs[:, 1])
+        for a in aps:
+            axR.plot(xs_of(a), gibps(a), **style(a))
+        axis(axR, sizes)
+        axR.set_ylabel("Throughput (GiB/s)", fontsize=YLABEL_SIZE)
+        if ceiling and ceiling > 0:
+            lo, hi = axR.get_ylim()
+            axR.set_ylim(lo, max(hi, ceiling * 1.16))
+            axR.axhline(ceiling, ls="--", color="#777", lw=1.4)
+            axR.text(0.02, ceiling * 0.98, f"10 GbE line rate (~{ceiling:.2f} GiB/s)",
+                     color="black", fontsize=13, va="top", ha="left",
+                     transform=axR.get_yaxis_transform())
 
     fig.tight_layout()
     handles, labels = axL.get_legend_handles_labels()

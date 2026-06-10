@@ -159,6 +159,52 @@ Roadrunner needs (README + `docs/`): **Ubuntu 20.04/22.04 x86_64**, **WasmEdge v
   - roadrunner modes: `…/roadrunner-{kernel,net,embedded}-mode.sh` (report its best mode)
 - [ ] (Secondary) deploy/cold-start microbench: `experiments/motivation/scripts/run_{wasm_,}image_resize.sh`.
 
+#### Reproduction status (2026-06-10) — BLOCKED on this host
+
+Installed the full stack on the dev box via `roadrunner/docs/quick-install.sh` (we have
+passwordless sudo): **containerd 2.2.4, Docker 29.5.3, WasmEdge 0.11.2, Redis, runc**, plus all
+prebuilt shims (`cwasi`, `cwasim1/2/3`) in `/usr/local/bin` and a `libwasmedge.so.0` ld path +
+containerd systemd `LD_LIBRARY_PATH`/`PATH` override. Storage server builds and serves
+`file_10M.txt` on `:8888`. Images pull (`keniack/fanout-wasi`, `keniack/alice-lib`).
+
+**The prebuilt Roadrunner shims do not run here** — they are coupled to the authors' original
+Ubuntu 20.04 + containerd 1.x environment:
+- `cwasim1` (embedded): looks up a **nonexistent snapshot `6294`** (a stale ID baked into the
+  prebuilt binary) for the worker module `alice-lib.wasm`; our max snapshot is 21. Building a
+  combined single-layer image (both wasm modules) did not help — the lookup ignores the live
+  container snapshot.
+- `cwasim3` (net): **`Bind guest directory failed:54`** — the runtime cannot set up its guest
+  working dir on containerd 2.x, so the staged file never reaches the driver (`args[3]` panic).
+
+Root cause: prebuilt binaries built against containerd 1.x snapshot/mount APIs. Fixing means either
+(A) **rebuild the shim from `roadrunner/app/` source** ported to current containerd libs (uncertain;
+`containerd-shim 0.3.0` → 2.x), or (B) run on a **matching Ubuntu 20.04/22.04 + containerd 1.6**
+node (their supported config).
+
+**Deeper investigation (2026-06-10) — pushed past two of three blockers, hit a hard wall:**
+1. The snapshot `6294` is **literally hardcoded in the shim binary** (`/var/lib/containerd/
+   io.containerd.snapshotter.v1.overlayfs/snapshots/6294/fs/alice-lib.wasm`) — confirmed by it
+   appearing even under a **standalone containerd 1.6.36** instance with a *different* root. Worked
+   around by placing `alice-lib.wasm` at that exact path → the shim then loads the worker module.
+2. After that, the driver runs but fails at **`Bind guest directory failed:54`** — WasmEdge 0.11.2's
+   WASI dir-preopen is **incompatible with this host's kernel** (same root cause as plain
+   `wasmedge --dir` failing, errno 44). Without the dir bind, the runtime can't stage the fetched
+   file as `argv[3]`, so the driver panics.
+3. Swapping in **WasmEdge 0.13.5**'s `libwasmedge.so.0` (kernel-compatible dir binding) **crashes the
+   shim at startup** (`bitset::reset out_of_range`) — the prebuilt shim is ABI-locked to WasmEdge
+   0.11.2.
+
+Net: the prebuilt shim needs WasmEdge 0.11.2's exact ABI, but 0.11.2 can't bind guest dirs on this
+kernel. **No config workaround exists.** Self-running the transport here requires rebuilding the
+shim from `roadrunner/app/` source against a newer WasmEdge (port `wasmedge-sdk 0.7.1`/`containerd-
+shim 0.3.0` → current) — real, uncertain effort — or option (B), the matching-OS node.
+Stack left installed (containerd 2.2.4 + WasmEdge 0.11.2 lib) for any retry.
+
+**Interim:** use Roadrunner's **published intra-node numbers**
+(`experiments/evaluation/results/parallel/intra-node/*.csv`, columns `RoadRunner_Embedded,
+RoadRunner, RunC, Wasmedge`) for the comparison — complete, and exactly what their paper reports.
+`Tests/ImageResize_Fanout/plot.py` overlays them.
+
 ### Dataset (standardize across both systems)
 
 - **Image payloads** sized like their text payloads (1 MB → 500 MB) so delivery cost is comparable.

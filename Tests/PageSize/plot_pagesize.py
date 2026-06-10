@@ -33,7 +33,7 @@ DEFAULT_BASELINE = os.path.join(HERE, "..", "Micro-Benchmarks", "StateSync-local
 PAGES = [4096, 65536, 2097152]
 LABEL = {4096: "WasMem 4 KiB page", 65536: "WasMem 64 KiB page", 2097152: "WasMem 2 MiB page"}
 COLOR = {4096: "#2057c7", 65536: "#e8843c", 2097152: "#8c1d40"}
-MARKER = {4096: "o", 65536: "s", 2097152: "^"}
+MARKER = {4096: "o", 65536: "o", 2097152: "o"}
 
 # Comparison group: the modelled /dev/shm zero-copy row from StateSync-local.
 COMP = "shm-zerocopy"
@@ -130,8 +130,9 @@ def main():
     comp = {} if args.no_baseline else load_comparison(args.baseline_csv)
 
     figsize = tuple(float(x) for x in args.figsize.split(","))
+    op_label = {"get": "Read", "put": "Write"}
     fig, axes = plt.subplots(1, 2, figsize=figsize)
-    for ax, op in zip(axes, ("put", "get")):
+    for ax, op in zip(axes, ("get", "put")):       # read (GET) left, write (PUT) right
         for pb in pages:
             xs = [idx[s] for s in sorted(data[pb])]
             ys = [float(data[pb][s][f"{op}_{m}_us"]) for s in sorted(data[pb])]
@@ -147,7 +148,7 @@ def main():
         ax.set_xticks(range(len(sizes)))
         ax.set_xticklabels([fmt_size(s) for s in sizes], fontsize=TICK_SIZE)
         ax.set_xlabel("transfer size")
-        ax.set_ylabel(f"{stat} {op.upper()} latency (µs, log)", fontsize=YLABEL_SIZE)
+        ax.set_ylabel(f"{stat} {op_label[op]} latency (µs, log)", fontsize=YLABEL_SIZE)
         ax.grid(True, which="both", ls=":", alpha=0.4)
     fig.tight_layout()
     handles, labels = axes[0].get_legend_handles_labels()

@@ -32,22 +32,32 @@ import matplotlib.pyplot as plt
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_BASELINE = os.path.join(HERE, "..", "Micro-Benchmarks", "StateSync-local", "results.csv")
 DEFAULT_ENGINE = os.path.join(HERE, "results_local.csv")
+DEFAULT_ROADRUNNER = os.path.join(HERE, "results_roadrunner.csv")
 
 # The series we compare, in presentation order (slow -> fast).
-SERIES = ["redis-local", "shm-copy", "shm-zerocopy", "shm-zerocopy-engine"]
+SERIES = ["s3", "redis-local", "rr-embedded",
+          "shm-copy", "shm-zerocopy", "shm-zerocopy-engine"]
 LABEL = {
+    "s3":                  "AWS Step Functions (Minio/S3)",
     "redis-local":         "Cloudburst (Redis local)",
+    "rr-embedded":         "Roadrunner (Shim leverages IPC)",
     "shm-copy":            "Faasm (Shared memory copy)",
-    "shm-zerocopy":        "RMMAP (Shared memory zero-copy)",
+    "shm-zerocopy":        "RMMap (Shared memory zero-copy)",
     "shm-zerocopy-engine": "WasMem (Zero-copy memory routing)",
 }
 COLOR = {
+    "s3":                  "#d1495b",    # red    (matches StateSync-local)
     "redis-local":         "#edae49",   # amber  (matches StateSync-local)
+    "rr-embedded":         "#7b2cbf",    # purple (Roadrunner)
     "shm-copy":            "#2a9d8f",   # teal   (matches StateSync-local)
     "shm-zerocopy":        "#1d7a3e",   # green  (matches StateSync-local)
     "shm-zerocopy-engine": "#2057c7",   # blue   (ours, real)
 }
-MARKER = {"redis-local": "v", "shm-copy": "D", "shm-zerocopy": "*", "shm-zerocopy-engine": "o"}
+MARKER = {"s3": "s", "redis-local": "v", "rr-embedded": "P",
+          "shm-copy": "D", "shm-zerocopy": "*", "shm-zerocopy-engine": "o"}
+
+# Human-friendly operation names for the figures: PUT->write, GET->read.
+OP_LABEL = {"put": "Write", "get": "Read"}
 
 # Font sizes — adopted from StateSync-local/plot.py so the figures match.
 TICK_SIZE   = 16
@@ -83,13 +93,16 @@ def load_rows(path, readers):
     return out
 
 
-def collect(baseline_csv, engine_csv, readers):
+def collect(baseline_csv, engine_csv, roadrunner_csv, readers):
     base = load_rows(baseline_csv, readers)
     eng = load_rows(engine_csv, readers)
+    rr = load_rows(roadrunner_csv, readers)
     data = {}
-    for a in ("redis-local", "shm-copy", "shm-zerocopy"):
+    for a in ("s3", "redis-local", "shm-copy", "shm-zerocopy"):
         if a in base:
             data[a] = base[a]
+    if "rr-embedded" in rr:
+        data["rr-embedded"] = rr["rr-embedded"]
     if "shm-zerocopy-engine" in eng:
         data["shm-zerocopy-engine"] = eng["shm-zerocopy-engine"]
     missing = [a for a in SERIES if a not in data]
@@ -136,13 +149,14 @@ def line_plot(data, col, ylabel, outpath, figsize, logy=True):
 
 
 def panel_plot(data, metric, outpath, figsize):
-    """Combined PUT|GET latency panel with one shared legend above, mirroring
-    StateSync-local/plot.py's latency_put_get figure."""
+    """Combined Read|Write latency panel with one shared legend above, mirroring
+    StateSync-local/plot.py's latency_put_get figure. Read (GET) is on the left,
+    Write (PUT) on the right."""
     sizes = all_sizes(data)
     idx = {s: i for i, s in enumerate(sizes)}
     stat = "Mean" if metric == "mean" else "Median"
     fig, axes = plt.subplots(1, 2, figsize=figsize)
-    for ax, op in zip(axes, ("put", "get")):
+    for ax, op in zip(axes, ("get", "put")):
         for a in present(data):
             xs = [idx[s] for s in sorted(data[a])]
             ys = [float(data[a][s][f"{op}_{metric}_us"]) for s in sorted(data[a])]
@@ -151,7 +165,7 @@ def panel_plot(data, metric, outpath, figsize):
         ax.set_xticks(range(len(sizes)))
         ax.set_xticklabels([fmt_size(s) for s in sizes], fontsize=TICK_SIZE)
         ax.set_xlabel("state size")
-        ax.set_ylabel(f"{stat} {op.upper()} latency (µs, log)", fontsize=YLABEL_SIZE)
+        ax.set_ylabel(f"{stat} {OP_LABEL[op]} latency (µs, log)", fontsize=YLABEL_SIZE)
         ax.grid(True, which="both", ls=":", alpha=0.4)
     # One shared legend anchored entirely above the panels (can't overlap axes).
     fig.tight_layout()
@@ -169,7 +183,7 @@ def speedup(data, op, metric):
         return
     eng = {s: float(r[f"{op}_{metric}_us"]) for s, r in data[base].items()}
     others = [a for a in present(data) if a != base]
-    print(f"\n=== {op.upper()} {metric} speedup of {LABEL[base]} vs others (x) ===")
+    print(f"\n=== {OP_LABEL[op]} {metric} speedup of {LABEL[base]} vs others (x) ===")
     print(f"{'size':>8}  " + "".join(f"{LABEL[a]:>38}" for a in others))
     for s in all_sizes(data):
         cells = []
@@ -184,6 +198,7 @@ def main():
     ap = argparse.ArgumentParser(description="Compare engine zero-copy vs StateSync-local baselines")
     ap.add_argument("--baseline-csv", default=DEFAULT_BASELINE)
     ap.add_argument("--engine-csv", default=DEFAULT_ENGINE)
+    ap.add_argument("--roadrunner-csv", default=DEFAULT_ROADRUNNER)
     ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Graph")))
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--readers", type=int, default=1)
@@ -193,14 +208,14 @@ def main():
     args = ap.parse_args()
 
     figsize = tuple(float(x) for x in args.figsize.split(","))
-    data = collect(args.baseline_csv, args.engine_csv, args.readers)
+    data = collect(args.baseline_csv, args.engine_csv, args.roadrunner_csv, args.readers)
     os.makedirs(args.outdir, exist_ok=True)
     ext, m = args.format, args.metric
 
     tag = "" if m == "p50" else f"_{m}"   # keep p50 filenames stable; tag mean
     panel_plot(data, m, os.path.join(args.outdir, f"compare_put_get{tag}.{ext}"), figsize)
     # Single-panel throughput uses half the width so its aspect matches the panels.
-    line_plot(data, "get_gibps", "GET throughput (GiB/s, log)",
+    line_plot(data, "get_gibps", "Read throughput (GiB/s, log)",
               os.path.join(args.outdir, f"compare_get_throughput.{ext}"),
               (figsize[0] / 2, figsize[1]))
 

@@ -1,0 +1,16 @@
+[package]
+name = "resize"
+version = "0.1.0"
+edition = "2021"
+
+# Faithful baseline resizer: same per-task work as our guest `img_resize`
+# (downscale 0.5, nearest-neighbour, over our internal image format), so the
+# ONLY difference vs our system is the data-delivery path. Built two ways:
+#   native: cargo build --release
+#   wasm:   cargo build --release --target wasm32-wasip1   (run under wasmedge)
+[[bin]]
+name = "resize"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
