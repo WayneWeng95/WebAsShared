@@ -216,6 +216,26 @@ pub(crate) fn assign_slots(nodes: &mut Vec<SymbolicNode>) -> Result<()> {
             new_out.insert("slot".into(), json!(dep_slot));
             nodes[idx].kind = json!({ "Output": Value::Object(new_out) });
             // Output nodes have no output_slot annotation.
+
+        } else if let Some(sp) = kind.get("StreamPipeline").and_then(|v| v.as_object()) {
+            // A StreamPipeline's local output is the last stage's `arg1` slot
+            // (e.g. img_export_ppm → slot 1). Stages carry explicit slots, so we
+            // do not rewrite the kind — we only register the output so a local
+            // downstream node (Output/Func depending on this pipeline) resolves.
+            // Pipelines whose result leaves via embedded `rdma_send` have no local
+            // consumer; recording the slot anyway is harmless.
+            if let Some(out_slot) = sp
+                .get("stages")
+                .and_then(|v| v.as_array())
+                .and_then(|stages| stages.last())
+                .and_then(|last| last.get("arg1"))
+                .and_then(|v| v.as_u64())
+                .map(|v| v as u32)
+            {
+                nodes[idx].output_slot = nodes[idx].output_slot.or(Some(out_slot));
+                id_to_output.insert(node_id, out_slot);
+                next_slot = next_slot.max(out_slot + 1);
+            }
         }
         // All other kinds (RemoteRecv, RemoteSend, Bridge, …) pass through unchanged.
     }

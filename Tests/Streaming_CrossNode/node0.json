@@ -1,0 +1,45 @@
+{
+  "_comment": "Cross-node streaming test — Node 0 (loader/sender). Run on 10.10.1.2 (node-0).",
+  "_comment2": "Loads 3 PPMs, 1-stage StreamPipeline decodes one image per round into stream",
+  "_comment3": "slot 20 and RDMA-sends it to node 1 on the dedicated streaming lane (conn-3/4).",
+  "shm_path": "/dev/shm/xnode_img_node0",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 0,
+    "total": 2,
+    "ips": ["10.10.1.2", "10.10.1.1"],
+    "transfer": true
+  },
+  "nodes": [
+    {
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": {
+        "paths": [
+          "TestData/img_gradient.ppm",
+          "TestData/img_checkerboard.ppm",
+          "TestData/img_rings.ppm"
+        ],
+        "slot": 10,
+        "binary": true
+      }}
+    },
+    {
+      "id": "pipeline",
+      "deps": ["load"],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_load_ppm", "arg0": 10, "arg1": 20 }
+        ],
+        "rdma_send": {
+          "peer": 1,
+          "slot": 20,
+          "slot_kind": "Stream",
+          "free_after": true
+        }
+      }}
+    }
+  ]
+}

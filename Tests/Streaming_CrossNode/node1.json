@@ -1,0 +1,52 @@
+{
+  "_comment": "Cross-node streaming test — Node 1 (receiver/processor). Run on 10.10.1.1 (node-1).",
+  "_comment2": "Receives one decoded image per round into stream slot 20, runs a 5-stage",
+  "_comment3": "StreamPipeline (rotate->grayscale->equalize->blur->export), writes 3 PGMs.",
+  "shm_path": "/dev/shm/xnode_img_node1",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 1,
+    "total": 2,
+    "ips": ["10.10.1.2", "10.10.1.1"],
+    "transfer": true
+  },
+  "nodes": [
+    {
+      "id": "pipeline",
+      "deps": [],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_rotate",     "arg0": 20, "arg1": 30 },
+          { "func": "img_grayscale",  "arg0": 30, "arg1": 40 },
+          { "func": "img_equalize",   "arg0": 40, "arg1": 50 },
+          { "func": "img_blur",       "arg0": 50, "arg1": 60 },
+          { "func": "img_export_ppm", "arg0": 60, "arg1": 1  }
+        ],
+        "rdma_recv": {
+          "peer": 0,
+          "slot": 20,
+          "slot_kind": "Stream"
+        }
+      }}
+    },
+    {
+      "id": "save",
+      "deps": ["pipeline"],
+      "kind": { "Output": {
+        "paths": [
+          "TestOutput/rdma_img_pipeline_out/gradient_processed.pgm",
+          "TestOutput/rdma_img_pipeline_out/checkerboard_processed.pgm",
+          "TestOutput/rdma_img_pipeline_out/rings_processed.pgm"
+        ],
+        "slot": 1
+      }}
+    },
+    {
+      "id": "free",
+      "deps": ["save"],
+      "kind": { "FreeSlots": { "stream": [20, 30, 40, 50, 60], "io": [1] } }
+    }
+  ]
+}
