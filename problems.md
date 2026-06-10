@@ -107,7 +107,22 @@ removed from this file. One-line trace below; details are in git history.
     [ ] Cross-node streaming TEST HARNESS (Tests/Streaming, 2-node loopback):
         lockstep rounds, per-tick hand-off correctness (no dropped/duplicated
         rounds), result matches single-node baseline. Rust + Python.
-    [ ] Real-cluster (not loopback) end-to-end verification.
+        PARTIAL: Tests/Streaming_CrossNode/ has the hand-split node0/node1 image
+        DAGs + verify.py (byte-compare vs single-node baseline). Still want the
+        deterministic analytic (pipeline_source→…→sink) lockstep version + Python.
+    [x] Real-cluster (not loopback) end-to-end verification — DONE 2026-06-10.
+        Two physical nodes (node-0 10.10.1.2, node-1 10.10.1.1, mlx4_0). Image
+        pipeline split across nodes (node0 decode → RDMA → node1 rotate/gray/
+        equalize/blur/export): 3/3 images byte-identical to the single-node
+        baseline (gradient=683910b9, checker/rings=c36c7705). conn-3/4 streaming
+        lanes + round-handling confirmed on real RDMA, not just loopback.
+        GOTCHAS hit (operational, not code): (a) both nodes must be on the SAME
+        commit + rebuilt — a node-1 binary predating the conn-3/4 commit (d52167e)
+        dials only conn-1/2 and deadlocks node-0's mesh setup; (b) a multi-path
+        Output needs `split_records: true` or it writes all N records into paths[0].
+        NOTE: the committed img DAGs (rdma_img_pipeline_node1, rdma_py_img_pipeline_
+        node1, img_pipeline_auto_placement save_images, pipeline_routing save_images)
+        all still MISSING split_records — latent same-bug.
 
 
 after the worker dropped, wait for 30s,if job submitted, excluding it from calculated the job partitioning. after 30s not responses make it out from the cluster for scheduling decision. (Do it later, not important now)

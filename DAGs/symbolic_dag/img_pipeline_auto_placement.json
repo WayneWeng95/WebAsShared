@@ -93,7 +93,8 @@
           "TestOutput/rdma_pipeline_routing_out/checkerboard_processed.pgm",
           "TestOutput/rdma_pipeline_routing_out/rings_processed.pgm"
         ],
-        "slot": 1
+        "slot": 1,
+        "split_records": true
       }}
     },
 
