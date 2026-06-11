@@ -45,20 +45,21 @@ removed from this file. One-line trace below; details are in git history.
 --- TODO ------------------------------------------------------------------------
 
 PRIORITY ORDER (updated 2026-06-11):
-  1. CLUSTER e2e for what's built: run DAGs/symbolic_dag/img_pipeline_split.json
-     (auto-split) via node-agent submit; submit a hinted SymbolicDag to observe the
-     locality cut; word-count distributed COUNTS == baseline (only timing confirmed).
-  2. Phase 2 follow-ons: multi-cut / N-machine chains; auto-pick the cut stage from
-     split/out_weight weights (today cut_after is explicit); hint-driven half placement.
-  3. Autoscaling under cross-node VARIABLE load (images are 1 rec/round → never triggers).
-  4. [FUTURE WORK] Peer-failure robustness — a RemoteRecv whose peer dies segfaults
+  1. CLUSTER e2e remaining: submit a hinted SymbolicDag to observe the locality cut;
+     word-count distributed COUNTS == baseline (only timing confirmed).
+     [DONE: auto-split img_pipeline_split.json cluster-verified via node-agent submit.]
+  2. Autoscaling under cross-node VARIABLE load (images are 1 rec/round → never triggers).
+  3. [FUTURE WORK] Peer-failure robustness — a RemoteRecv whose peer dies segfaults
      (seen when node-1 lacked a local input under bare `host dag`). Pre-existing.
-  5. Cross-node streaming test harness (deterministic analytic lockstep + Python).
-  6. [FUTURE WORK] Worker-drop scheduling grace period.
+  4. Cross-node streaming test harness (deterministic analytic lockstep + Python).
+  5. [FUTURE WORK] Worker-drop scheduling grace period.
   Separate track, ongoing (outside this order): benchmark baselines.
+  NOTE: streaming fan-out FEATURE work is COMPLETE (per-stage width, autoscaling, Phase 2
+        cross-host auto-split + N-way/self-optimizing/hint-aware cuts). What's left is
+        verification (cluster e2e), the deferred items above, and the benchmark track.
   DONE: Mode 2 (cluster); locality split hint (local+structural); streaming fan-out
         Phase 1 width (cluster) + 3 load signals + 4 autoscaling (local) + Phase 2
-        cross-host auto-split (local+loopback). See TEST STATUS block below.
+        cross-host auto-split (cluster) + N-way/self-optimizing/hint-aware (local+loopback).
 
 [x] RDMA OUTPUT-RETURN, Mode 1 (batch) — DONE + cluster-verified 2026-06-10.
     A worker's output is returned to the coordinator (node 0) over RDMA just by
@@ -152,8 +153,9 @@ PRIORITY ORDER (updated 2026-06-11):
             word-count filter×3+transform×2 == width:1 == analytic + deterministic
             (correct sum proves all records were distributed across workers), image
             widened-stage byte-identical. build.sh green.
-        [x] PHASE 2 — cross-host streaming via partitioner AUTO-SPLIT (local + loopback
-            2026-06-11; cluster pending user). Chosen form (user): auto-split ONE
+        [x] PHASE 2 — cross-host streaming via partitioner AUTO-SPLIT — DONE +
+            CLUSTER-VERIFIED 2026-06-11 (node-agent submit, 3/3 byte-identical to baseline).
+            Chosen form (user): auto-split ONE
             StreamPipeline across machines at a stage cut, NOT cross-machine stage width.
             New `cut_after: k` on the StreamPipeline kind (partitioner-only; executor never
             sees it). New pass split_stream_pipelines (splitter.rs, after expand_fanout):
@@ -166,8 +168,33 @@ PRIORITY ORDER (updated 2026-06-11):
             split.json (cut_after:0, widths on 2 stages). VERIFIED: 21 partitioner tests
             (new split_stream_pipeline_at_cut), 2-node loopback 3/3 byte-identical to baseline
             (verify_combo.py), existing 7 symbolic DAGs still partition (no-op without
-            cut_after), Tests/Streaming 34/34, build.sh green. v1 = 2 machines / single cut /
-            terminal-Output return; multi-cut + N-machine + hint-auto-picked cut = follow-ons.
+            cut_after), Tests/Streaming 34/34, build.sh green.
+        [x] PHASE 2 N-WAY + SELF-OPTIMIZING + HINT-AWARE — DONE (local+loopback 2026-06-11).
+            Generalized split_stream_pipelines to M segments. New `segments: M` on the
+            StreamPipeline kind auto-picks the M-1 CHEAPEST stage boundaries via choose_cuts:
+            per-stage cost = split:"avoid"→∞ (never), split:"prefer"→0 (first), else
+            out_weight (default 1.0) — the locality-hint philosophy applied to stage
+            boundaries. `cut_after` (now int OR list) stays as explicit override. Segments
+            chained by embedded rdma (recv from prev + send to next; last sends the Io
+            return to node 0); placed by machine_order = coordinator + others by capacity
+            hint desc (homogeneous → sequential). `segments` CLAMPS to online node count
+            (segments:3 → 2 segments on a 2-node cluster). All partitioner-only; executor +
+            types.rs untouched (serde ignores the extra per-stage fields). VERIFIED: 22
+            partitioner tests (split_three_way_auto_cut asserts cheapest cuts + avoid skipped
+            + chain wiring); 2-segment AUTO loopback == baseline; 3-segment / 3-NODE loopback
+            == baseline; explicit cut_after still passes; 7 symbolic DAGs partition; Streaming
+            34/34. DAG: DAGs/symbolic_dag/img_pipeline_split_auto.json (segments:3 + hints).
+            Cost is a relative HINT (out_weight/split), not measured bytes — runtime-measured
+            volumes are a later idea. Placement reuses existing capacity hints (no new
+            scheduler). REMAINING streaming feature work: none (cluster e2e of segments:N is
+            the only open item, user-driven).
+            COORDINATOR FIX (NodeAgent/agent/src/cluster_dag.rs has_remote_nodes): the
+            node-agent attached the per-node `rdma` block only when a kind contained
+            RemoteSend/RemoteRecv — it MISSED EMBEDDED rdma_send/rdma_recv (StreamPipeline/
+            StreamOutput), so node 0's StreamOutput failed "requires dag.rdma" on the first
+            cluster submit. Added rdma_send/rdma_recv substring detection (additive). Latent
+            bug for ANY embedded-RDMA DAG submitted via the coordinator (Mode 2 too, had it
+            not been hand-split with an explicit rdma block). After fix: CLUSTER RUN GREEN.
         [x] PHASE 3 — load signals (locally tested 2026-06-11). Per-stage input load
             (records/tick delta) + active ticks accumulated in execute_stream_pipeline,
             printed as a per-stage "load profile" at pipeline end (identifies the
@@ -201,12 +228,13 @@ PRIORITY ORDER (updated 2026-06-11):
                distributed RUN (cluster) + loopback==baseline, backward-compat
                (Streaming 34/34, 20 partitioner tests, symbolic DAGs partition).
       LEFT:    (1) word-count COUNTS==baseline on cluster (only timing confirmed);
-               (2) locality hint end-to-end on cluster; (3) auto-split img_pipeline_split
-               .json on the real cluster (loopback-passed); (4) autoscaling under
-               cross-node VARIABLE load; (5) Phase 2 follow-ons (multi-cut / N-machine /
-               hint-auto-cut); (6) peer-failure hardening; (7) the 24 rdma_workload_dag/
-               rdma_demo_dag hand-split DAGs not re-run (additive-schema-safe).
-    Phase 2 cross-host AUTO-SPLIT is now BUILT (was "unbuilt") — see PHASE 2 above.
+               (2) locality hint end-to-end on cluster; (3) autoscaling under cross-node
+               VARIABLE load; (4) Phase 2 follow-ons (multi-cut / N-machine / hint-auto-cut);
+               (5) peer-failure hardening; (6) the 24 rdma_workload_dag/rdma_demo_dag
+               hand-split DAGs not re-run (additive-schema-safe).
+    Phase 2 cross-host AUTO-SPLIT BUILT + CLUSTER-VERIFIED (img_pipeline_split.json via
+    node-agent submit, 3/3 == baseline) — see PHASE 2 above. Required the cluster_dag.rs
+    embedded-RDMA detection fix.
 
 [ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto
     the table. Tests/Fan_out_remote/ is the starting point for the measurement side.

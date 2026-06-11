@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Phase 2 follow-on — N-way, SELF-OPTIMIZING, HINT-AWARE cross-host streaming.",
+    "A single 6-stage StreamPipeline with `segments: 3` (no explicit cut_after): the",
+    "partitioner auto-picks the 2 CHEAPEST stage boundaries to cut on, using per-stage",
+    "hints — `split:\"prefer\"` (cut here) / `split:\"avoid\"` (never) / `out_weight`",
+    "(relative data emitted; lower = cheaper to ship). It then chains M StreamPipeline",
+    "segments across M machines by embedded RDMA and returns each round to node 0",
+    "(StreamOutput sink). `segments` clamps to the online node count, so this runs as",
+    "2 segments on a 2-node cluster and 3 on a 3-node cluster automatically.",
+    "Here img_load_ppm (prefer) and the grayscale→equalize boundary (low out_weight)",
+    "are the cheap cuts; img_blur is marked avoid. Output is byte-identical to the",
+    "single-node baseline (verify with Tests/Streaming_CrossNode/verify_combo.py).",
+    "Submit via `node-agent submit` (coordinator partitions + RDMA-stages + runs)."
+  ],
+  "shm_path_prefix": "/dev/shm/img_split_auto",
+  "total_nodes": 3,
+  "transfer": true,
+  "nodes": [
+    { "id": "load", "node_id": 0, "deps": [],
+      "kind": { "Input": { "paths": [
+        "TestData/img_gradient.ppm",
+        "TestData/img_checkerboard.ppm",
+        "TestData/img_rings.ppm"
+      ], "slot": 10, "binary": true } } },
+    { "id": "pipe", "deps": ["load"],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "segments": 3,
+        "stages": [
+          { "func": "img_load_ppm",  "arg0": 10, "arg1": 20, "split": "prefer" },
+          { "func": "img_rotate",    "arg0": 20, "arg1": 30 },
+          { "func": "img_grayscale", "arg0": 30, "arg1": 40, "out_weight": 0.2 },
+          { "func": "img_equalize",  "arg0": 40, "arg1": 50 },
+          { "func": "img_blur",      "arg0": 50, "arg1": 60, "split": "avoid" },
+          { "func": "img_export_ppm","arg0": 60, "arg1": 5  }
+        ]
+      } } },
+    { "id": "save", "deps": ["pipe"],
+      "kind": { "Output": { "slot": 5, "split_records": true, "paths": [
+        "TestOutput/combo_return_out/gradient_processed.pgm",
+        "TestOutput/combo_return_out/checkerboard_processed.pgm",
+        "TestOutput/combo_return_out/rings_processed.pgm"
+      ] } } }
+  ]
+}

@@ -88,7 +88,7 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
     // ── 0·. Cross-host streaming: auto-split any StreamPipeline marked `cut_after`
     // into two RDMA-wired halves + a StreamOutput return sink (pre-pinned, so the
     // placer below leaves them be).  No-op when no pipeline carries `cut_after`.
-    let mut nodes = split_stream_pipelines(nodes0, total_nodes)?;
+    let mut nodes = split_stream_pipelines(nodes0, total_nodes, effective_hints)?;
 
     // ── 0a. Converge-on-coordinator: before auto-placement, pin the convergence
     // tail (Output + its single-chain auto ancestors up to the first fan-in)
@@ -810,107 +810,172 @@ fn stream_pipeline_kind(rounds: u64, stages: Vec<Value>,
     json!({ "StreamPipeline": Value::Object(sp) })
 }
 
-/// Auto-split any `StreamPipeline` carrying `cut_after: k` across two machines at
-/// that stage boundary, producing the cross-node streaming topology automatically:
-///
-///   pipe__a (machine A, stages 0..=k) --embedded rdma_send(boundary,Stream)-->
-///   pipe__b (machine B, stages k+1..) --embedded rdma_send(return,Io)--> node 0
-///   sink    (node 0, StreamOutput rdma_recv(return,Io) → paths[round])
-///
-/// `boundary` = `stages[k].arg1` (the slot crossing the cut); `return` = the
-/// original last stage's `arg1` (Io, returned per round). The downstream `Output`
-/// consumer is converted to the `StreamOutput` sink. No-op when `total_nodes < 2`
-/// or no pipeline has `cut_after`. v1: one cut → two machines (A = pipeline's
-/// node_id or 0, B = A+1).
-fn split_stream_pipelines(nodes: Vec<SymbolicNode>, total_nodes: usize) -> Result<Vec<SymbolicNode>> {
-    // Index pipelines to split: id → cut_after.
-    let to_split: HashMap<String, usize> = nodes.iter().filter_map(|n| {
-        n.kind.get("StreamPipeline")
-            .and_then(|sp| sp.get("cut_after"))
-            .and_then(|v| v.as_u64())
-            .map(|k| (n.id.clone(), k as usize))
-    }).collect();
+/// Cost of cutting after a stage = the data it emits per round (a relative hint):
+/// `split:"avoid"` → ∞ (never cut here), `split:"prefer"` → 0 (cut here first),
+/// else `out_weight` (default 1.0).
+fn boundary_cost(stage: &Value) -> f64 {
+    match stage.get("split").and_then(|v| v.as_str()) {
+        Some("avoid")  => f64::INFINITY,
+        Some("prefer") => 0.0,
+        _ => stage.get("out_weight").and_then(|v| v.as_f64()).unwrap_or(1.0),
+    }
+}
+
+/// Pick `m-1` cut points (after-stage indices in `[0, len-2]`) for `m` segments,
+/// cheapest first (skipping `avoid`=∞), tie-broken by earliest index.  Sorted asc.
+fn choose_cuts(stages: &[Value], m: usize) -> Vec<usize> {
+    if m <= 1 || stages.len() < 2 { return Vec::new(); }
+    let mut cand: Vec<(usize, f64)> = (0..stages.len() - 1)
+        .map(|k| (k, boundary_cost(&stages[k])))
+        .filter(|&(_, c)| c.is_finite())
+        .collect();
+    cand.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+    let mut cuts: Vec<usize> = cand.into_iter().take(m - 1).map(|(k, _)| k).collect();
+    cuts.sort_unstable();
+    cuts
+}
+
+/// Segment placement order: coordinator (0) first, then the other machines by the
+/// capacity hint (desc).  On a homogeneous cluster this is `0,1,2,…`.
+fn machine_order(total_nodes: usize, hints: &PlacementHints) -> Vec<u32> {
+    let mut rest: Vec<u32> = (1..total_nodes as u32).collect();
+    rest.sort_by(|a, b| {
+        let (ca, cb) = (hints.capacity.get(a).copied().unwrap_or(0.0),
+                        hints.capacity.get(b).copied().unwrap_or(0.0));
+        cb.partial_cmp(&ca).unwrap_or(std::cmp::Ordering::Equal).then(a.cmp(b))
+    });
+    std::iter::once(0u32).chain(rest).collect()
+}
+
+/// Resolve a pipeline's cut points: explicit `cut_after` (int or list) wins; else
+/// `segments: M` auto-picks the M-1 cheapest boundaries.  Returns validated, sorted
+/// cut indices, or `None` when the pipeline should not be split.
+fn cut_points_for(sp: &serde_json::Map<String, Value>, total_nodes: usize, who: &str)
+    -> Result<Option<Vec<usize>>>
+{
+    let stages = match sp.get("stages").and_then(|v| v.as_array()) {
+        Some(s) => s, None => return Ok(None),
+    };
+    let mut cuts: Vec<usize> = if let Some(ca) = sp.get("cut_after") {
+        match ca {
+            Value::Number(_) => ca.as_u64().map(|k| vec![k as usize]).unwrap_or_default(),
+            Value::Array(a)  => a.iter().filter_map(|v| v.as_u64().map(|x| x as usize)).collect(),
+            _ => bail!("'{}' cut_after must be an integer or a list of integers", who),
+        }
+    } else if let Some(m) = sp.get("segments").and_then(|v| v.as_u64()).map(|m| m as usize) {
+        if m <= 1 { return Ok(None); }
+        choose_cuts(stages, m.min(total_nodes).min(stages.len()))
+    } else {
+        return Ok(None);
+    };
+    cuts.sort_unstable();
+    cuts.dedup();
+    if cuts.is_empty() { return Ok(None); }
+    if *cuts.last().unwrap() + 1 >= stages.len() {
+        bail!("'{}' cut after stage {} leaves no stages downstream ({} stages)",
+              who, cuts.last().unwrap(), stages.len());
+    }
+    if cuts.len() + 1 > total_nodes {
+        bail!("'{}' needs {} machines (segments) but total_nodes is {}",
+              who, cuts.len() + 1, total_nodes);
+    }
+    Ok(Some(cuts))
+}
+
+/// Auto-split any `StreamPipeline` carrying `segments: M` (or explicit `cut_after`)
+/// into M cross-node streaming SEGMENTS.  Cut points fall where the data is cheapest
+/// (per-stage `split`/`out_weight`); segments are placed on machines ordered by the
+/// capacity hint (coordinator first).  Each segment is a `StreamPipeline` wired to its
+/// neighbours by embedded rdma_send/rdma_recv (streaming lane); the last segment
+/// returns each round to node 0 (Io), where the terminal `Output` becomes a
+/// `StreamOutput` sink.  No-op when `total_nodes < 2` or no pipeline is marked.
+fn split_stream_pipelines(nodes: Vec<SymbolicNode>, total_nodes: usize, hints: &PlacementHints)
+    -> Result<Vec<SymbolicNode>>
+{
+    let mut to_split: HashMap<String, Vec<usize>> = HashMap::new();
+    for n in &nodes {
+        if let Some(sp) = n.kind.get("StreamPipeline").and_then(|v| v.as_object()) {
+            if let Some(cuts) = cut_points_for(sp, total_nodes, &n.id)? {
+                to_split.insert(n.id.clone(), cuts);
+            }
+        }
+    }
     if to_split.is_empty() { return Ok(nodes); }
     if total_nodes < 2 {
-        bail!("StreamPipeline 'cut_after' needs total_nodes ≥ 2 (got {})", total_nodes);
+        bail!("StreamPipeline cut needs total_nodes ≥ 2 (got {})", total_nodes);
     }
+    let machines = machine_order(total_nodes, hints);
 
-    let mut out: Vec<SymbolicNode> = Vec::with_capacity(nodes.len() + 1);
-    // Map each split pipeline id → the StreamOutput sink id that replaces its
-    // terminal Output (so we can detect + convert that Output below).
-    let mut sink_for_pipe: HashMap<String, ()> = HashMap::new();
+    let mut out: Vec<SymbolicNode> = Vec::with_capacity(nodes.len() + 2);
+    // pipe id → (return_slot, last_machine, seg0_deps) for the sink conversion.
+    let mut split_meta: HashMap<String, (u32, u32, Vec<String>)> = HashMap::new();
 
-    // First pass: split the pipelines, remember their return slot + machine B.
-    let mut split_meta: HashMap<String, (u32, u32)> = HashMap::new(); // pipe_id → (return_slot, machine_B)
+    // First pass: emit the M segments per split pipeline.
     for node in &nodes {
-        let Some(&cut_after) = to_split.get(&node.id) else { continue };
-        let sp = node.kind.get("StreamPipeline").and_then(|v| v.as_object())
-            .ok_or_else(|| anyhow!("'{}' StreamPipeline kind malformed", node.id))?;
+        let Some(cuts) = to_split.get(&node.id) else { continue };
+        let sp = node.kind.get("StreamPipeline").and_then(|v| v.as_object()).unwrap();
         let rounds = sp.get("rounds").and_then(|v| v.as_u64())
             .ok_or_else(|| anyhow!("'{}' StreamPipeline missing rounds", node.id))?;
-        let stages = sp.get("stages").and_then(|v| v.as_array())
-            .ok_or_else(|| anyhow!("'{}' StreamPipeline missing stages", node.id))?;
-        if cut_after + 1 >= stages.len() {
-            bail!("'{}' cut_after={} leaves no stages on the downstream node \
-                   ({} stages; need cut_after ≤ {})",
-                  node.id, cut_after, stages.len(), stages.len().saturating_sub(2));
-        }
-        let machine_a = node.node_id.unwrap_or(0);
-        let machine_b = machine_a + 1;
-        if machine_b as usize >= total_nodes {
-            bail!("'{}' cut needs machine {} but total_nodes is {}", node.id, machine_b, total_nodes);
-        }
-        let boundary = stages[cut_after].get("arg1").and_then(|v| v.as_u64())
-            .ok_or_else(|| anyhow!("'{}' stage {} has no arg1 to cut on", node.id, cut_after))? as u32;
+        let stages = sp.get("stages").and_then(|v| v.as_array()).unwrap();
+        let m = cuts.len() + 1; // segment count
+
+        // Stage range [lo, hi) of each segment.
+        let mut bounds: Vec<(usize, usize)> = Vec::with_capacity(m);
+        let mut lo = 0usize;
+        for &c in cuts { bounds.push((lo, c + 1)); lo = c + 1; }
+        bounds.push((lo, stages.len()));
+
+        let boundary_slot = |c: usize| -> Result<u32> {
+            stages[c].get("arg1").and_then(|v| v.as_u64()).map(|v| v as u32)
+                .ok_or_else(|| anyhow!("'{}' stage {} has no arg1 to cut on", node.id, c))
+        };
         let return_slot = stages.last().and_then(|s| s.get("arg1")).and_then(|v| v.as_u64())
             .ok_or_else(|| anyhow!("'{}' last stage has no arg1 for the return", node.id))? as u32;
 
-        let a_stages: Vec<Value> = stages[..=cut_after].to_vec();
-        let b_stages: Vec<Value> = stages[cut_after + 1..].to_vec();
-
-        let a_send = json!({ "peer": machine_b, "slot": boundary, "slot_kind": "Stream", "free_after": true });
-        let b_recv = json!({ "peer": machine_a, "slot": boundary, "slot_kind": "Stream" });
-        let b_send = json!({ "peer": 0, "slot": return_slot, "slot_kind": "Io", "free_after": true });
-
-        out.push(pinned_node(format!("{}__a", node.id), node.deps.clone(), machine_a,
-                             stream_pipeline_kind(rounds, a_stages, None, Some(a_send))));
-        out.push(pinned_node(format!("{}__b", node.id), Vec::new(), machine_b,
-                             stream_pipeline_kind(rounds, b_stages, Some(b_recv), Some(b_send))));
-
-        split_meta.insert(node.id.clone(), (return_slot, machine_b));
-        sink_for_pipe.insert(node.id.clone(), ());
+        for s in 0..m {
+            let (slo, shi) = bounds[s];
+            let seg_stages: Vec<Value> = stages[slo..shi].to_vec();
+            let recv = if s > 0 {
+                Some(json!({ "peer": machines[s - 1], "slot": boundary_slot(cuts[s - 1])?, "slot_kind": "Stream" }))
+            } else { None };
+            let send = if s < m - 1 {
+                Some(json!({ "peer": machines[s + 1], "slot": boundary_slot(cuts[s])?, "slot_kind": "Stream", "free_after": true }))
+            } else {
+                Some(json!({ "peer": 0, "slot": return_slot, "slot_kind": "Io", "free_after": true }))
+            };
+            let deps = if s == 0 { node.deps.clone() } else { Vec::new() };
+            out.push(pinned_node(format!("{}__s{}", node.id, s), deps, machines[s],
+                                 stream_pipeline_kind(rounds, seg_stages, recv, send)));
+        }
+        split_meta.insert(node.id.clone(), (return_slot, machines[m - 1], node.deps.clone()));
     }
 
-    // Second pass: copy through non-split nodes, converting the terminal Output of
-    // a split pipeline into a StreamOutput sink; drop the original pipeline nodes.
+    // Second pass: convert each split pipeline's terminal Output → StreamOutput sink;
+    // drop the original pipeline nodes; pass everything else through.
     for node in nodes {
-        if to_split.contains_key(&node.id) { continue; } // replaced above
-
-        // Is this the terminal Output consumer of a split pipeline?
-        let split_dep = node.deps.iter().find(|d| sink_for_pipe.contains_key(*d)).cloned();
+        if to_split.contains_key(&node.id) { continue; }
+        let split_dep = node.deps.iter().find(|d| split_meta.contains_key(*d)).cloned();
         if let (Some(pipe_id), Some(out_obj)) =
             (split_dep, node.kind.get("Output").and_then(|v| v.as_object()))
         {
-            let (return_slot, machine_b) = split_meta[&pipe_id];
+            let (return_slot, last_machine, seg0_deps) = split_meta[&pipe_id].clone();
             let paths = out_obj.get("paths").and_then(|v| v.as_array()).cloned()
                 .filter(|p| !p.is_empty())
                 .ok_or_else(|| anyhow!(
                     "Output '{}' returning a split StreamPipeline must use `paths` \
                      (one per round) for the StreamOutput sink", node.id))?;
-            // Find this pipeline's rounds from its __b half we just made.
-            let rounds = out.iter().find(|n| n.id == format!("{}__b", pipe_id))
+            let rounds = out.iter().find(|n| n.id == format!("{}__s0", pipe_id))
                 .and_then(|n| n.kind.get("StreamPipeline"))
                 .and_then(|sp| sp.get("rounds")).and_then(|v| v.as_u64()).unwrap_or(0);
-            // Sink shares the source half's wave (deps = the pipeline's original deps),
-            // runs as a thread, and pulls each round back over RDMA from machine B.
-            let a_deps = out.iter().find(|n| n.id == format!("{}__a", pipe_id))
-                .map(|n| n.deps.clone()).unwrap_or_default();
+            // Sink shares the source segment's wave (deps = the pipeline's original
+            // deps), runs as a thread, and pulls each round back over RDMA from the
+            // last segment's machine.
             let sink_kind = json!({ "StreamOutput": {
                 "rounds": rounds, "slot": return_slot, "slot_kind": "Io", "binary": true,
-                "rdma_recv": { "peer": machine_b, "slot": return_slot, "slot_kind": "Io" },
+                "rdma_recv": { "peer": last_machine, "slot": return_slot, "slot_kind": "Io" },
                 "paths": Value::Array(paths),
             }});
-            out.push(pinned_node(node.id.clone(), a_deps, 0, sink_kind));
+            out.push(pinned_node(node.id.clone(), seg0_deps, 0, sink_kind));
             continue;
         }
         out.push(node);
@@ -1125,17 +1190,17 @@ mod tests {
         let n1: Vec<Value> = serde_json::from_value(nd["1"].clone()).unwrap();
         let find = |ns: &[Value], id: &str| ns.iter().find(|n| n["id"].as_str() == Some(id)).cloned();
 
-        // Upstream half on node 0: stages[0..=0], embedded rdma_send of the boundary (20).
-        let a = find(&n0, "pipe__a").expect("pipe__a on node 0");
+        // Upstream segment on node 0: stages[0..=0], embedded rdma_send of the boundary (20).
+        let a = find(&n0, "pipe__s0").expect("pipe__s0 on node 0");
         let asp = &a["kind"]["StreamPipeline"];
-        assert_eq!(asp["stages"].as_array().unwrap().len(), 1, "pipe__a keeps 1 stage");
+        assert_eq!(asp["stages"].as_array().unwrap().len(), 1, "pipe__s0 keeps 1 stage");
         assert_eq!(asp["rdma_send"]["slot"], json!(20));
         assert_eq!(asp["rdma_send"]["peer"], json!(1));
         assert_eq!(asp["rdma_send"]["slot_kind"], json!("Stream"));
         assert!(asp.get("cut_after").is_none(), "cut_after must not leak to the executor");
 
-        // Downstream half on node 1: stages[1..], rdma_recv(boundary) + rdma_send(return,Io).
-        let b = find(&n1, "pipe__b").expect("pipe__b on node 1");
+        // Downstream segment on node 1: stages[1..], rdma_recv(boundary) + rdma_send(return,Io).
+        let b = find(&n1, "pipe__s1").expect("pipe__s1 on node 1");
         let bsp = &b["kind"]["StreamPipeline"];
         assert_eq!(bsp["stages"].as_array().unwrap().len(), 2, "pipe__b keeps 2 stages");
         assert_eq!(bsp["stages"][0]["width"], json!(2), "per-stage width survives the split");
@@ -1156,5 +1221,72 @@ mod tests {
         assert!(find(&n0, "pipe").is_none() && find(&n1, "pipe").is_none());
         assert!(!n0.iter().chain(&n1).any(|n| n["id"].as_str().map_or(false, |s| s.starts_with("rs_") || s.starts_with("rr_"))),
                 "split halves use embedded RDMA, not injected RemoteSend/Recv nodes");
+    }
+
+    const SPLIT_3WAY_SYMBOLIC: &str = r#"{
+      "shm_path_prefix": "/dev/shm/s3", "total_nodes": 3, "transfer": true,
+      "nodes": [
+        { "id": "load", "node_id": 0, "deps": [],
+          "kind": { "Input": { "paths": ["a"], "slot": 10, "binary": true } } },
+        { "id": "pipe", "deps": ["load"], "kind": { "StreamPipeline": {
+            "rounds": 3, "segments": 3, "stages": [
+              { "func": "s0", "arg0": 10, "arg1": 20, "out_weight": 5 },
+              { "func": "s1", "arg0": 20, "arg1": 30, "split": "prefer" },
+              { "func": "s2", "arg0": 30, "arg1": 40, "split": "avoid"  },
+              { "func": "s3", "arg0": 40, "arg1": 50, "out_weight": 0.1 },
+              { "func": "s4", "arg0": 50, "arg1": 5 } ] } } },
+        { "id": "save", "deps": ["pipe"],
+          "kind": { "Output": { "slot": 5, "split_records": true, "paths": ["o0","o1"] } } }
+      ] }"#;
+
+    #[test]
+    fn split_three_way_auto_cut() {
+        let dag = SymbolicDag::from_json(SPLIT_3WAY_SYMBOLIC).expect("parse");
+        // Empty hints → machine_order is deterministic 0,1,2.
+        let out = partition(&dag, Some(&PlacementHints::default())).expect("partition");
+        let nd = out["node_dags"].as_object().unwrap();
+        let all: Vec<Value> = (0..3).flat_map(|h|
+            serde_json::from_value::<Vec<Value>>(nd[&h.to_string()].clone()).unwrap()).collect();
+        let find = |id: &str| all.iter().find(|n| n["id"].as_str() == Some(id)).cloned();
+        let on = |id: &str| -> i64 {
+            for h in 0..3 {
+                let ns: Vec<Value> = serde_json::from_value(nd[&h.to_string()].clone()).unwrap();
+                if ns.iter().any(|n| n["id"].as_str() == Some(id)) { return h; }
+            }
+            -1
+        };
+
+        // 3 segments → cuts chosen at the two CHEAPEST boundaries: after s1 (prefer→0)
+        // and after s3 (out_weight 0.1). s2 (avoid) is never a boundary.
+        let s0 = find("pipe__s0").expect("s0"); let s0sp = &s0["kind"]["StreamPipeline"];
+        let s1 = find("pipe__s1").expect("s1"); let s1sp = &s1["kind"]["StreamPipeline"];
+        let s2 = find("pipe__s2").expect("s2"); let s2sp = &s2["kind"]["StreamPipeline"];
+
+        // Stage partition: [s0,s1] | [s2,s3] | [s4]
+        assert_eq!(s0sp["stages"].as_array().unwrap().len(), 2);
+        assert_eq!(s1sp["stages"].as_array().unwrap().len(), 2);
+        assert_eq!(s2sp["stages"].as_array().unwrap().len(), 1);
+
+        // Placement on machines 0,1,2 (homogeneous → sequential).
+        assert_eq!((on("pipe__s0"), on("pipe__s1"), on("pipe__s2")), (0, 1, 2));
+
+        // Chain wiring: boundary slots are 30 (after s1) and 50 (after s3).
+        assert_eq!(s0sp["rdma_send"]["slot"], json!(30)); assert_eq!(s0sp["rdma_send"]["peer"], json!(1));
+        assert!(s0sp.get("rdma_recv").is_none());
+        assert_eq!(s1sp["rdma_recv"]["slot"], json!(30)); assert_eq!(s1sp["rdma_recv"]["peer"], json!(0));
+        assert_eq!(s1sp["rdma_send"]["slot"], json!(50)); assert_eq!(s1sp["rdma_send"]["peer"], json!(2));
+        assert_eq!(s2sp["rdma_recv"]["slot"], json!(50)); assert_eq!(s2sp["rdma_recv"]["peer"], json!(1));
+        assert_eq!(s2sp["rdma_send"]["slot"], json!(5));  // return, Io
+        assert_eq!(s2sp["rdma_send"]["slot_kind"], json!("Io"));
+        assert_eq!(s2sp["rdma_send"]["peer"], json!(0));
+
+        // The `avoid` stage's output slot (40) is never a cut boundary.
+        let wire = out.to_string();
+        assert!(!wire.contains("\"slot\":40"), "avoid boundary (slot 40) must not be a cut");
+
+        // Sink on node 0 pulls the return from the last segment's machine (2).
+        let sink = find("save").expect("sink");
+        assert_eq!(sink["kind"]["StreamOutput"]["rdma_recv"]["peer"], json!(2));
+        assert_eq!(sink["kind"]["StreamOutput"]["slot"], json!(5));
     }
 }
