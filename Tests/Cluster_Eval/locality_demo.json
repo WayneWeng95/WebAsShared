@@ -1,0 +1,27 @@
+{
+  "_comment": [
+    "Locality-hint demo: an ASYMMETRIC join used to evaluate the `split` cut hint.",
+    "Two pinned producers feed one auto-placed `join`; the partitioner must cut one",
+    "of the two producer→join edges to place `join`.  Each producer declares the",
+    "breakability of its OWN output edge:",
+    "  heavy: split=avoid  → don't cut here (keep the consumer local)",
+    "  light: split=prefer → safe to cut here",
+    "So `join` colocates with `heavy` (host 0) and the cross-machine cut lands on the",
+    "LIGHT edge.  check_locality.py flips the hints and asserts the cut follows.",
+    "Partitioned with EMPTY hints so every host has quota and dep-affinity (the hint)",
+    "decides placement (Pack/balanced policies would force the single auto node onto",
+    "one host before the hint could act)."
+  ],
+  "shm_path_prefix": "/dev/shm/loc_demo",
+  "total_nodes": 2,
+  "transfer": true,
+  "nodes": [
+    { "id": "in0", "node_id": 0, "deps": [], "kind": { "Input": { "path": "TestData/corpus_large.txt" } } },
+    { "id": "in1", "node_id": 1, "deps": [], "kind": { "Input": { "path": "TestData/corpus_large.txt" } } },
+    { "id": "heavy", "node_id": 0, "deps": ["in0"], "output_slot": 20, "split": "avoid",
+      "kind": { "Func": { "func": "wc_map", "output_offset": 100 } } },
+    { "id": "light", "node_id": 1, "deps": ["in1"], "output_slot": 30, "split": "prefer",
+      "kind": { "Func": { "func": "wc_map", "output_offset": 100 } } },
+    { "id": "join", "deps": ["heavy", "light"], "kind": { "Aggregate": {} } }
+  ]
+}

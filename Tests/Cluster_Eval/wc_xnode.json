@@ -1,0 +1,108 @@
+{
+  "_comment": [
+    "Word count with fully partitioner-managed placement and topology.",
+    "",
+    "placement:'all' nodes are expanded to one copy per machine automatically.",
+    "  load       \u2192 load_0, load_1            (each reads the locally staged corpus)",
+    "  distribute \u2192 distribute_0, distribute_1  (fan-out base slot: out_base=30)",
+    "  map_n      \u2192 map_n_0_{0..9}, map_n_1_{0..9}  (fanout:10 applied per machine)",
+    "  aggregate  \u2192 aggregate_0, aggregate_1  (each collects its machine's map outputs)",
+    "",
+    "shared_inputs is auto-derived from the 'load' Input node; no need to declare it.",
+    "",
+    "Auto-placed nodes: aggregate_global, reduce, save.",
+    "  placement_policy controls where these land (default: pack = colocate on fewest hosts).",
+    "",
+    "Available placement_policy values:",
+    "  'balanced'  \u2014 spread proportionally across all hosts",
+    "  'pack'      \u2014 colocate on fewest hosts (default when field is omitted)",
+    "  'spread'    \u2014 at most one auto-node per host",
+    "  { 'type': 'weighted', 'weights': [0.8, 0.2] }  \u2014 explicit capacity ratio",
+    "  { 'type': 'balanced', 'per_host_limit': 4 }    \u2014 balanced with a sandbox cap"
+  ],
+  "shm_path_prefix": "/dev/shm/cluster_eval_wc",
+  "log_level": "info",
+  "transfer": true,
+  "placement_policy": "pack",
+  "nodes": [
+    {
+      "id": "load",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/corpus_large.txt",
+          "prefetch": true
+        }
+      }
+    },
+    {
+      "id": "distribute",
+      "placement": "all",
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "wc_distribute",
+          "out_base": 50
+        }
+      }
+    },
+    {
+      "id": "map_n",
+      "placement": "all",
+      "fanout": 8,
+      "deps": [
+        "distribute"
+      ],
+      "kind": {
+        "Func": {
+          "func": "wc_map",
+          "output_offset": 100
+        }
+      }
+    },
+    {
+      "id": "aggregate",
+      "placement": "all",
+      "deps": [
+        "map_n"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_global",
+      "deps": [
+        "aggregate"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "reduce",
+      "deps": [
+        "aggregate_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "wc_reduce"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "deps": [
+        "reduce"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/cluster_eval_result.txt"
+        }
+      }
+    }
+  ]
+}
