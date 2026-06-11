@@ -46,6 +46,26 @@ def wc_dag(shm, rounds, out, fw, tw):
     }
 
 
+def wc_var_dag(shm, rounds, out, filter_max):
+    """Variable-load word-count: pipeline_source_var emits a round-dependent
+    batch.  `filter_max` set → the filter autoscales in [1, filter_max]."""
+    filt = {"func": "pipeline_filter", "arg0": 200, "arg1": 201}
+    if filter_max:
+        filt["max_width"] = filter_max
+    return {
+        "shm_path": shm, "wasm_path": WASM, "log_level": "error",
+        "nodes": [
+            {"id": "sp", "deps": [], "kind": {"StreamPipeline": {"rounds": rounds, "stages": [
+                {"func": "pipeline_source_var", "arg0": 200, "arg1": None},
+                filt,
+                {"func": "pipeline_transform", "arg0": 201, "arg1": 202},
+                {"func": "pipeline_sink", "arg0": 202, "arg1": 203},
+            ]}}},
+            {"id": "w", "deps": ["sp"], "kind": {"Watch": {"stream": 203, "output": out}}},
+        ],
+    }
+
+
 def img_dag(shm, out_paths, widen_func, width):
     stages = []
     for s in IMG_STAGES:
@@ -76,6 +96,7 @@ def run_dag(dag, tmp, tag):
     if res.returncode != 0:
         print(res.stdout[-2000:]); print(res.stderr[-2000:])
         raise SystemExit(f"host dag {tag} failed ({res.returncode})")
+    return res.stdout
 
 
 def summaries(path):
@@ -134,6 +155,20 @@ def main():
     for i in range(3):
         bm, wm = md5(base_imgs[i]), md5(wide_imgs[i])
         check(f"image {i}: widened blur == width:1 ({bm[:8]})", bm == wm, f"{bm} != {wm}")
+
+    # [3] dynamic autoscaling: width tracks time-varying load, result unchanged
+    print("\n[3] dynamic autoscaling — width tracks load, result == width:1")
+    vr = 14  # two cycles of the 7-round burst pattern
+    vbase = os.path.join(tmp, "var_base.txt")
+    vdyn = os.path.join(tmp, "var_dyn.txt")
+    run_dag(wc_var_dag("/dev/shm/wt_vbase", vr, vbase, None), tmp, "var_base")
+    out = run_dag(wc_var_dag("/dev/shm/wt_vdyn", vr, vdyn, 6), tmp, "var_dyn")
+    check("dynamic-width result == width:1 baseline", summaries(vdyn) == summaries(vbase),
+          f"{summaries(vdyn)} != {summaries(vbase)}")
+    m = re.search(r"pipeline_filter.*?peak (\d+)", out)
+    peak = int(m.group(1)) if m else 0
+    check(f"filter autoscaled above width 1 under load (peak={peak})", peak > 1,
+          "autoscaler never widened — check load profile in stdout")
 
     print("\n=== " + ("ALL PASS" if ok else "FAILED") + " ===")
     sys.exit(0 if ok else 1)

@@ -53,6 +53,21 @@ pub extern "C" fn pipeline_source(out_slot: u32, round: u32) {
     }
 }
 
+/// Variable-load source: emits a round-dependent number of records so the
+/// autoscaler has time-varying load to react to.  Pattern (cycled by round):
+/// `[4, 4, 40, 40, 40, 4, 4]` — quiet, a burst, then quiet again.  Record
+/// format matches `pipeline_source` so the same filter/transform/sink apply.
+#[no_mangle]
+pub extern "C" fn pipeline_source_var(out_slot: u32, round: u32) {
+    const PATTERN: [u32; 7] = [4, 4, 40, 40, 40, 4, 4];
+    let n = PATTERN[(round as usize) % PATTERN.len()];
+    for i in 0..n {
+        let v = round * 1000 + i;
+        let rec = alloc::format!("r={},i={:02},v={:05}", round, i, v);
+        ShmApi::append_stream_data(out_slot, rec.as_bytes());
+    }
+}
+
 /// Stage 2 — filter: reads new records from `in_slot` (cursor: "pipe_filter_cursor"),
 /// keeps only those with an even item index, appends surviving records to `out_slot`.
 #[no_mangle]

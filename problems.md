@@ -138,10 +138,22 @@ PRIORITY ORDER (updated 2026-06-11):
             widened-stage byte-identical. build.sh green.
         [ ] PHASE 2 — cross-host width via partitioner (expand width → placed workers,
             use split hint for cut points, RDMA scatter/gather + Mode-2 return). cluster.
-        [ ] PHASE 3 — load signals: per-stage backlog (count_stream_records) + per-tick
-            stage time into metrics / [DAG][timing]. locally testable.
-        [ ] PHASE 4 — dynamic autoscaling: in-executor control loop pre-spawns max_width
-            and gates active width per tick from Phase-3 backlog (policy + hysteresis).
+        [x] PHASE 3 — load signals (locally tested 2026-06-11). Per-stage input load
+            (records/tick delta) + active ticks accumulated in execute_stream_pipeline,
+            printed as a per-stage "load profile" at pipeline end (identifies the
+            bottleneck stage). Read-only; no behaviour change.
+        [x] PHASE 4 — dynamic autoscaling (locally tested 2026-06-11). Opt-in per stage
+            via `max_width`: pre-spawn max_width workers, and each tick set the stage's
+            ACTIVE width from a smoothed (EMA) per-tick load via desired_width
+            (≈ceil(load/SCALE_TARGET=8), clamped [width, max_width]), moving ±1/tick
+            (hysteresis) to avoid flapping. active_w==1 uses the byte-identical width-1
+            fast path. Signal = input LOAD not slot backlog (lockstep schedule keeps
+            backlog bounded). Test: new pipeline_source_var (bursty [4,4,40,40,40,4,4]);
+            Tests/Streaming/width_test.py [3] — dynamic filter (max_width 6) autoscaled
+            1→peak 4 under the burst, result byte-identical to width:1 baseline.
+            Backward-compat: Tests/Streaming 34/34 still pass, Phase-1 width test passes.
+            NOTE: dynamic targets windowed (pipe_read_window) stages; read_next stages
+            (1 rec/tick, e.g. images) use STATIC width, not max_width.
 
 [ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto
     the table. Tests/Fan_out_remote/ is the starting point for the measurement side.

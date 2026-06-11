@@ -123,6 +123,19 @@ fn load_atomic(splice_addr: usize, idx: usize) -> u64 {
     unsafe { (*ptr).load(Ordering::Acquire) }
 }
 
+/// Target input records per worker per tick — the autoscale set-point.  A stage
+/// handling more than this per worker scales up (one more worker), less scales
+/// down, so steady-state width ≈ ceil(load / SCALE_TARGET).
+const SCALE_TARGET: f64 = 8.0;
+
+/// Desired active width for a dynamic stage given its smoothed per-tick load,
+/// clamped to `[floor, max]`.  Used with a ±1-step-per-tick move (hysteresis) so
+/// the width ramps rather than flapping on noisy load.
+fn desired_width(load_ema: f64, floor: usize, max: usize) -> usize {
+    let want = (load_ema / SCALE_TARGET).ceil() as usize;
+    want.clamp(floor.max(1), max)
+}
+
 /// Committed record count of stream `slot` (cheap, count-only chain walk).
 fn slot_record_count(splice_addr: usize, slot: usize) -> usize {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
@@ -180,40 +193,68 @@ pub(super) fn execute_stream_pipeline(
         return Err(anyhow!("[{}] StreamPipeline has no stages", node_id));
     }
 
-    // Per-stage fan-out width (parallel workers).  Default/clamp to 1 — that path
-    // is byte-for-byte the original single-worker execution, so existing DAGs
-    // (no `width` field) are unaffected.
-    let widths: Vec<usize> = params.stages.iter()
+    // Per-stage fan-out width (parallel workers).
+    //   static_width = `width` (floor / fixed parallelism; default 1).
+    //   spawn_w      = workers to pre-spawn = max(static_width, max_width).
+    //   is_dyn       = `max_width > static_width` → the stage AUTOSCALES its
+    //                  active width in [static_width, max_width] per tick from
+    //                  observed input load (Phase 4); else it stays fixed.
+    // A stage with neither field → width 1, the byte-for-byte original path, so
+    // existing DAGs are unaffected.
+    let static_width: Vec<usize> = params.stages.iter()
         .map(|s| s.width.unwrap_or(1).max(1))
         .collect();
-    let max_w = widths.iter().copied().max().unwrap_or(1);
-    if max_w > 1 && !stage_fanout::fits_band(depth, max_w) {
+    let spawn_w: Vec<usize> = params.stages.iter().enumerate()
+        .map(|(s, stage)| stage.max_width.unwrap_or(0).max(static_width[s]))
+        .collect();
+    let is_dyn: Vec<bool> = params.stages.iter().enumerate()
+        .map(|(s, stage)| stage.max_width.unwrap_or(0) > static_width[s])
+        .collect();
+    let max_spawn = spawn_w.iter().copied().max().unwrap_or(1);
+    if max_spawn > 1 && !stage_fanout::fits_band(depth, max_spawn) {
         return Err(anyhow!(
             "[{}] StreamPipeline width too large: depth {} × width {} exceeds the \
              reserved sub-slot band (max width {}, depth ≤ 8)",
-            node_id, depth, max_w, stage_fanout::MAX_STAGE_WIDTH
+            node_id, depth, max_spawn, stage_fanout::MAX_STAGE_WIDTH
         ));
     }
 
-    // Spawn `width` persistent workers per stage (wasmtime init paid once each).
+    // Spawn `spawn_w` persistent workers per stage (wasmtime init paid once each).
+    // Dynamic stages pre-spawn up to `max_width` and gate how many run per tick.
     let mut workers: Vec<Vec<WasmLoopWorker>> = params.stages.iter().enumerate()
-        .map(|(s, stage)| (0..widths[s])
+        .map(|(s, stage)| (0..spawn_w[s])
             .map(|_| WasmLoopWorker::spawn(&stage.func, shm_path, wasm_path, node_id))
             .collect::<Result<Vec<_>>>())
         .collect::<Result<Vec<_>>>()?;
 
+    // Current active width per stage (mutated each tick for dynamic stages).
+    let mut active_w: Vec<usize> = static_width.clone();
+
     let slot_chain: Vec<String> = params.stages.iter().enumerate()
         .map(|(s, stage)| {
-            let w = if widths[s] > 1 { format!("×{}", widths[s]) } else { String::new() };
+            let w = if is_dyn[s] { format!("×≤{}", spawn_w[s]) }
+                    else if static_width[s] > 1 { format!("×{}", static_width[s]) }
+                    else { String::new() };
             stage.arg1.map_or_else(|| format!("{}(r){}", stage.arg0, w),
                                    |a| format!("{}→{}{}", stage.arg0, a, w))
         })
         .collect();
-    let total_workers: usize = widths.iter().sum();
+    let total_workers: usize = spawn_w.iter().sum();
     println!(
         "  StreamPipeline: {} rounds, {} stages | {} ({} persistent workers)",
         rounds, depth, slot_chain.join(" › "), total_workers
     );
+
+    // ── Phase-3 load signals + Phase-4 autoscale state ────────────────────────
+    // `stage_load`/`stage_ticks`: accumulated input records + active ticks per
+    // stage (a load profile printed at the end).  `load_ema`: smoothed
+    // records/tick driving the autoscale policy.  `prev_count`: last seen
+    // committed count of each stage's input slot (for the per-tick delta).
+    let mut stage_load  = vec![0usize; depth];
+    let mut stage_ticks = vec![0usize; depth];
+    let mut width_peak  = static_width.clone();
+    let mut load_ema    = vec![0.0f64; depth];
+    let mut prev_count  = vec![0usize; depth];
 
     // ── Per-round race guard: per-slot read watermarks ────────────────────────
     // Each consumer stage reads its input slot (`arg0`) bounded by a watermark
@@ -317,36 +358,52 @@ pub(super) fn execute_stream_pipeline(
             .collect();
         println!("    [{}] tick {} stages: [{}]", node_id, tick, stage_desc.join(", "));
 
-        // ── Publish read watermarks (BEFORE scatter, so they reflect the
-        //    pre-tick committed counts).  A consumer of round R thus sees only
-        //    the records its producer committed in earlier ticks, never round
-        //    R+1 that the producer appends concurrently in this tick.
-        //
-        //    For a WIDENED stage (width > 1) the host plays the consumer's role:
-        //    it snapshots round R's input window from arg0 (same race-safe
-        //    pre-tick read) and scatters those records round-robin into the
-        //    stage's private input sub-slots, advancing its own arg0 cursor.
+        // ── Load signal + autoscale (BEFORE scatter) ─────────────────────────
+        //    Per active stage: measure this tick's input load (new committed
+        //    records on arg0 since last tick), smooth it, and — for a dynamic
+        //    stage — move its active width one step toward the load-driven
+        //    target (hysteresis).  Then publish the width-1 read watermark or
+        //    scatter the widened input, using the just-chosen active width.
         for &(s_idx, _) in &active {
             let slot = params.stages[s_idx].arg0;
-            if widths[s_idx] == 1 {
+            let cnt  = slot_record_count(splice_addr, slot as usize);
+            let load = cnt.saturating_sub(prev_count[s_idx]);
+            prev_count[s_idx] = cnt;
+            stage_load[s_idx]  += load;
+            stage_ticks[s_idx] += 1;
+
+            if is_dyn[s_idx] {
+                load_ema[s_idx] = if stage_ticks[s_idx] == 1 { load as f64 }
+                                  else { 0.5 * load_ema[s_idx] + 0.5 * load as f64 };
+                let want = desired_width(load_ema[s_idx], static_width[s_idx], spawn_w[s_idx]);
+                // ±1 step per tick toward the target.
+                active_w[s_idx] = if want > active_w[s_idx] { active_w[s_idx] + 1 }
+                                  else if want < active_w[s_idx] { active_w[s_idx] - 1 }
+                                  else { active_w[s_idx] };
+                width_peak[s_idx] = width_peak[s_idx].max(active_w[s_idx]);
+            }
+
+            if active_w[s_idx] == 1 {
+                // Width-1 fast path: publish the watermark; the worker reads arg0.
                 if let Some(&hi) = hi_idx.get(&slot) {
-                    let cnt = slot_record_count(splice_addr, slot as usize);
                     store_atomic(splice_addr, hi, cnt as u64 + 1); // +1 sentinel: 0 = unset
                 }
             } else {
-                scatter_widened_input(splice_addr, slot, widths[s_idx], s_idx, &cursor_idx)?;
+                // Host plays the consumer: snapshot round R's input window and
+                // scatter it round-robin into the stage's private sub-slots.
+                scatter_widened_input(splice_addr, slot, active_w[s_idx], s_idx, &cursor_idx)?;
             }
         }
 
         // Scatter: write all commands first — workers wake and run concurrently.
         // Width-1: send the stage's single worker on (arg0 → a1).  Width-N: send
-        // each worker on its (sub_in → sub_out) private slot pair.
+        // each active worker on its (sub_in → sub_out) private slot pair.
         for &(s_idx, a1) in &active {
-            if widths[s_idx] == 1 {
+            if active_w[s_idx] == 1 {
                 workers[s_idx][0].send(params.stages[s_idx].arg0, a1)
                     .map_err(|e| anyhow!("[{}] stage {} tick {} send: {}", node_id, s_idx, tick, e))?;
             } else {
-                for k in 0..widths[s_idx] {
+                for k in 0..active_w[s_idx] {
                     let si = stage_fanout::sub_in_slot(s_idx, k) as u32;
                     let so = stage_fanout::sub_out_slot(s_idx, k) as u32;
                     workers[s_idx][k].send(si, so)
@@ -354,19 +411,19 @@ pub(super) fn execute_stream_pipeline(
                 }
             }
         }
-        // Gather: collect responses; for widened stages, merge the workers'
-        // output sub-slots back into the stage's real output slot (a1) in
-        // round-robin record order, then free the sub-slots.
+        // Gather: collect responses; for widened stages, merge the active
+        // workers' output sub-slots back into the stage's real output slot (a1)
+        // in round-robin record order, then free the sub-slots.
         for &(s_idx, a1) in &active {
-            if widths[s_idx] == 1 {
+            if active_w[s_idx] == 1 {
                 workers[s_idx][0].recv()
                     .map_err(|e| anyhow!("[{}] stage {} tick {}: {}", node_id, s_idx, tick, e))?;
             } else {
-                for k in 0..widths[s_idx] {
+                for k in 0..active_w[s_idx] {
                     workers[s_idx][k].recv()
                         .map_err(|e| anyhow!("[{}] stage {} worker {} tick {}: {}", node_id, s_idx, k, tick, e))?;
                 }
-                gather_widened_output(splice_addr, s_idx, widths[s_idx], a1)?;
+                gather_widened_output(splice_addr, s_idx, active_w[s_idx], a1)?;
             }
         }
 
@@ -465,6 +522,22 @@ pub(super) fn execute_stream_pipeline(
         h.join()
             .map_err(|_| anyhow!("[{}] final send thread panicked", node_id))??;
         println!("    [{}] final rdma_send joined  (+{}ms)", node_id, ts());
+    }
+
+    // ── Load profile (Phase 3) + autoscale summary (Phase 4) ──────────────────
+    // Per-stage input records / active ticks, and — for dynamic stages — the
+    // peak active width the load drove them to.  Identifies the bottleneck stage
+    // and shows the autoscaler responding to load.
+    println!("  [{}] StreamPipeline load profile:", node_id);
+    for s in 0..depth {
+        let avg = if stage_ticks[s] > 0 { stage_load[s] as f64 / stage_ticks[s] as f64 } else { 0.0 };
+        let wdesc = if is_dyn[s] {
+            format!("dyn {}→peak {} (max {})", static_width[s], width_peak[s], spawn_w[s])
+        } else {
+            format!("width {}", static_width[s])
+        };
+        println!("    stage {} {:<16} {}: {} records / {} ticks (avg {:.1}/tick)",
+                 s, params.stages[s].func, wdesc, stage_load[s], stage_ticks[s], avg);
     }
 
     // Close stdin on all workers (EOF → they exit) and wait for them.
