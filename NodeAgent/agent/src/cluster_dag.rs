@@ -173,7 +173,12 @@ impl ClusterDag {
         Ok(result)
     }
 
-    /// Check if any node's DAG contains RemoteSend or RemoteRecv nodes.
+    /// Check if any node's DAG needs the RDMA mesh — either an explicit
+    /// RemoteSend/RemoteRecv/RemoteAtomic node, OR a node with EMBEDDED RDMA
+    /// (a `StreamPipeline`/`StreamOutput` carrying `rdma_send`/`rdma_recv`, as
+    /// produced by Mode-2 return and the Phase-2 auto-split).  Without the latter
+    /// the cross-node streaming nodes would run with `dag.rdma` unset and fail
+    /// ("requires dag.rdma to be configured").
     fn has_remote_nodes(&self) -> bool {
         for nodes in self.node_dags.values() {
             for node in nodes {
@@ -183,6 +188,7 @@ impl ClusterDag {
                         || kind_str.contains("RemoteAtomicFetchAdd")
                         || kind_str.contains("RemoteAtomicCmpSwap")
                         || kind_str.contains("RemoteAtomicPush")
+                        || kind_str.contains("rdma_send") || kind_str.contains("rdma_recv")
                     {
                         return true;
                     }
