@@ -45,11 +45,20 @@ removed from this file. One-line trace below; details are in git history.
 --- TODO ------------------------------------------------------------------------
 
 PRIORITY ORDER (updated 2026-06-11):
-  1. Streaming fan-out + locality awareness (hint mechanism). (active next)
-  2. Cross-node streaming test harness (deterministic analytic lockstep + Python).
-  3. [FUTURE WORK] Worker-drop scheduling grace period.
+  1. CLUSTER e2e for what's built: run DAGs/symbolic_dag/img_pipeline_split.json
+     (auto-split) via node-agent submit; submit a hinted SymbolicDag to observe the
+     locality cut; word-count distributed COUNTS == baseline (only timing confirmed).
+  2. Phase 2 follow-ons: multi-cut / N-machine chains; auto-pick the cut stage from
+     split/out_weight weights (today cut_after is explicit); hint-driven half placement.
+  3. Autoscaling under cross-node VARIABLE load (images are 1 rec/round → never triggers).
+  4. [FUTURE WORK] Peer-failure robustness — a RemoteRecv whose peer dies segfaults
+     (seen when node-1 lacked a local input under bare `host dag`). Pre-existing.
+  5. Cross-node streaming test harness (deterministic analytic lockstep + Python).
+  6. [FUTURE WORK] Worker-drop scheduling grace period.
   Separate track, ongoing (outside this order): benchmark baselines.
-  DONE: Mode 2 — streaming / per-round RDMA output return (cluster-verified 2026-06-11).
+  DONE: Mode 2 (cluster); locality split hint (local+structural); streaming fan-out
+        Phase 1 width (cluster) + 3 load signals + 4 autoscaling (local) + Phase 2
+        cross-host auto-split (local+loopback). See TEST STATUS block below.
 
 [x] RDMA OUTPUT-RETURN, Mode 1 (batch) — DONE + cluster-verified 2026-06-10.
     A worker's output is returned to the coordinator (node 0) over RDMA just by
@@ -119,12 +128,19 @@ PRIORITY ORDER (updated 2026-06-11):
         affinity); all 20 partitioner tests pass, full build.sh green. Design: per-NODE
         hint (fits the bare-id `deps` schema), greedy weighted-affinity (not full
         min-cut), strong-preference (not hard guarantee — pin node_id for that).
+        STRUCTURAL TEST: Tests/Cluster_Eval/check_locality.py partitions an asymmetric
+        join with empty hints (so affinity, not quota, decides) and asserts the cut lands
+        on the `prefer` edge and FLIPS when hints reverse — PASS. NOTE: Pack/balanced
+        policies force a single auto node onto one host before the hint can act; the hint
+        decides only when ≥2 hosts have quota (empty hints, or enough auto nodes).
+        STILL PENDING: end-to-end on the live cluster (submit a hinted SymbolicDag via
+        node-agent, observe the coordinator's cut) — priority 2(a).
     [~] STREAMING FAN-OUT (unified per-stage width + dynamic autoscaling). User wants
         a unified mechanism: scale a hot stage (more workers in a stage) AND replicate
         full pipelines (all stages wide), driven by dynamic autoscaling on load.
         Unifying primitive = per-stage WIDTH. Phased; the static width mechanism is the
         actuator the autoscaler will drive. Plan: ~/.claude/plans/encapsulated-splashing-fairy.md.
-        [x] PHASE 1 — static per-stage width, single host (locally tested 2026-06-11).
+        [x] PHASE 1 — static per-stage width (local + CLUSTER-verified 2026-06-11).
             `width`/`max_width` added to StreamPipelineStage (types.rs). A widened stage
             runs W persistent workers; each tick the host SCATTERS the per-tick input
             batch round-robin into W private sub-slots (reserved band 1792.., dag_runner/
@@ -136,8 +152,22 @@ PRIORITY ORDER (updated 2026-06-11):
             word-count filter×3+transform×2 == width:1 == analytic + deterministic
             (correct sum proves all records were distributed across workers), image
             widened-stage byte-identical. build.sh green.
-        [ ] PHASE 2 — cross-host width via partitioner (expand width → placed workers,
-            use split hint for cut points, RDMA scatter/gather + Mode-2 return). cluster.
+        [x] PHASE 2 — cross-host streaming via partitioner AUTO-SPLIT (local + loopback
+            2026-06-11; cluster pending user). Chosen form (user): auto-split ONE
+            StreamPipeline across machines at a stage cut, NOT cross-machine stage width.
+            New `cut_after: k` on the StreamPipeline kind (partitioner-only; executor never
+            sees it). New pass split_stream_pipelines (splitter.rs, after expand_fanout):
+            splits stages[0..=k] → pipe__a (machine A, embedded rdma_send boundary=stages[k]
+            .arg1, Stream) and stages[k+1..] → pipe__b (machine B, rdma_recv boundary +
+            rdma_send return=last.arg1, Io); converts the terminal Output into a StreamOutput
+            return sink on node 0. Pre-pinned so the placer skips them; halves use EMBEDDED
+            rdma (no injected RemoteSend/Recv). Per-stage width survives the split. Generates
+            byte-for-byte the verified combo topology. DAG: DAGs/symbolic_dag/img_pipeline_
+            split.json (cut_after:0, widths on 2 stages). VERIFIED: 21 partitioner tests
+            (new split_stream_pipeline_at_cut), 2-node loopback 3/3 byte-identical to baseline
+            (verify_combo.py), existing 7 symbolic DAGs still partition (no-op without
+            cut_after), Tests/Streaming 34/34, build.sh green. v1 = 2 machines / single cut /
+            terminal-Output return; multi-cut + N-machine + hint-auto-picked cut = follow-ons.
         [x] PHASE 3 — load signals (locally tested 2026-06-11). Per-stage input load
             (records/tick delta) + active ticks accumulated in execute_stream_pipeline,
             printed as a per-stage "load profile" at pipeline end (identifies the
@@ -154,6 +184,29 @@ PRIORITY ORDER (updated 2026-06-11):
             Backward-compat: Tests/Streaming 34/34 still pass, Phase-1 width test passes.
             NOTE: dynamic targets windowed (pipe_read_window) stages; read_next stages
             (1 rec/tick, e.g. images) use STATIC width, not max_width.
+
+    ── TEST STATUS (2026-06-11) ──────────────────────────────────────────────
+    COMBINED cross-node test (Tests/Streaming_CrossNode/node{0,1}_combo.json +
+    verify_combo.py) exercises in ONE 2-node run: streaming input + cross-node RDMA
+    (conn-3/4) + per-stage WIDTH:2 on two middle stages + Mode-2 per-round return.
+    CLUSTER-PASSED 3/3 images byte-identical to baseline (also 2-node loopback).
+    Cluster regression harness: Tests/Cluster_Eval/ (make_xnode_dags.py, verify.py,
+    wc_xnode.json, README). word-count via node-agent submit → coordinator RDMA-stages
+    the corpus to workers (stage_shared_inputs_rdma) → distributed run. NOTE: bare
+    `host dag` does NOT stage inputs (each node must have its data locally); the
+    node-agent coordinator flow does (RDMA, TCP fallback).
+      TESTED:  Mode 2 (cluster), per-stage width Phase 1 (cluster via combo + local),
+               load signals 3 (local), autoscaling 4 (local, 1→peak 4), locality hint
+               (local unit+structural), RDMA input staging (cluster), word-count
+               distributed RUN (cluster) + loopback==baseline, backward-compat
+               (Streaming 34/34, 20 partitioner tests, symbolic DAGs partition).
+      LEFT:    (1) word-count COUNTS==baseline on cluster (only timing confirmed);
+               (2) locality hint end-to-end on cluster; (3) auto-split img_pipeline_split
+               .json on the real cluster (loopback-passed); (4) autoscaling under
+               cross-node VARIABLE load; (5) Phase 2 follow-ons (multi-cut / N-machine /
+               hint-auto-cut); (6) peer-failure hardening; (7) the 24 rdma_workload_dag/
+               rdma_demo_dag hand-split DAGs not re-run (additive-schema-safe).
+    Phase 2 cross-host AUTO-SPLIT is now BUILT (was "unbuilt") — see PHASE 2 above.
 
 [ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto
     the table. Tests/Fan_out_remote/ is the starting point for the measurement side.

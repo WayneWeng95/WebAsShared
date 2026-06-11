@@ -83,7 +83,12 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
     // the workers — and, via assign_input_slices, 80% of the input slice).
     let (after_all, auto_shared_inputs) =
         expand_all_placements(dag.nodes.clone(), total_nodes, effective_hints);
-    let (mut nodes, fanout_worker_ids): (Vec<SymbolicNode>, HashSet<String>) = expand_fanout(after_all);
+    let (nodes0, fanout_worker_ids): (Vec<SymbolicNode>, HashSet<String>) = expand_fanout(after_all);
+
+    // ── 0·. Cross-host streaming: auto-split any StreamPipeline marked `cut_after`
+    // into two RDMA-wired halves + a StreamOutput return sink (pre-pinned, so the
+    // placer below leaves them be).  No-op when no pipeline carries `cut_after`.
+    let mut nodes = split_stream_pipelines(nodes0, total_nodes)?;
 
     // ── 0a. Converge-on-coordinator: before auto-placement, pin the convergence
     // tail (Output + its single-chain auto ancestors up to the first fan-in)
@@ -783,6 +788,137 @@ fn expand_fanout(nodes: Vec<SymbolicNode>) -> (Vec<SymbolicNode>, HashSet<String
     (expanded, worker_ids)
 }
 
+// ── Phase 2: cross-host streaming — auto-split a StreamPipeline at `cut_after` ──
+
+/// Build a `SymbolicNode` with an explicit machine pin and constructed kind.
+fn pinned_node(id: String, deps: Vec<String>, node_id: u32, kind: Value) -> SymbolicNode {
+    SymbolicNode {
+        id, deps, node_id: Some(node_id),
+        output_slot: None, fanout: None, placement: None,
+        barrier_group: None, split: None, out_weight: None, kind,
+    }
+}
+
+/// Assemble a `StreamPipeline` kind from a stage slice + optional RDMA config.
+fn stream_pipeline_kind(rounds: u64, stages: Vec<Value>,
+                        rdma_recv: Option<Value>, rdma_send: Option<Value>) -> Value {
+    let mut sp = serde_json::Map::new();
+    sp.insert("rounds".into(), json!(rounds));
+    sp.insert("stages".into(), Value::Array(stages));
+    if let Some(r) = rdma_recv { sp.insert("rdma_recv".into(), r); }
+    if let Some(s) = rdma_send { sp.insert("rdma_send".into(), s); }
+    json!({ "StreamPipeline": Value::Object(sp) })
+}
+
+/// Auto-split any `StreamPipeline` carrying `cut_after: k` across two machines at
+/// that stage boundary, producing the cross-node streaming topology automatically:
+///
+///   pipe__a (machine A, stages 0..=k) --embedded rdma_send(boundary,Stream)-->
+///   pipe__b (machine B, stages k+1..) --embedded rdma_send(return,Io)--> node 0
+///   sink    (node 0, StreamOutput rdma_recv(return,Io) → paths[round])
+///
+/// `boundary` = `stages[k].arg1` (the slot crossing the cut); `return` = the
+/// original last stage's `arg1` (Io, returned per round). The downstream `Output`
+/// consumer is converted to the `StreamOutput` sink. No-op when `total_nodes < 2`
+/// or no pipeline has `cut_after`. v1: one cut → two machines (A = pipeline's
+/// node_id or 0, B = A+1).
+fn split_stream_pipelines(nodes: Vec<SymbolicNode>, total_nodes: usize) -> Result<Vec<SymbolicNode>> {
+    // Index pipelines to split: id → cut_after.
+    let to_split: HashMap<String, usize> = nodes.iter().filter_map(|n| {
+        n.kind.get("StreamPipeline")
+            .and_then(|sp| sp.get("cut_after"))
+            .and_then(|v| v.as_u64())
+            .map(|k| (n.id.clone(), k as usize))
+    }).collect();
+    if to_split.is_empty() { return Ok(nodes); }
+    if total_nodes < 2 {
+        bail!("StreamPipeline 'cut_after' needs total_nodes ≥ 2 (got {})", total_nodes);
+    }
+
+    let mut out: Vec<SymbolicNode> = Vec::with_capacity(nodes.len() + 1);
+    // Map each split pipeline id → the StreamOutput sink id that replaces its
+    // terminal Output (so we can detect + convert that Output below).
+    let mut sink_for_pipe: HashMap<String, ()> = HashMap::new();
+
+    // First pass: split the pipelines, remember their return slot + machine B.
+    let mut split_meta: HashMap<String, (u32, u32)> = HashMap::new(); // pipe_id → (return_slot, machine_B)
+    for node in &nodes {
+        let Some(&cut_after) = to_split.get(&node.id) else { continue };
+        let sp = node.kind.get("StreamPipeline").and_then(|v| v.as_object())
+            .ok_or_else(|| anyhow!("'{}' StreamPipeline kind malformed", node.id))?;
+        let rounds = sp.get("rounds").and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow!("'{}' StreamPipeline missing rounds", node.id))?;
+        let stages = sp.get("stages").and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow!("'{}' StreamPipeline missing stages", node.id))?;
+        if cut_after + 1 >= stages.len() {
+            bail!("'{}' cut_after={} leaves no stages on the downstream node \
+                   ({} stages; need cut_after ≤ {})",
+                  node.id, cut_after, stages.len(), stages.len().saturating_sub(2));
+        }
+        let machine_a = node.node_id.unwrap_or(0);
+        let machine_b = machine_a + 1;
+        if machine_b as usize >= total_nodes {
+            bail!("'{}' cut needs machine {} but total_nodes is {}", node.id, machine_b, total_nodes);
+        }
+        let boundary = stages[cut_after].get("arg1").and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow!("'{}' stage {} has no arg1 to cut on", node.id, cut_after))? as u32;
+        let return_slot = stages.last().and_then(|s| s.get("arg1")).and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow!("'{}' last stage has no arg1 for the return", node.id))? as u32;
+
+        let a_stages: Vec<Value> = stages[..=cut_after].to_vec();
+        let b_stages: Vec<Value> = stages[cut_after + 1..].to_vec();
+
+        let a_send = json!({ "peer": machine_b, "slot": boundary, "slot_kind": "Stream", "free_after": true });
+        let b_recv = json!({ "peer": machine_a, "slot": boundary, "slot_kind": "Stream" });
+        let b_send = json!({ "peer": 0, "slot": return_slot, "slot_kind": "Io", "free_after": true });
+
+        out.push(pinned_node(format!("{}__a", node.id), node.deps.clone(), machine_a,
+                             stream_pipeline_kind(rounds, a_stages, None, Some(a_send))));
+        out.push(pinned_node(format!("{}__b", node.id), Vec::new(), machine_b,
+                             stream_pipeline_kind(rounds, b_stages, Some(b_recv), Some(b_send))));
+
+        split_meta.insert(node.id.clone(), (return_slot, machine_b));
+        sink_for_pipe.insert(node.id.clone(), ());
+    }
+
+    // Second pass: copy through non-split nodes, converting the terminal Output of
+    // a split pipeline into a StreamOutput sink; drop the original pipeline nodes.
+    for node in nodes {
+        if to_split.contains_key(&node.id) { continue; } // replaced above
+
+        // Is this the terminal Output consumer of a split pipeline?
+        let split_dep = node.deps.iter().find(|d| sink_for_pipe.contains_key(*d)).cloned();
+        if let (Some(pipe_id), Some(out_obj)) =
+            (split_dep, node.kind.get("Output").and_then(|v| v.as_object()))
+        {
+            let (return_slot, machine_b) = split_meta[&pipe_id];
+            let paths = out_obj.get("paths").and_then(|v| v.as_array()).cloned()
+                .filter(|p| !p.is_empty())
+                .ok_or_else(|| anyhow!(
+                    "Output '{}' returning a split StreamPipeline must use `paths` \
+                     (one per round) for the StreamOutput sink", node.id))?;
+            // Find this pipeline's rounds from its __b half we just made.
+            let rounds = out.iter().find(|n| n.id == format!("{}__b", pipe_id))
+                .and_then(|n| n.kind.get("StreamPipeline"))
+                .and_then(|sp| sp.get("rounds")).and_then(|v| v.as_u64()).unwrap_or(0);
+            // Sink shares the source half's wave (deps = the pipeline's original deps),
+            // runs as a thread, and pulls each round back over RDMA from machine B.
+            let a_deps = out.iter().find(|n| n.id == format!("{}__a", pipe_id))
+                .map(|n| n.deps.clone()).unwrap_or_default();
+            let sink_kind = json!({ "StreamOutput": {
+                "rounds": rounds, "slot": return_slot, "slot_kind": "Io", "binary": true,
+                "rdma_recv": { "peer": machine_b, "slot": return_slot, "slot_kind": "Io" },
+                "paths": Value::Array(paths),
+            }});
+            out.push(pinned_node(node.id.clone(), a_deps, 0, sink_kind));
+            continue;
+        }
+        out.push(node);
+    }
+
+    Ok(out)
+}
+
 /// Stamp each per-machine data-parallel `Input` replica with a line-aligned
 /// fractional `slice: [lo, hi]` so the N nodes together cover the file exactly
 /// once (result == single-node, not N×) and each node's SHM holds only its
@@ -964,5 +1100,61 @@ mod tests {
         let slots: Vec<u32> = upstream.iter().map(|v| v.as_u64().unwrap() as u32).collect();
         assert!(slots.contains(&recv_slot), "upstream missing recv_slot");
         assert!(slots.contains(&200), "upstream missing 200");
+    }
+
+    const SPLIT_PIPELINE_SYMBOLIC: &str = r#"{
+      "shm_path_prefix": "/dev/shm/sp", "total_nodes": 2, "transfer": true,
+      "nodes": [
+        { "id": "load", "node_id": 0, "deps": [],
+          "kind": { "Input": { "paths": ["a","b"], "slot": 10, "binary": true } } },
+        { "id": "pipe", "deps": ["load"], "kind": { "StreamPipeline": {
+            "rounds": 3, "cut_after": 0, "stages": [
+              { "func": "s0", "arg0": 10, "arg1": 20 },
+              { "func": "s1", "arg0": 20, "arg1": 30, "width": 2 },
+              { "func": "s2", "arg0": 30, "arg1": 5 } ] } } },
+        { "id": "save", "deps": ["pipe"],
+          "kind": { "Output": { "slot": 5, "split_records": true, "paths": ["o0","o1"] } } }
+      ] }"#;
+
+    #[test]
+    fn split_stream_pipeline_at_cut() {
+        let dag = SymbolicDag::from_json(SPLIT_PIPELINE_SYMBOLIC).expect("parse");
+        let out = partition(&dag, None).expect("partition");
+        let nd = out["node_dags"].as_object().unwrap();
+        let n0: Vec<Value> = serde_json::from_value(nd["0"].clone()).unwrap();
+        let n1: Vec<Value> = serde_json::from_value(nd["1"].clone()).unwrap();
+        let find = |ns: &[Value], id: &str| ns.iter().find(|n| n["id"].as_str() == Some(id)).cloned();
+
+        // Upstream half on node 0: stages[0..=0], embedded rdma_send of the boundary (20).
+        let a = find(&n0, "pipe__a").expect("pipe__a on node 0");
+        let asp = &a["kind"]["StreamPipeline"];
+        assert_eq!(asp["stages"].as_array().unwrap().len(), 1, "pipe__a keeps 1 stage");
+        assert_eq!(asp["rdma_send"]["slot"], json!(20));
+        assert_eq!(asp["rdma_send"]["peer"], json!(1));
+        assert_eq!(asp["rdma_send"]["slot_kind"], json!("Stream"));
+        assert!(asp.get("cut_after").is_none(), "cut_after must not leak to the executor");
+
+        // Downstream half on node 1: stages[1..], rdma_recv(boundary) + rdma_send(return,Io).
+        let b = find(&n1, "pipe__b").expect("pipe__b on node 1");
+        let bsp = &b["kind"]["StreamPipeline"];
+        assert_eq!(bsp["stages"].as_array().unwrap().len(), 2, "pipe__b keeps 2 stages");
+        assert_eq!(bsp["stages"][0]["width"], json!(2), "per-stage width survives the split");
+        assert_eq!(bsp["rdma_recv"]["slot"], json!(20));
+        assert_eq!(bsp["rdma_send"]["slot"], json!(5));
+        assert_eq!(bsp["rdma_send"]["slot_kind"], json!("Io"));
+        assert_eq!(bsp["rdma_send"]["peer"], json!(0));
+
+        // Terminal Output → StreamOutput sink on node 0, recv(return,Io) → paths.
+        let sink = find(&n0, "save").expect("save sink on node 0");
+        let so = &sink["kind"]["StreamOutput"];
+        assert_eq!(so["slot"], json!(5));
+        assert_eq!(so["rdma_recv"]["peer"], json!(1));
+        assert_eq!(so["paths"].as_array().unwrap().len(), 2);
+        assert!(sink["kind"].get("Output").is_none(), "Output must be replaced by StreamOutput");
+
+        // The original opaque pipeline node is gone; no stray cross-edge RemoteSend/Recv.
+        assert!(find(&n0, "pipe").is_none() && find(&n1, "pipe").is_none());
+        assert!(!n0.iter().chain(&n1).any(|n| n["id"].as_str().map_or(false, |s| s.starts_with("rs_") || s.starts_with("rr_"))),
+                "split halves use embedded RDMA, not injected RemoteSend/Recv nodes");
     }
 }

@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "Phase 2 — cross-host streaming AUTO-SPLIT. A SINGLE StreamPipeline (all 6 image",
+    "stages) with `cut_after: 0`. The partitioner splits it across 2 machines at that",
+    "stage boundary, generating the cross-node streaming topology automatically:",
+    "  node 0: load + pipe__a (img_load_ppm, rdma_send slot 20 → node 1)",
+    "          + save→StreamOutput sink (rdma_recv slot 5 ← node 1, one file per round)",
+    "  node 1: pipe__b (rotate→grayscale→equalize→blur→export, rdma_recv 20, rdma_send 5)",
+    "Two middle stages keep per-stage width:2 (survives the split). Output is byte-",
+    "identical to the single-node baseline (Tests/Streaming_CrossNode/baseline/).",
+    "Verify with Tests/Streaming_CrossNode/verify_combo.py (writes to combo_return_out).",
+    "Submit via `node-agent submit` (coordinator partitions + RDMA-stages), or partition",
+    "locally and run the per-node DAGs (Tests/Cluster_Eval/make_xnode_dags.py)."
+  ],
+  "shm_path_prefix": "/dev/shm/img_split",
+  "total_nodes": 2,
+  "transfer": true,
+  "nodes": [
+    { "id": "load", "node_id": 0, "deps": [],
+      "kind": { "Input": { "paths": [
+        "TestData/img_gradient.ppm",
+        "TestData/img_checkerboard.ppm",
+        "TestData/img_rings.ppm"
+      ], "slot": 10, "binary": true } } },
+    { "id": "pipe", "deps": ["load"],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "cut_after": 0,
+        "stages": [
+          { "func": "img_load_ppm",  "arg0": 10, "arg1": 20 },
+          { "func": "img_rotate",    "arg0": 20, "arg1": 30 },
+          { "func": "img_grayscale", "arg0": 30, "arg1": 40, "width": 2 },
+          { "func": "img_equalize",  "arg0": 40, "arg1": 50 },
+          { "func": "img_blur",      "arg0": 50, "arg1": 60, "width": 2 },
+          { "func": "img_export_ppm","arg0": 60, "arg1": 5  }
+        ]
+      } } },
+    { "id": "save", "deps": ["pipe"],
+      "kind": { "Output": { "slot": 5, "split_records": true, "paths": [
+        "TestOutput/combo_return_out/gradient_processed.pgm",
+        "TestOutput/combo_return_out/checkerboard_processed.pgm",
+        "TestOutput/combo_return_out/rings_processed.pgm"
+      ] } } }
+  ]
+}
