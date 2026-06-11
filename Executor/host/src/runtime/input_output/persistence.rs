@@ -63,7 +63,10 @@ struct Snapshot {
 /// The item captured by a single `watch_stream` / `watch_shared` call.
 /// Carries only heap-allocated data — no raw pointers, fully `Send`.
 enum WatchItem {
-    Stream { slot_id: usize, records: Vec<(u32, Vec<u8>)>, output: PathBuf },
+    /// `raw = false`: one `"[  i][src=o] <record>"` text line per record.
+    /// `raw = true`:  concatenated raw record bytes (binary-safe — e.g. a single
+    ///                image payload per round for a `StreamOutput` sink).
+    Stream { slot_id: usize, records: Vec<(u32, Vec<u8>)>, output: PathBuf, raw: bool },
     Shared { name: String,   payload: Vec<u8>,             output: PathBuf },
 }
 
@@ -109,6 +112,33 @@ impl PersistenceWriter {
             slot_id,
             records,
             output: output.into(),
+            raw: false,
+        }));
+    }
+
+    /// Binary-safe variant of [`watch_stream`]: copies the records of `slot_id`
+    /// (Stream or I/O area) and writes their raw concatenated bytes to `output`,
+    /// with no text framing.  Use for a `StreamOutput` sink writing one binary
+    /// payload (e.g. an image) per round.  Records are read into heap memory in
+    /// the calling thread, so the slot may be freed immediately after this call.
+    pub fn watch_slot_binary(
+        &self,
+        splice_addr: usize,
+        slot_id: usize,
+        is_io: bool,
+        output: impl Into<PathBuf>,
+    ) {
+        let sb      = unsafe { &*(splice_addr as *const Superblock) };
+        let records = if is_io {
+            read_io_records(splice_addr, sb, slot_id)
+        } else {
+            read_stream_records(splice_addr, sb, slot_id)
+        };
+        let _ = self.tx.send(PersistMsg::Watch(WatchItem::Stream {
+            slot_id,
+            records,
+            output: output.into(),
+            raw: true,
         }));
     }
 
@@ -363,15 +393,22 @@ impl PageReader {
 
 fn write_watch(item: WatchItem) {
     match item {
-        WatchItem::Stream { slot_id, records, output } => {
+        WatchItem::Stream { slot_id, records, output, raw } => {
             if let Some(parent) = output.parent() { let _ = fs::create_dir_all(parent); }
             match fs::File::create(&output) {
                 Ok(mut f) => {
-                    for (i, (origin, rec)) in records.iter().enumerate() {
-                        let _ = writeln!(f, "[{:4}][src={}] {}", i, origin, String::from_utf8_lossy(rec));
+                    if raw {
+                        let mut bytes = 0usize;
+                        for (_origin, rec) in &records { let _ = f.write_all(rec); bytes += rec.len(); }
+                        println!("[PersistenceWriter] watch slot {} ({} records, {} bytes raw) → {}",
+                            slot_id, records.len(), bytes, output.display());
+                    } else {
+                        for (i, (origin, rec)) in records.iter().enumerate() {
+                            let _ = writeln!(f, "[{:4}][src={}] {}", i, origin, String::from_utf8_lossy(rec));
+                        }
+                        println!("[PersistenceWriter] watch stream {} ({} records) → {}",
+                            slot_id, records.len(), output.display());
                     }
-                    println!("[PersistenceWriter] watch stream {} ({} records) → {}",
-                        slot_id, records.len(), output.display());
                 }
                 Err(e) => eprintln!("[PersistenceWriter] watch stream {} failed: {}", slot_id, e),
             }

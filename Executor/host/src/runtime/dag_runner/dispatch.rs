@@ -20,7 +20,7 @@ use common::{atomic_shm_offset, rdma_scratch_shm_offset, REGISTRY_OFFSET, Regist
 use super::types::*;
 use super::workers::{spawn_wasm_subprocess, spawn_python_subprocess};
 use super::grouping::{execute_wasm_grouping, execute_py_grouping};
-use super::pipeline::{execute_stream_pipeline, execute_py_pipeline};
+use super::pipeline::{execute_stream_pipeline, execute_py_pipeline, execute_stream_output};
 
 // ─── Atomic arena helpers ─────────────────────────────────────────────────────
 
@@ -179,6 +179,15 @@ pub(super) fn execute_node(
             log(&format!("stream pipeline {} rounds {} stages", p.rounds, p.stages.len()));
             execute_stream_pipeline(p, &node.id, shm_path, wasm_path, splice_addr, mesh)?;
             log("stream pipeline done");
+        }
+
+        // ── StreamOutput: per-round streaming output sink (one file per round) ─
+        // Normally dispatched as a thread by the scheduler (see mod.rs 3c); this
+        // arm handles the serial fallback and keeps the match exhaustive.
+        NodeKind::StreamOutput(p) => {
+            log(&format!("stream output {} rounds → {} path(s)", p.rounds, p.paths.len()));
+            execute_stream_output(p, &node.id, splice_addr, mesh)?;
+            log("stream output done");
         }
 
         // ── Output: flush reserved output slot to a file ─────────────────────

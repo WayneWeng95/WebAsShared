@@ -1,8 +1,9 @@
 use anyhow::{anyhow, Result};
-use super::types::{StreamPipelineParams, PyPipelineParams, RemoteSlotKind};
+use super::types::{StreamPipelineParams, PyPipelineParams, StreamOutputParams, RemoteSlotKind};
 use super::workers::{WasmLoopWorker, PyLoopWorker};
 use crate::runtime::remote::{execute_remote_recv, execute_remote_send};
 use crate::runtime::mem_operation::reclaimer;
+use crate::runtime::input_output::persistence::PersistenceWriter;
 use common::{atomic_shm_offset, REGISTRY_OFFSET, RegistryEntry, Superblock};
 
 // ─── Guest cursor reset helper ────────────────────────────────────────────────
@@ -426,6 +427,81 @@ pub(super) fn execute_stream_pipeline(
     }
 
     println!("  StreamPipeline done");
+    Ok(())
+}
+
+// ─── StreamOutput executor (per-round streaming sink) ─────────────────────────
+
+/// Execute a `StreamOutput` node — a per-round output sink (one file per round).
+///
+/// For each round `R` in `0..rounds`:
+///   1. If `rdma_recv` is configured (coordinator-side per-round RETURN), receive
+///      round R from the peer over the dedicated streaming RDMA lane
+///      (`recv_channel_stream` / conn-4) into a freshly-freed `slot`.  This is the
+///      receive half of the worker's embedded `rdma_send`; the two ride opposite
+///      directions of the streaming lane so a source pipeline on the same host can
+///      send concurrently on conn-3 without a control-channel collision.
+///   2. Capture the slot's record(s) and queue a binary-safe write to
+///      `paths[R % paths.len()]` via the background `PersistenceWriter` (records are
+///      copied to heap synchronously, so the slot can be freed immediately after).
+///   3. Free `slot` so round R+1's receive starts from an empty page chain.
+///
+/// Runs on its own OS thread (see the scheduler in `mod.rs`) so it can receive
+/// while a source `StreamPipeline` streams input out on the main thread.
+pub(super) fn execute_stream_output(
+    params:      &StreamOutputParams,
+    node_id:     &str,
+    splice_addr: usize,
+    mesh:        Option<&std::sync::Arc<connect::MeshNode>>,
+) -> Result<()> {
+    let rounds = params.rounds as usize;
+    if params.paths.is_empty() {
+        return Err(anyhow!("[{}] StreamOutput has no output paths", node_id));
+    }
+    let is_io = matches!(params.slot_kind, RemoteSlotKind::Io);
+    println!(
+        "  StreamOutput: {} rounds → {} path(s), slot {} ({:?}), binary={}, recv={}",
+        rounds, params.paths.len(), params.slot, params.slot_kind, params.binary,
+        params.rdma_recv.is_some()
+    );
+
+    let writer = PersistenceWriter::new();
+
+    for round in 0..rounds {
+        // ── Per-round receive (coordinator-side output return) ────────────────
+        if let Some(rdma) = &params.rdma_recv {
+            let m = mesh.ok_or_else(|| anyhow!(
+                "[{}] StreamOutput.rdma_recv requires dag.rdma to be configured", node_id
+            ))?;
+            let ch = m.recv_channel_stream(rdma.peer);
+            execute_remote_recv(splice_addr, rdma.slot, rdma.slot_kind, &ch, rdma.protocol, m)
+                .map_err(|e| anyhow!("[{}] StreamOutput recv round {}: {}", node_id, round, e))?;
+            println!("    [{}] StreamOutput round {} received into slot {}", node_id, round, rdma.slot);
+        }
+
+        // ── Write this round to its own file ──────────────────────────────────
+        let path = &params.paths[round % params.paths.len()];
+        if params.binary {
+            writer.watch_slot_binary(splice_addr, params.slot, is_io, path);
+        } else {
+            // Text line-dump (Stream slots only); mirrors `watch_stream`.
+            writer.watch_stream(splice_addr, params.slot, path);
+        }
+        println!("    [{}] StreamOutput round {} → \"{}\"", node_id, round, path);
+
+        // ── Free the slot so the next round's receive starts clean ────────────
+        if params.rdma_recv.is_some() {
+            match params.slot_kind {
+                RemoteSlotKind::Stream => reclaimer::free_stream_slot(splice_addr, params.slot),
+                RemoteSlotKind::Io     => reclaimer::free_io_slot(splice_addr, params.slot),
+            }
+            reset_guest_slot_cursor(splice_addr, params.slot, params.slot_kind);
+        }
+    }
+
+    // Drop joins the writer — all queued per-round files are flushed here.
+    drop(writer);
+    println!("  StreamOutput done ({} rounds written)", rounds);
     Ok(())
 }
 

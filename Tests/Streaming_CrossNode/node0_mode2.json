@@ -1,0 +1,64 @@
+{
+  "_comment": "Mode 2 (per-round output RETURN) — Node 0 (coordinator). Run on 10.10.1.2.",
+  "_comment2": "Streams one decoded image per round to node 1 (src, conn-3) AND receives",
+  "_comment3": "node 1's processed result per round into Io slot 5 (sink StreamOutput, conn-4),",
+  "_comment4": "writing one file per round. src + sink share wave 1: src runs on the main",
+  "_comment5": "thread, the StreamOutput sink runs on its own thread, so the two streaming",
+  "_comment6": "directions overlap without a control-channel collision.",
+  "shm_path": "/dev/shm/xnode_m2_node0",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 0,
+    "total": 2,
+    "ips": ["10.10.1.2", "10.10.1.1"],
+    "transfer": true
+  },
+  "nodes": [
+    {
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": {
+        "paths": [
+          "TestData/img_gradient.ppm",
+          "TestData/img_checkerboard.ppm",
+          "TestData/img_rings.ppm"
+        ],
+        "slot": 10,
+        "binary": true
+      }}
+    },
+    {
+      "id": "src",
+      "deps": ["load"],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_load_ppm", "arg0": 10, "arg1": 20 }
+        ],
+        "rdma_send": {
+          "peer": 1,
+          "slot": 20,
+          "slot_kind": "Stream",
+          "free_after": true
+        }
+      }}
+    },
+    {
+      "id": "sink",
+      "deps": ["load"],
+      "kind": { "StreamOutput": {
+        "rounds": 3,
+        "slot": 5,
+        "slot_kind": "Io",
+        "binary": true,
+        "rdma_recv": { "peer": 1, "slot": 5, "slot_kind": "Io" },
+        "paths": [
+          "TestOutput/mode2_return_out/gradient_processed.pgm",
+          "TestOutput/mode2_return_out/checkerboard_processed.pgm",
+          "TestOutput/mode2_return_out/rings_processed.pgm"
+        ]
+      }}
+    }
+  ]
+}

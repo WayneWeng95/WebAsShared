@@ -135,6 +135,14 @@ pub enum NodeKind {
     OwnedDispatch(OwnedDispatchParams),
     /// Read the reserved output slot and save all records to a file.
     Output(OutputParams),
+    /// Streaming per-round output sink: each round, write one record to
+    /// `paths[round]` (one file per round).  With `rdma_recv` set it is the
+    /// COORDINATOR side of a per-round output RETURN — it receives the worker's
+    /// round-R result over the streaming RDMA lane before writing.  Without
+    /// `rdma_recv` it writes a locally-produced slot per round.  Runs as its own
+    /// OS thread so it can receive concurrently with a source `StreamPipeline`
+    /// on the same host (see scheduler in `mod.rs`).
+    StreamOutput(StreamOutputParams),
     /// Free specified stream and/or I/O slot page chains back to the SHM pool.
     /// Use between sequential pipeline runs that reuse the same fixed slots.
     FreeSlots(FreeSlotsParams),
@@ -295,7 +303,7 @@ pub struct StreamPipelineStage {
 ///
 /// The previous round's page chain in `slot` is freed automatically before
 /// each receive (except round 0) to avoid leaking SHM pages.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct RdmaPipelineRecv {
     /// Mesh peer index to receive from.
     pub peer: usize,
@@ -449,6 +457,44 @@ pub struct OutputParams {
     /// Extra records beyond `paths.len()` wrap (`i % paths.len()`).
     #[serde(default)]
     pub split_records: bool,
+}
+
+fn default_true() -> bool { true }
+
+/// Parameters for the `StreamOutput` node — a streaming, per-round output sink.
+///
+/// Each round `R` in `0..rounds` writes exactly one record to `paths[R % len]`
+/// (one file per round), the streaming analogue of `Output` + `split_records`
+/// which flushes all records once at the end.
+///
+/// Two roles, selected by `rdma_recv`:
+///   - **Coordinator return** (`rdma_recv = Some`): the round-R result is produced
+///     on a remote worker and returned over the dedicated streaming RDMA lane
+///     (conn-4).  Before writing, this node frees+resets `slot` and receives the
+///     round into it, mirroring a `StreamPipeline`'s per-round `rdma_recv`.
+///   - **Local write** (`rdma_recv = None`): the producing pipeline has already
+///     written round R into `slot`; the node just reads and writes it.
+///
+/// Reads use the page-chain readers in `input_output::persistence` and writes use
+/// the background `PersistenceWriter`, so disk I/O never blocks the receive loop.
+#[derive(Debug, Clone, Deserialize)]
+pub struct StreamOutputParams {
+    /// Number of rounds (one output file per round).
+    pub rounds: u32,
+    /// Per-round destination paths.  Round R → `paths[R % paths.len()]`.
+    pub paths: Vec<String>,
+    /// SHM slot read (and, when `rdma_recv` is set, received into) each round.
+    pub slot: usize,
+    /// Whether `slot` lives in the Stream or I/O area.
+    pub slot_kind: RemoteSlotKind,
+    /// `true` (default): write raw record bytes — correct for binary payloads
+    /// (e.g. images).  `false`: write a text line-dump like `Watch`.
+    #[serde(default = "default_true")]
+    pub binary: bool,
+    /// When set, receive the round's result from a remote peer over the streaming
+    /// RDMA lane before writing (coordinator-side per-round output return).
+    #[serde(default)]
+    pub rdma_recv: Option<RdmaPipelineRecv>,
 }
 
 /// Explicitly free a set of stream and/or I/O slots, returning their page

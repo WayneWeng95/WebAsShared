@@ -526,7 +526,11 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 })
                 .collect::<Result<Vec<_>>>()?;
 
-            // 3b. Partition host nodes: RDMA (RemoteSend/RemoteRecv) vs serial.
+            // 3b. Partition host nodes: threaded (RDMA + StreamOutput sink) vs serial.
+            //     StreamOutput runs as a thread so its per-round rdma_recv can
+            //     progress concurrently with a source StreamPipeline streaming
+            //     input out on the main thread (opposite directions of the
+            //     streaming lane — conn-3 send / conn-4 recv — so no collision).
             let (rdma_idxs, serial_idxs): (Vec<usize>, Vec<usize>) =
                 host_idxs.iter().cloned().partition(|&idx| {
                     matches!(dag.nodes[idx].kind,
@@ -534,7 +538,8 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                         | NodeKind::RemoteRecv(_)
                         | NodeKind::RemoteAtomicFetchAdd(_)
                         | NodeKind::RemoteAtomicCmpSwap(_)
-                        | NodeKind::RemoteAtomicPush(_))
+                        | NodeKind::RemoteAtomicPush(_)
+                        | NodeKind::StreamOutput(_))
                 });
 
             // 3c. Spawn RDMA nodes as OS threads so bidirectional transfers
@@ -626,6 +631,20 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                                         log_id, local_val
                                     );
                                     Ok(())
+                                })
+                            }
+                            NodeKind::StreamOutput(p) => {
+                                // Per-round streaming sink.  Owned-clone the params
+                                // (paths/rdma_recv) so they outlive the borrow of
+                                // `dag.nodes`, and an Option-clone of the mesh Arc
+                                // (only needed when `rdma_recv` is set).
+                                let params   = p.clone();
+                                let mesh_opt = mesh.clone();
+                                let node_id  = id.clone();
+                                std::thread::spawn(move || {
+                                    pipeline::execute_stream_output(
+                                        &params, &node_id, splice_addr, mesh_opt.as_ref(),
+                                    )
                                 })
                             }
                             _ => unreachable!(),
