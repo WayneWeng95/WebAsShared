@@ -118,6 +118,7 @@ mod plan;
 mod workers;
 mod grouping;
 mod pipeline;
+mod stage_fanout;
 mod dispatch;
 
 pub use types::*;

@@ -2,7 +2,28 @@ use std::collections::{HashMap, VecDeque};
 use serde::{Deserialize, Serialize};
 use rand::Rng;
 
-use crate::symbolic_dag::SymbolicNode;
+use crate::symbolic_dag::{SymbolicNode, SplitHint};
+
+/// Locality weight a producer's output edge exerts on its consumers in the
+/// data-weighted dep-affinity (see `assign_nodes`).  Larger → the consumer is
+/// pulled harder onto this node's host, so cross-machine cuts avoid this edge.
+///
+/// Resolution: the friendly `split` hint wins when present (`avoid` → a weight
+/// that dominates all normal edges so the edge stays local; `prefer` → 0 so the
+/// edge exerts no pull and becomes a cut point); otherwise the numeric
+/// `out_weight`; otherwise `1.0` (the original count-based affinity).
+///
+/// `KEEP_WEIGHT` is a large *finite* sentinel: `avoid` is a strong preference,
+/// not a hard guarantee, so it still yields to capacity/quota limits.
+const KEEP_WEIGHT: f64 = 1e9;
+
+pub(crate) fn edge_weight(node: &SymbolicNode) -> f64 {
+    match node.split {
+        Some(SplitHint::Avoid)  => KEEP_WEIGHT,
+        Some(SplitHint::Prefer) => 0.0,
+        None => node.out_weight.unwrap_or(1.0),
+    }
+}
 
 /// Placement hints derived from live cluster state.
 ///
@@ -75,6 +96,16 @@ pub fn assign_nodes(
         .filter_map(|n| n.node_id.map(|id| (n.id.clone(), id)))
         .collect();
 
+    // Locality hint: the breakability weight each node's output edge(s) exert.
+    // Used to weight dep-affinity so a consumer is pulled toward the host of its
+    // strongest-`avoid` / heaviest producer — cross-machine cuts then fall on
+    // `prefer` / lightest edges.  Neutral nodes resolve to 1.0, reproducing the
+    // original count-based affinity exactly (see `edge_weight`).
+    let id_to_weight: HashMap<String, f64> = nodes
+        .iter()
+        .map(|n| (n.id.clone(), edge_weight(n)))
+        .collect();
+
     let mut quota = compute_quotas(total_nodes, auto_count, hints, global_cap);
 
     let order = topo_order(nodes);
@@ -84,22 +115,29 @@ pub fn assign_nodes(
             continue;
         }
 
-        // Count how many direct deps landed on each host (dep-affinity).
-        let mut affinity: HashMap<u32, usize> = HashMap::new();
+        // Sum the data-weight of direct deps that landed on each host
+        // (data-weighted dep-affinity). With default weights (1.0) this is the
+        // original per-dep count.
+        let mut affinity: HashMap<u32, f64> = HashMap::new();
         for dep_id in &nodes[idx].deps {
             if let Some(&host) = id_to_host.get(dep_id.as_str()) {
-                *affinity.entry(host).or_insert(0) += 1;
+                let w = id_to_weight.get(dep_id.as_str()).copied().unwrap_or(1.0);
+                *affinity.entry(host).or_insert(0.0) += w;
             }
         }
 
-        // Pick the host with the most dep-affinity that still has quota;
-        // break ties by remaining quota (packs onto fewer hosts).
+        // Pick the host with the most dep-affinity (heaviest local data) that
+        // still has quota; break ties by remaining quota (packs onto fewer
+        // hosts).  Ties return the last maximal host, matching the prior
+        // `max_by_key` behaviour.
         let best = (0..total_nodes as u32)
             .filter(|h| quota.get(h).copied().unwrap_or(0) > 0)
-            .max_by_key(|h| {
-                let aff = affinity.get(h).copied().unwrap_or(0);
-                let rem = quota.get(h).copied().unwrap_or(0);
-                (aff, rem)
+            .max_by(|a, b| {
+                let key_a = (affinity.get(a).copied().unwrap_or(0.0),
+                             quota.get(a).copied().unwrap_or(0) as f64);
+                let key_b = (affinity.get(b).copied().unwrap_or(0.0),
+                             quota.get(b).copied().unwrap_or(0) as f64);
+                key_a.partial_cmp(&key_b).unwrap_or(std::cmp::Ordering::Equal)
             })
             .unwrap_or(0);
 
@@ -278,7 +316,7 @@ pub(crate) fn topo_order(nodes: &[SymbolicNode]) -> Vec<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::symbolic_dag::SymbolicNode;
+    use crate::symbolic_dag::{SymbolicNode, SplitHint};
     use serde_json::json;
 
     fn make_node(id: &str, deps: Vec<&str>, node_id: Option<u32>) -> SymbolicNode {
@@ -290,6 +328,8 @@ mod tests {
             fanout: None,
             placement: None,
             barrier_group: None,
+            split: None,
+            out_weight: None,
             kind: json!({"Func": {"slot": 0}}),
         }
     }
@@ -379,6 +419,91 @@ mod tests {
 
         assert_eq!(nodes[0].node_id, Some(0), "pinned node must not change");
         assert!(nodes[1].node_id.is_some(), "auto node must be assigned");
+    }
+
+    #[test]
+    fn split_avoid_keeps_consumer_local() {
+        // `split: "avoid"` on a producer = don't break its output edge. The
+        // consumer should colocate with it even though its other dep is on a
+        // different host, so the cut lands on the OTHER (neutral) edge.
+        let mut keep = make_node("keep", vec![], Some(0));
+        keep.split = Some(SplitHint::Avoid);
+        let other = make_node("other", vec![], Some(1)); // neutral
+        let sink = make_node("sink", vec!["keep", "other"], None);
+        let mut nodes = vec![keep, other, sink];
+
+        let hints = PlacementHints::default(); // every host has full quota
+        assign_nodes(&mut nodes, 2, &hints, None);
+
+        assert_eq!(
+            nodes[2].node_id, Some(0),
+            "sink must stay with the `avoid` producer (host 0), got {:?}",
+            nodes[2].node_id
+        );
+    }
+
+    #[test]
+    fn split_prefer_becomes_the_cut_point() {
+        // `split: "prefer"` on a producer = a safe place to break. The consumer
+        // is NOT pulled toward it, so it follows its neutral dep on the other
+        // host and the `prefer` edge is the one that gets cut.
+        let mut cheap = make_node("cheap", vec![], Some(0));
+        cheap.split = Some(SplitHint::Prefer);
+        let other = make_node("other", vec![], Some(1)); // neutral
+        let sink = make_node("sink", vec!["cheap", "other"], None);
+        let mut nodes = vec![cheap, other, sink];
+
+        let hints = PlacementHints::default();
+        assign_nodes(&mut nodes, 2, &hints, None);
+
+        assert_eq!(
+            nodes[2].node_id, Some(1),
+            "sink should follow its neutral dep (host 1), cutting the `prefer` edge, got {:?}",
+            nodes[2].node_id
+        );
+    }
+
+    #[test]
+    fn out_weight_pulls_consumer_to_heaviest_producer() {
+        // Two pinned producers on different hosts feed one auto consumer.
+        // The heavy edge should stay local: the sink lands on the heavy
+        // producer's host, so the cross-machine cut falls on the LIGHT edge.
+        let mut heavy = make_node("heavy", vec![], Some(0));
+        heavy.out_weight = Some(5.0);
+        let mut light = make_node("light", vec![], Some(1));
+        light.out_weight = Some(1.0);
+        let sink = make_node("sink", vec!["heavy", "light"], None);
+        let mut nodes = vec![heavy, light, sink];
+
+        // Empty hints → every host has full quota, so data-weighted dep-affinity
+        // alone decides placement.
+        let hints = PlacementHints::default();
+        assign_nodes(&mut nodes, 2, &hints, None);
+
+        assert_eq!(
+            nodes[2].node_id, Some(0),
+            "sink should colocate with the heavy producer (host 0), got {:?}",
+            nodes[2].node_id
+        );
+    }
+
+    #[test]
+    fn equal_weights_reproduce_count_affinity() {
+        // Sanity / backward-compat: with default (absent) weights the tie-break
+        // is unchanged — equal affinity resolves to the last maximal host, exactly
+        // as the original count-based `max_by_key` did.
+        let p0 = make_node("p0", vec![], Some(0));
+        let p1 = make_node("p1", vec![], Some(1));
+        let sink = make_node("sink", vec!["p0", "p1"], None);
+        let mut nodes = vec![p0, p1, sink];
+
+        let hints = PlacementHints::default();
+        assign_nodes(&mut nodes, 2, &hints, None);
+
+        assert_eq!(
+            nodes[2].node_id, Some(1),
+            "equal-weight tie should resolve to the last host (unchanged behaviour)"
+        );
     }
 
     #[test]

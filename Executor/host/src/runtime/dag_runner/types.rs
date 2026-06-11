@@ -293,6 +293,20 @@ pub struct StreamPipelineStage {
     pub arg0: u32,
     /// Second argument.  `null` / `None` → inject the current round number.
     pub arg1: Option<u32>,
+    /// Number of parallel workers for this stage (stage fan-out width).  When
+    /// `> 1`, each tick the host scatters this stage's per-tick input batch
+    /// round-robin across `width` private sub-slots, runs the workers
+    /// concurrently, and gathers their outputs back into the stage's output slot
+    /// in record order.  `None` / `1` keeps the original single-worker path
+    /// (no scatter/gather) so existing pipelines are byte-for-byte unchanged.
+    /// Used to scale a hot stage under high streaming load.
+    #[serde(default)]
+    pub width: Option<usize>,
+    /// Upper bound on `width` for dynamic autoscaling (a later phase pre-spawns
+    /// this many workers and gates how many run each tick from observed
+    /// backlog).  Ignored by the static width path.
+    #[serde(default)]
+    pub max_width: Option<usize>,
 }
 
 /// RDMA recv source configuration for a pipeline node.

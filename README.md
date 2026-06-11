@@ -78,6 +78,21 @@ Distributed correctness, capacity-aware fan-out, metrics, and streaming fixes:
   correctness against analytic **and** non-pipelined baselines, determinism,
   slot lifecycle, reset/multi-run, `split_records`, and Rust/Python parity.
 
+- **Per-round RDMA output return (streaming, Mode 2).** A worker's processed
+  output is now returned to the coordinator (node 0) and written **one file per
+  round, as each round arrives** — the streaming analogue of the batch
+  `Output`+`split_records` flush. New **`StreamOutput`** node kind: each round it
+  optionally `rdma_recv`s the worker's result over the dedicated streaming lane
+  (conn-4) and binary-writes it to `paths[round]`. It runs on its own thread, so
+  node 0 can stream input **out** (conn-3, source `StreamPipeline` on the main
+  thread) while the sink receives output **back** (conn-4) concurrently — safe
+  because the streaming control lane is split by direction, so the two never share
+  a TCP stream. The worker is a single `StreamPipeline` doing both per-round
+  `rdma_recv` (input) and embedded `rdma_send` (output). Cross-node verified: 3/3
+  images byte-identical to the single-node baseline, deterministic
+  ([`Tests/Streaming_CrossNode/node{0,1}_mode2.json`](Tests/Streaming_CrossNode/),
+  `verify_mode2.py`).
+
 See [`problems.md`](problems.md) for remaining open items and
 [`docs/updates.md`](docs/updates.md) for the full change log.
 
@@ -552,7 +567,8 @@ See [`docs/extended_pool.md`](docs/extended_pool.md) §"Phase 3 — RDMA integra
 | `PyFunc` | Call a Python workload function (one subprocess per invocation) |
 | `StreamPipeline` / `PyPipeline` | Multi-stage pipeline with persistent worker reuse per stage |
 | `Input` | Load a file into an I/O slot (optional background prefetch) |
-| `Output` | Write an I/O slot to a file |
+| `Output` | Write an I/O slot to a file (batch; `split_records` → one file per record) |
+| `StreamOutput` | Per-round streaming sink: write one file per round (`paths[round]`); with `rdma_recv` it receives the worker's round result over the streaming lane first (coordinator-side output return) |
 | `Bridge` / `Aggregate` / `Shuffle` / `Broadcast` | Host-side zero-copy routing |
 | `RemoteSend` | RDMA-WRITE a slot to a peer node's SHM staging area |
 | `RemoteRecv` | Receive a slot written by a peer via RDMA into local SHM |

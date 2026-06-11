@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use super::types::{StreamPipelineParams, PyPipelineParams, StreamOutputParams, RemoteSlotKind};
+use super::stage_fanout;
 use super::workers::{WasmLoopWorker, PyLoopWorker};
 use crate::runtime::remote::{execute_remote_recv, execute_remote_send};
 use crate::runtime::mem_operation::reclaimer;
@@ -115,6 +116,13 @@ fn store_atomic(splice_addr: usize, idx: usize, val: u64) {
     unsafe { (*ptr).store(val, Ordering::Release) };
 }
 
+/// Load the atomic-arena slot at `idx`.
+fn load_atomic(splice_addr: usize, idx: usize) -> u64 {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let ptr = (splice_addr + atomic_shm_offset(idx) as usize) as *const AtomicU64;
+    unsafe { (*ptr).load(Ordering::Acquire) }
+}
+
 /// Committed record count of stream `slot` (cheap, count-only chain walk).
 fn slot_record_count(splice_addr: usize, slot: usize) -> usize {
     let sb = unsafe { &*(splice_addr as *const Superblock) };
@@ -172,17 +180,39 @@ pub(super) fn execute_stream_pipeline(
         return Err(anyhow!("[{}] StreamPipeline has no stages", node_id));
     }
 
-    // Spawn one persistent worker per stage (wasmtime init paid once).
-    let mut workers: Vec<WasmLoopWorker> = params.stages.iter()
-        .map(|s| WasmLoopWorker::spawn(&s.func, shm_path, wasm_path, node_id))
+    // Per-stage fan-out width (parallel workers).  Default/clamp to 1 — that path
+    // is byte-for-byte the original single-worker execution, so existing DAGs
+    // (no `width` field) are unaffected.
+    let widths: Vec<usize> = params.stages.iter()
+        .map(|s| s.width.unwrap_or(1).max(1))
+        .collect();
+    let max_w = widths.iter().copied().max().unwrap_or(1);
+    if max_w > 1 && !stage_fanout::fits_band(depth, max_w) {
+        return Err(anyhow!(
+            "[{}] StreamPipeline width too large: depth {} × width {} exceeds the \
+             reserved sub-slot band (max width {}, depth ≤ 8)",
+            node_id, depth, max_w, stage_fanout::MAX_STAGE_WIDTH
+        ));
+    }
+
+    // Spawn `width` persistent workers per stage (wasmtime init paid once each).
+    let mut workers: Vec<Vec<WasmLoopWorker>> = params.stages.iter().enumerate()
+        .map(|(s, stage)| (0..widths[s])
+            .map(|_| WasmLoopWorker::spawn(&stage.func, shm_path, wasm_path, node_id))
+            .collect::<Result<Vec<_>>>())
         .collect::<Result<Vec<_>>>()?;
 
-    let slot_chain: Vec<String> = params.stages.iter()
-        .map(|s| s.arg1.map_or_else(|| format!("{}(r)", s.arg0), |a| format!("{}→{}", s.arg0, a)))
+    let slot_chain: Vec<String> = params.stages.iter().enumerate()
+        .map(|(s, stage)| {
+            let w = if widths[s] > 1 { format!("×{}", widths[s]) } else { String::new() };
+            stage.arg1.map_or_else(|| format!("{}(r){}", stage.arg0, w),
+                                   |a| format!("{}→{}{}", stage.arg0, a, w))
+        })
         .collect();
+    let total_workers: usize = widths.iter().sum();
     println!(
         "  StreamPipeline: {} rounds, {} stages | {} ({} persistent workers)",
-        rounds, depth, slot_chain.join(" › "), depth
+        rounds, depth, slot_chain.join(" › "), total_workers
     );
 
     // ── Per-round race guard: per-slot read watermarks ────────────────────────
@@ -291,23 +321,53 @@ pub(super) fn execute_stream_pipeline(
         //    pre-tick committed counts).  A consumer of round R thus sees only
         //    the records its producer committed in earlier ticks, never round
         //    R+1 that the producer appends concurrently in this tick.
+        //
+        //    For a WIDENED stage (width > 1) the host plays the consumer's role:
+        //    it snapshots round R's input window from arg0 (same race-safe
+        //    pre-tick read) and scatters those records round-robin into the
+        //    stage's private input sub-slots, advancing its own arg0 cursor.
         for &(s_idx, _) in &active {
             let slot = params.stages[s_idx].arg0;
-            if let Some(&hi) = hi_idx.get(&slot) {
-                let cnt = slot_record_count(splice_addr, slot as usize);
-                store_atomic(splice_addr, hi, cnt as u64 + 1); // +1 sentinel: 0 = unset
+            if widths[s_idx] == 1 {
+                if let Some(&hi) = hi_idx.get(&slot) {
+                    let cnt = slot_record_count(splice_addr, slot as usize);
+                    store_atomic(splice_addr, hi, cnt as u64 + 1); // +1 sentinel: 0 = unset
+                }
+            } else {
+                scatter_widened_input(splice_addr, slot, widths[s_idx], s_idx, &cursor_idx)?;
             }
         }
 
         // Scatter: write all commands first — workers wake and run concurrently.
+        // Width-1: send the stage's single worker on (arg0 → a1).  Width-N: send
+        // each worker on its (sub_in → sub_out) private slot pair.
         for &(s_idx, a1) in &active {
-            workers[s_idx].send(params.stages[s_idx].arg0, a1)
-                .map_err(|e| anyhow!("[{}] stage {} tick {} send: {}", node_id, s_idx, tick, e))?;
+            if widths[s_idx] == 1 {
+                workers[s_idx][0].send(params.stages[s_idx].arg0, a1)
+                    .map_err(|e| anyhow!("[{}] stage {} tick {} send: {}", node_id, s_idx, tick, e))?;
+            } else {
+                for k in 0..widths[s_idx] {
+                    let si = stage_fanout::sub_in_slot(s_idx, k) as u32;
+                    let so = stage_fanout::sub_out_slot(s_idx, k) as u32;
+                    workers[s_idx][k].send(si, so)
+                        .map_err(|e| anyhow!("[{}] stage {} worker {} tick {} send: {}", node_id, s_idx, k, tick, e))?;
+                }
+            }
         }
-        // Gather: collect responses in order (workers may already be done).
-        for &(s_idx, _) in &active {
-            workers[s_idx].recv()
-                .map_err(|e| anyhow!("[{}] stage {} tick {}: {}", node_id, s_idx, tick, e))?;
+        // Gather: collect responses; for widened stages, merge the workers'
+        // output sub-slots back into the stage's real output slot (a1) in
+        // round-robin record order, then free the sub-slots.
+        for &(s_idx, a1) in &active {
+            if widths[s_idx] == 1 {
+                workers[s_idx][0].recv()
+                    .map_err(|e| anyhow!("[{}] stage {} tick {}: {}", node_id, s_idx, tick, e))?;
+            } else {
+                for k in 0..widths[s_idx] {
+                    workers[s_idx][k].recv()
+                        .map_err(|e| anyhow!("[{}] stage {} worker {} tick {}: {}", node_id, s_idx, k, tick, e))?;
+                }
+                gather_widened_output(splice_addr, s_idx, widths[s_idx], a1)?;
+            }
         }
 
         // ── RDMA send ─────────────────────────────────────────────────────────
@@ -408,8 +468,10 @@ pub(super) fn execute_stream_pipeline(
     }
 
     // Close stdin on all workers (EOF → they exit) and wait for them.
-    for w in workers {
-        w.finish()?;
+    for stage_workers in workers {
+        for w in stage_workers {
+            w.finish()?;
+        }
     }
 
     // Dump the accumulated per-round summaries from the last stage's output slot.
@@ -427,6 +489,75 @@ pub(super) fn execute_stream_pipeline(
     }
 
     println!("  StreamPipeline done");
+    Ok(())
+}
+
+// ─── Widened-stage scatter / gather (stage fan-out, width > 1) ────────────────
+
+/// Snapshot this tick's input window for a widened stage from `arg0` and scatter
+/// it round-robin into the stage's private input sub-slots, then prime each
+/// sub-slot's read cursors + watermark so the worker reads its whole shard
+/// (works for both `read_next_*` and `pipe_read_window` workloads).  Advances
+/// the host's own `arg0` consume cursor by the window size.
+fn scatter_widened_input(
+    splice_addr: usize,
+    arg0: u32,
+    width: usize,
+    s_idx: usize,
+    cursor_idx: &std::collections::HashMap<u32, usize>,
+) -> Result<()> {
+    // Race-safe window: only records committed before this tick's producers run.
+    let cnt = slot_record_count(splice_addr, arg0 as usize);
+    let cur = cursor_idx.get(&arg0).map(|&i| load_atomic(splice_addr, i) as usize).unwrap_or(0);
+    let all = stage_fanout::read_slot_records(splice_addr, arg0 as usize);
+    let window = all.into_iter().skip(cur).take(cnt.saturating_sub(cur));
+
+    // Reset the private sub-slots (fresh chain each tick).
+    for k in 0..width {
+        stage_fanout::free_sub_slot(splice_addr, stage_fanout::sub_in_slot(s_idx, k));
+        stage_fanout::free_sub_slot(splice_addr, stage_fanout::sub_out_slot(s_idx, k));
+    }
+    // Round-robin scatter: record j → worker j % width.
+    for (j, (origin, payload)) in window.enumerate() {
+        let si = stage_fanout::sub_in_slot(s_idx, j % width);
+        stage_fanout::append_stream_record(splice_addr, si, origin, &payload)?;
+    }
+    // Advance the host's consume cursor past the window.
+    if let Some(&i) = cursor_idx.get(&arg0) { store_atomic(splice_addr, i, cnt as u64); }
+
+    // Prime each sub-input slot's cursors + watermark so the worker reads it all.
+    for k in 0..width {
+        let si = stage_fanout::sub_in_slot(s_idx, k);
+        let cnt_k = slot_record_count(splice_addr, si);
+        for name in [format!("stream_cursor_{}", si), format!("pipe_cursor_{}", si)] {
+            let idx = register_or_get_atomic(splice_addr, &name);
+            store_atomic(splice_addr, idx, 0);
+        }
+        let hi = register_or_get_atomic(splice_addr, &format!("stream_hi_{}", si));
+        store_atomic(splice_addr, hi, cnt_k as u64 + 1); // +1 sentinel: 0 = unset
+    }
+    Ok(())
+}
+
+/// Merge a widened stage's output sub-slots back into its real output slot `a1`
+/// in round-robin record order (worker 0 rec 0, worker 1 rec 0, …), preserving
+/// each record's `origin`, then free the sub-slots.
+fn gather_widened_output(splice_addr: usize, s_idx: usize, width: usize, a1: u32) -> Result<()> {
+    let outs: Vec<Vec<(u32, Vec<u8>)>> = (0..width)
+        .map(|k| stage_fanout::read_slot_records(splice_addr, stage_fanout::sub_out_slot(s_idx, k)))
+        .collect();
+    let max_len = outs.iter().map(|v| v.len()).max().unwrap_or(0);
+    for pos in 0..max_len {
+        for out in &outs {
+            if let Some((origin, payload)) = out.get(pos) {
+                stage_fanout::append_stream_record(splice_addr, a1 as usize, *origin, payload)?;
+            }
+        }
+    }
+    for k in 0..width {
+        stage_fanout::free_sub_slot(splice_addr, stage_fanout::sub_in_slot(s_idx, k));
+        stage_fanout::free_sub_slot(splice_addr, stage_fanout::sub_out_slot(s_idx, k));
+    }
     Ok(())
 }
 

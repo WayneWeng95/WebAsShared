@@ -859,14 +859,14 @@ mod tests {
     fn input_node(id: &str, machine: u32, path: &str) -> SymbolicNode {
         SymbolicNode {
             id: id.to_string(), deps: vec![], node_id: Some(machine),
-            output_slot: None, fanout: None, placement: None, barrier_group: None,
+            output_slot: None, fanout: None, placement: None, barrier_group: None, split: None, out_weight: None,
             kind: json!({ "Input": { "path": path } }),
         }
     }
     fn map_node(id: &str, machine: u32) -> SymbolicNode {
         SymbolicNode {
             id: id.to_string(), deps: vec![], node_id: Some(machine),
-            output_slot: None, fanout: None, placement: None, barrier_group: None,
+            output_slot: None, fanout: None, placement: None, barrier_group: None, split: None, out_weight: None,
             kind: json!({ "WasmVoid": { "func": "wc_map", "arg": 0 } }),
         }
     }

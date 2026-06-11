@@ -215,7 +215,7 @@ mod tests {
     fn make_auto(id: &str) -> SymbolicNode {
         SymbolicNode {
             id: id.to_string(), deps: vec![], node_id: None, output_slot: None,
-            fanout: None, placement: None, barrier_group: None,
+            fanout: None, placement: None, barrier_group: None, split: None, out_weight: None,
             kind: json!({"Func": {"slot": 0}}),
         }
     }

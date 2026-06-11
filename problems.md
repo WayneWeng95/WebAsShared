@@ -44,12 +44,12 @@ removed from this file. One-line trace below; details are in git history.
 
 --- TODO ------------------------------------------------------------------------
 
-PRIORITY ORDER (set 2026-06-10):
-  1. Mode 2 — streaming / per-round RDMA output return (active next).
-  2. Streaming fan-out + locality awareness (hint mechanism).
-  3. Cross-node streaming test harness (deterministic analytic lockstep + Python).
-  4. [FUTURE WORK] Worker-drop scheduling grace period.
+PRIORITY ORDER (updated 2026-06-11):
+  1. Streaming fan-out + locality awareness (hint mechanism). (active next)
+  2. Cross-node streaming test harness (deterministic analytic lockstep + Python).
+  3. [FUTURE WORK] Worker-drop scheduling grace period.
   Separate track, ongoing (outside this order): benchmark baselines.
+  DONE: Mode 2 — streaming / per-round RDMA output return (cluster-verified 2026-06-11).
 
 [x] RDMA OUTPUT-RETURN, Mode 1 (batch) — DONE + cluster-verified 2026-06-10.
     A worker's output is returned to the coordinator (node 0) over RDMA just by
@@ -67,24 +67,81 @@ PRIORITY ORDER (set 2026-06-10):
     checker/rings=c36c7705). NOTE: partitioner placement is RNG-nondeterministic;
     regression-check structure, not bytes.
 
-[ ] (1) Mode 2 — STREAMING / per-round output return (ACTIVE NEXT).
+[x] (1) Mode 2 — STREAMING / per-round output return — DONE + cluster-verified 2026-06-11.
     Worker's final StreamPipeline relays each round's output via embedded rdma_send
-    back to node 0; node 0 runs a sink that writes each round as it arrives.
-    Needs: (a) a per-round write sink on node 0 — a streaming Output draining the
-    recv stream-slot to paths[round] (building on watch_stream), rather than
-    split_records flushing once at the end; (b) node-0 sink-only topology (push the
-    input via a one-shot RemoteSend{Io} / shared_inputs so node 0's only pipeline is
-    the sink) — two StreamPipelines can't run concurrently on one host (mod.rs runs
-    non-RDMA nodes serially; only RemoteSend/Recv/atomics get threads). Defer the
-    scheduler change (run StreamPipelines as threads) unless node 0 must be source
-    AND streaming-sink simultaneously.
-    OPEN DESIGN Q: per-round = one file per round (paths[round]) vs append all rounds
-    into one growing output — drives whether to extend Output or add a sink kind.
+    back to node 0; node 0 runs a sink that writes each round as it arrives, ONE FILE
+    PER ROUND (paths[round]).
+    DESIGN (resolved the open Q toward one-file-per-round + a new node kind, NOT
+    extending Output, to keep the race-sensitive execute_stream_pipeline untouched):
+      - New `StreamOutput` node kind (types.rs / pipeline.rs::execute_stream_output):
+        per round, optional rdma_recv the worker's result over the streaming lane
+        (recv_channel_stream / conn-4) then binary-write that round's record to
+        paths[round] via the background PersistenceWriter (new watch_slot_binary —
+        raw bytes, binary-safe for images; the text watch_stream path is unchanged).
+        Covers both coordinator-side remote RETURN (rdma_recv set) and a local
+        per-round write (rdma_recv absent).
+      - INPUT also streams one-by-one (user choice): node 0's source StreamPipeline
+        rdma_sends one decoded image per round on conn-3.
+      - node 0 is BOTH source AND sink simultaneously. Enabled WITHOUT the general
+        "run StreamPipelines as threads" change: StreamOutput is classified into the
+        threaded host group (mod.rs 3b/3c), so the sink receives on conn-4 (its own
+        thread) while the source StreamPipeline sends on conn-3 (main thread). Safe
+        because the streaming lane is direction-split (ctrl_as_sender_stream /
+        ctrl_as_receiver_stream) — no control-channel collision.
+      - Worker returns each round via the StreamPipeline's existing embedded rdma_send
+        (free_after); a single node-1 StreamPipeline does both rdma_recv (input) and
+        rdma_send (output) per round.
+    DAGs: Tests/Streaming_CrossNode/node0_mode2.json + node1_mode2.json; verify on
+    node 0 with verify_mode2.py (TestOutput/mode2_return_out vs baseline/). 3/3 images
+    byte-identical to the single-node baseline, deterministic. Single-node streaming
+    regression (Tests/Streaming) 34/34 still pass.
 
-[ ] (2) STREAMING FAN-OUT + LOCALITY AWARENESS.
+[~] (2) STREAMING FAN-OUT + LOCALITY AWARENESS — locality hint DONE, streaming scenarios next.
     Streaming-workload fan-out scenarios + a user hint mechanism: let the user hint
     which edges transfer less data so the partitioner breaks the topology there for
     multi-node deployment.
+    [x] LOCALITY HINT + CUT HEURISTIC (locally tested 2026-06-11). The placer's
+        dep-affinity is now DATA-WEIGHTED (placer.rs assign_nodes + edge_weight): a
+        consumer is pulled toward the host of its strongest producer, so when the
+        cluster must split, cross-machine cuts fall on the safest/lightest edges.
+        User-facing hint = per-node breakability intent (each node controls its OWN
+        output edge):
+          - `split: "avoid"`  → don't break here; keep the consumer local (maps to a
+            large finite weight — strong preference, yields only to capacity limits).
+          - `split: "prefer"` → safe place to break; cuts gravitate here (weight 0).
+          - omitted → neutral.
+        e.g. chain A→B→C with `B: "prefer"` cuts B→C; `A: "avoid"` keeps A→B local.
+        Advanced numeric override `out_weight: Option<f64>` (used only when `split`
+        absent; default 1.0). Backward-compat by construction — neutral nodes resolve
+        to 1.0 = original count-based affinity (same last-maximal tie-break). 4 unit
+        tests (split_avoid_keeps_consumer_local, split_prefer_becomes_the_cut_point,
+        out_weight_pulls_consumer_to_heaviest_producer, equal_weights_reproduce_count_
+        affinity); all 20 partitioner tests pass, full build.sh green. Design: per-NODE
+        hint (fits the bare-id `deps` schema), greedy weighted-affinity (not full
+        min-cut), strong-preference (not hard guarantee — pin node_id for that).
+    [~] STREAMING FAN-OUT (unified per-stage width + dynamic autoscaling). User wants
+        a unified mechanism: scale a hot stage (more workers in a stage) AND replicate
+        full pipelines (all stages wide), driven by dynamic autoscaling on load.
+        Unifying primitive = per-stage WIDTH. Phased; the static width mechanism is the
+        actuator the autoscaler will drive. Plan: ~/.claude/plans/encapsulated-splashing-fairy.md.
+        [x] PHASE 1 — static per-stage width, single host (locally tested 2026-06-11).
+            `width`/`max_width` added to StreamPipelineStage (types.rs). A widened stage
+            runs W persistent workers; each tick the host SCATTERS the per-tick input
+            batch round-robin into W private sub-slots (reserved band 1792.., dag_runner/
+            stage_fanout.rs), runs the workers, and GATHERS their outputs back into the
+            stage's slot in record order. Needed because slots are single-owner
+            (read_next load-then-fetch_add + chain append are not concurrency-safe).
+            `width==1` keeps the EXACT original path → existing DAGs byte-for-byte
+            unchanged (Tests/Streaming 34/34 still pass). New Tests/Streaming/width_test.py:
+            word-count filter×3+transform×2 == width:1 == analytic + deterministic
+            (correct sum proves all records were distributed across workers), image
+            widened-stage byte-identical. build.sh green.
+        [ ] PHASE 2 — cross-host width via partitioner (expand width → placed workers,
+            use split hint for cut points, RDMA scatter/gather + Mode-2 return). cluster.
+        [ ] PHASE 3 — load signals: per-stage backlog (count_stream_records) + per-tick
+            stage time into metrics / [DAG][timing]. locally testable.
+        [ ] PHASE 4 — dynamic autoscaling: in-executor control loop pre-spawns max_width
+            and gates active width per tick from Phase-3 backlog (policy + hysteresis).
 
 [ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto
     the table. Tests/Fan_out_remote/ is the starting point for the measurement side.

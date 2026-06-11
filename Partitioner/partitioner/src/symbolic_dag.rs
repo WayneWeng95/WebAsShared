@@ -97,7 +97,37 @@ pub struct SymbolicNode {
     pub placement: Option<String>,
     #[serde(default)]
     pub barrier_group: Option<String>,
+    /// Breakability hint for this node's OUTPUT edge(s) when the cluster is
+    /// partitioned across machines — the friendly way to steer where the cut
+    /// lands.  Each node controls its own outgoing edge:
+    ///   - `"avoid"`  → don't break here; keep the consumer on this node's host.
+    ///   - `"prefer"` → a safe/cheap place to break; cuts gravitate here.
+    ///   - omitted    → neutral.
+    /// E.g. in a chain `A→B→C`, `B: "prefer"` makes the cut fall between B and
+    /// C, while `A: "avoid"` keeps A→B co-located.  This is a strong preference,
+    /// not a hard guarantee (it yields if a host runs out of capacity); for a
+    /// hard guarantee pin both nodes to the same `node_id`.  Drives the placer's
+    /// data-weighted dep-affinity (see `placer::edge_weight`).
+    #[serde(default)]
+    pub split: Option<SplitHint>,
+    /// Advanced numeric override for the locality weight, used ONLY when `split`
+    /// is absent.  Relative, unitless "data emitted on my output edge(s)";
+    /// higher → the consumer is pulled harder onto this node's host, so cuts
+    /// fall on lighter edges.  Absent → `1.0` (the original count-based
+    /// dep-affinity).  Prefer `split` unless you need a specific ratio.
+    #[serde(default)]
+    pub out_weight: Option<f64>,
     pub kind: serde_json::Value,
+}
+
+/// Breakability intent for a node's output edge(s) — see `SymbolicNode::split`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitHint {
+    /// Avoid breaking this node's output edge(s): keep the consumer local.
+    Avoid,
+    /// Prefer breaking here: this node's output is a safe cut point.
+    Prefer,
 }
 
 impl SymbolicDag {
