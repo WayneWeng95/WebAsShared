@@ -1,322 +1,85 @@
 ================================================================================
-OPEN ITEMS  (updated 2026-06-05)
+OPEN ITEMS  (updated 2026-06-11)
 ================================================================================
 
-Resolved items have been summarized in README.md ("Recent Improvements") and
-removed from this file. One-line trace below; details are in git history.
+Resolved items are one-line traces below; full details in git history + README.md
+("Recent Improvements"). Open work is in the TODO section at the bottom.
 
---- RESOLVED (see README.md "Recent Improvements") ------------------------------
-[x] (1) Cross-node aggregate dropped a node's contribution — receiver freed a
-        stream RemoteRecv slot before its Aggregate consumer ran. Cluster-verified.
-[x] (2) Data-parallel input sharding — each node loads a line-aligned fractional
-        slice (load_slice); N nodes give the exact 1x result. Cluster-verified.
-[x] (3) Per-wave compute timing ([DAG][timing]); staging timed/excluded in worker.
-[x] (3b) RSS metric fixed — now sums the executor process TREE's private RSS
-        (host + all wasm-call workers), SHM counted once via shm_bump_offset.
-[x] (6) Capacity-weighted fan-out — `fanout: N` = N total workers across the
-        cluster, apportioned by per-host capacity (Hamilton). Composes with (2).
-[x] (7) Fan-out core-budget cap — clamp N to Σ max(1, cores−reserve) (reserve=2);
-        e.g. fanout:50 on 2×16 cores → 28. Works with or without SCX.
-[x] Streaming check + fixes — added Output `split_records` (record i → paths[i]);
-        fixed dag_demo FileDispatch wasm path.
-        See Tests/Fan_out_remote/ for the fan-out sweep harness + results.
+--- RESOLVED (earlier; see README.md) -------------------------------------------
+[x] (1) Cross-node aggregate dropped a contribution — recv slot freed before its
+        Aggregate consumer ran. Cluster-verified.
+[x] (2) Data-parallel input sharding (load_slice) — N nodes give the exact 1x. Cluster.
+[x] (3) Per-wave compute timing; (3b) RSS = executor process-tree private RSS.
+[x] (6) Capacity-weighted fan-out (fanout:N across cluster); (7) core-budget cap.
+[x] Output split_records (record i → paths[i]); dag_demo FileDispatch wasm path fix.
+[x] Single-node streaming pass (Tests/Streaming/, 34 checks) — fixed a per-round race:
+        host publishes per-slot watermark stream_hi_{slot}; consumers bound reads via
+        pipe_read_window. Same fix Python side. img_pipeline_demo un-broken.
 
-[x] Single-node streaming test pass (StreamPipeline / PyPipeline) — Tests/Streaming/.
-        FOUND + FIXED a per-round race: in the pipelined wave schedule, stage S
-        (producing round R) and stage S+1 (consuming round R-1) run concurrently
-        and share a fixed stream slot; consumers read "all since cursor" and so
-        raced into the next round's concurrently-appended records — per-round
-        batching was non-deterministic (only the cumulative total survived; the
-        img pipeline was safe only because its stages read ONE record/tick).
-        Fix: the host publishes a per-slot read watermark `stream_hi_{slot}` (the
-        pre-tick committed count) before each tick's scatter; consumers bound
-        their read to it (`pipe_read_window`). Cursors are keyed by input slot so
-        they reset cleanly between runs. Same fix on the Python side (shm.py
-        named atomics + pyp_* workload). Harness asserts per-round correctness vs
-        analytic AND non-pipelined (WasmGrouping/PyGrouping) baselines,
-        determinism, slot lifecycle, reset/multi-run, Output split_records, and
-        Rust/Python parity (34 checks). Also un-broke img_pipeline_demo.json (it
-        used a `Pipeline` node kind that no longer exists → now StreamPipeline;
-        pipelined output verified byte-identical to the serial baseline).
-        NOTE: the img workload yields a different result for 1 image vs 3 images
-        (reproduces in serial too — a multi-image workload quirk, NOT a
-        pipelining bug); left as-is, out of streaming-correctness scope.
+--- RESOLVED 2026-06-10/11 (cross-node streaming + fan-out) ----------------------
+[x] conn-3/4 streaming control lane — dedicated per-peer TCP streams (BASE_PORT3/4) for
+        pipeline rdma_send/recv, so concurrent transfers to the same peer stop crossing
+        over (multi-path control-channel collision). RemoteSend/Recv/atomics keep conn-1/2.
+        + round-handling fix (reset pipe_cursor_{slot} in the rdma_recv free path).
+        Files: connect/src/mesh/{mod,connect}.rs, host pipeline.rs. Loopback + 2-node real
+        cluster: 3/3 images byte-identical.
+[x] RDMA OUTPUT-RETURN Mode 1 (batch) — Output on node 0 with a cross-machine dep →
+        partitioner auto-injects RemoteSend/Recv (splitter.rs cross_edge_slot_kind + wave-0
+        guard). DAG: img_pipeline_return.json. Cluster 3/3. 2026-06-10.
+[x] (1) Mode 2 — STREAMING per-round output RETURN — new StreamOutput node kind (types.rs /
+        pipeline.rs::execute_stream_output): per round rdma_recv the result over conn-4 +
+        binary-write to paths[round] (PersistenceWriter::watch_slot_binary). Threaded sink
+        (mod.rs 3b/3c) so node 0 is source (conn-3) + sink (conn-4) concurrently. DAGs:
+        Tests/Streaming_CrossNode/node{0,1}_mode2.json + verify_mode2.py. Cluster 3/3.
+[x] LOCALITY HINT — placer dep-affinity is now DATA-WEIGHTED (placer.rs edge_weight).
+        Per-node split:"avoid"(keep local) / "prefer"(safe to cut) / out_weight (default
+        1.0); cross-machine cuts fall on the cheapest edges. 4 unit tests +
+        Tests/Cluster_Eval/check_locality.py (cut follows the hint, flips when reversed).
+        NOTE: only acts when ≥2 hosts have quota (Pack/balanced force a single auto node).
+[x] STREAMING FAN-OUT — per-stage WIDTH (Phase 1) + load signals (3) + dynamic autoscaling
+        (4). `width`/`max_width` on StreamPipelineStage; a widened stage host-scatters the
+        per-tick batch into private sub-slots (stage_fanout.rs) and gathers in order (slots
+        are single-owner). width==1 = exact original path. max_width → per-tick active width
+        from EMA load (desired_width, ±1/tick hysteresis). Tests/Streaming/width_test.py
+        (filter×3 == baseline; autoscale 1→peak 4). Phase 1 cluster-verified via the combo
+        DAG; signals/autoscaling local. 2026-06-11.
+[x] PHASE 2 — cross-host streaming AUTO-SPLIT + N-WAY / SELF-OPTIMIZING / HINT-AWARE.
+        partitioner split_stream_pipelines (splitter.rs): `segments:M` cuts a single
+        StreamPipeline into M cross-node segments at the M-1 CHEAPEST stage boundaries
+        (choose_cuts: split:"avoid"→∞, "prefer"→0, else out_weight); `cut_after` (int or
+        list) = explicit override. Segments chained by embedded rdma + Mode-2 return; placed
+        by capacity hint (machine_order); `segments` clamps to online node count. Terminal
+        Output → StreamOutput sink. Partitioner-only (executor + types.rs untouched). 22
+        partitioner tests; CLUSTER-VERIFIED segments:3 across 3 online nodes (0,1,3 —
+        coordinator maps logical→physical) 3/3 == baseline. DAGs: img_pipeline_split.json
+        (explicit), img_pipeline_split_auto.json (segments + hints).
+        + COORDINATOR FIX (cluster_dag.rs has_remote_nodes): detect EMBEDDED rdma_send/recv
+        (not just RemoteSend/Recv nodes) so the per-node rdma block is attached for streaming
+        DAGs submitted via node-agent. 2026-06-11.
+[x] Combined cross-node test (Tests/Streaming_CrossNode/node{0,1}_combo.json + verify_combo.py):
+        streaming input + cross-node RDMA + per-stage width + Mode-2 return in one run.
+        Cluster 3/3 == baseline.
+[x] RDMA input staging — coordinator RDMA-stages shared_inputs to workers
+        (stage_shared_inputs_rdma, TCP fallback). word-count auto-placement runs distributed
+        (Tests/Cluster_Eval/). NOTE: bare `host dag` does NOT stage inputs; node-agent does.
+[x] split_records latent bug — added "split_records": true to rdma_img_pipeline_node1.json
+        and rdma_py_img_pipeline_node1.json (were writing all 3 images into paths[0]).
+        img_pipeline_auto_placement already had it; pipeline_routing has no multi-path Output.
 
---- TODO ------------------------------------------------------------------------
+================================================================================
+TODO  (open)
+================================================================================
 
-PRIORITY ORDER (updated 2026-06-11):
-  1. CLUSTER e2e remaining: submit a hinted SymbolicDag to observe the locality cut;
-     word-count distributed COUNTS == baseline (only timing confirmed).
-     [DONE: auto-split img_pipeline_split.json cluster-verified via node-agent submit.]
-  2. Autoscaling under cross-node VARIABLE load (images are 1 rec/round → never triggers).
-  3. [FUTURE WORK] Peer-failure robustness — a RemoteRecv whose peer dies segfaults
-     (seen when node-1 lacked a local input under bare `host dag`). Pre-existing.
-  4. Cross-node streaming test harness (deterministic analytic lockstep + Python).
-  5. [FUTURE WORK] Worker-drop scheduling grace period.
-  Separate track, ongoing (outside this order): benchmark baselines.
-  NOTE: streaming fan-out FEATURE work is COMPLETE (per-stage width, autoscaling, Phase 2
-        cross-host auto-split + N-way/self-optimizing/hint-aware cuts). What's left is
-        verification (cluster e2e), the deferred items above, and the benchmark track.
-  DONE: Mode 2 (cluster); locality split hint (local+structural); streaming fan-out
-        Phase 1 width (cluster) + 3 load signals + 4 autoscaling (local) + Phase 2
-        cross-host auto-split (cluster) + N-way/self-optimizing/hint-aware (local+loopback).
+All feature + correctness work is done and cluster-verified. Cluster e2e of the built
+features is covered (locality hint via the auto-split-with-hints run; word-count
+loopback==baseline + cluster success; autoscaling is a per-node loop with nothing
+cross-node-specific to test). Only deferred work + the benchmark track remain:
 
-[x] RDMA OUTPUT-RETURN, Mode 1 (batch) — DONE + cluster-verified 2026-06-10.
-    A worker's output is returned to the coordinator (node 0) over RDMA just by
-    placing the Output node on node 0 with a cross-machine dep on the worker's
-    producer; the Partitioner auto-injects the RemoteSend/RemoteRecv pair. Two
-    splitter.rs fixes: (a) cross_edge_slot_kind() picks slot_kind Io when the source
-    is the terminal OUTPUT_IO_SLOT(1) (io_heads, length-prefixed records → Output
-    split_records), Stream otherwise; (b) the §5d wave-0 guard now also treats a
-    StreamPipeline's embedded rdma_send as a "send to peer P", so the return
-    RemoteRecv is sequenced AFTER the local source pipeline (else it sits in wave 0
-    and deadlocks — RDMA threads join at end of their own wave, mod.rs:652).
-    Also: Partitioner StreamPipeline output-slot registration (slot_assigner.rs) so
-    these DAGs partition at all. DAG: DAGs/symbolic_dag/img_pipeline_return.json.
-    Verified 3/3 images byte-identical on node 0 (gradient=683910b9,
-    checker/rings=c36c7705). NOTE: partitioner placement is RNG-nondeterministic;
-    regression-check structure, not bytes.
+[ ] [FUTURE] Peer-failure robustness — a RemoteRecv whose peer dies segfaults (seen when a
+    node lacked its local input under bare `host dag`). Pre-existing, not hardened.
 
-[x] (1) Mode 2 — STREAMING / per-round output return — DONE + cluster-verified 2026-06-11.
-    Worker's final StreamPipeline relays each round's output via embedded rdma_send
-    back to node 0; node 0 runs a sink that writes each round as it arrives, ONE FILE
-    PER ROUND (paths[round]).
-    DESIGN (resolved the open Q toward one-file-per-round + a new node kind, NOT
-    extending Output, to keep the race-sensitive execute_stream_pipeline untouched):
-      - New `StreamOutput` node kind (types.rs / pipeline.rs::execute_stream_output):
-        per round, optional rdma_recv the worker's result over the streaming lane
-        (recv_channel_stream / conn-4) then binary-write that round's record to
-        paths[round] via the background PersistenceWriter (new watch_slot_binary —
-        raw bytes, binary-safe for images; the text watch_stream path is unchanged).
-        Covers both coordinator-side remote RETURN (rdma_recv set) and a local
-        per-round write (rdma_recv absent).
-      - INPUT also streams one-by-one (user choice): node 0's source StreamPipeline
-        rdma_sends one decoded image per round on conn-3.
-      - node 0 is BOTH source AND sink simultaneously. Enabled WITHOUT the general
-        "run StreamPipelines as threads" change: StreamOutput is classified into the
-        threaded host group (mod.rs 3b/3c), so the sink receives on conn-4 (its own
-        thread) while the source StreamPipeline sends on conn-3 (main thread). Safe
-        because the streaming lane is direction-split (ctrl_as_sender_stream /
-        ctrl_as_receiver_stream) — no control-channel collision.
-      - Worker returns each round via the StreamPipeline's existing embedded rdma_send
-        (free_after); a single node-1 StreamPipeline does both rdma_recv (input) and
-        rdma_send (output) per round.
-    DAGs: Tests/Streaming_CrossNode/node0_mode2.json + node1_mode2.json; verify on
-    node 0 with verify_mode2.py (TestOutput/mode2_return_out vs baseline/). 3/3 images
-    byte-identical to the single-node baseline, deterministic. Single-node streaming
-    regression (Tests/Streaming) 34/34 still pass.
+[ ] [FUTURE] Worker-drop scheduling grace period — after a worker drops, wait 30s then
+    exclude it from job partitioning; remove from the cluster after no response. Deferred.
 
-[~] (2) STREAMING FAN-OUT + LOCALITY AWARENESS — locality hint DONE, streaming scenarios next.
-    Streaming-workload fan-out scenarios + a user hint mechanism: let the user hint
-    which edges transfer less data so the partitioner breaks the topology there for
-    multi-node deployment.
-    [x] LOCALITY HINT + CUT HEURISTIC (locally tested 2026-06-11). The placer's
-        dep-affinity is now DATA-WEIGHTED (placer.rs assign_nodes + edge_weight): a
-        consumer is pulled toward the host of its strongest producer, so when the
-        cluster must split, cross-machine cuts fall on the safest/lightest edges.
-        User-facing hint = per-node breakability intent (each node controls its OWN
-        output edge):
-          - `split: "avoid"`  → don't break here; keep the consumer local (maps to a
-            large finite weight — strong preference, yields only to capacity limits).
-          - `split: "prefer"` → safe place to break; cuts gravitate here (weight 0).
-          - omitted → neutral.
-        e.g. chain A→B→C with `B: "prefer"` cuts B→C; `A: "avoid"` keeps A→B local.
-        Advanced numeric override `out_weight: Option<f64>` (used only when `split`
-        absent; default 1.0). Backward-compat by construction — neutral nodes resolve
-        to 1.0 = original count-based affinity (same last-maximal tie-break). 4 unit
-        tests (split_avoid_keeps_consumer_local, split_prefer_becomes_the_cut_point,
-        out_weight_pulls_consumer_to_heaviest_producer, equal_weights_reproduce_count_
-        affinity); all 20 partitioner tests pass, full build.sh green. Design: per-NODE
-        hint (fits the bare-id `deps` schema), greedy weighted-affinity (not full
-        min-cut), strong-preference (not hard guarantee — pin node_id for that).
-        STRUCTURAL TEST: Tests/Cluster_Eval/check_locality.py partitions an asymmetric
-        join with empty hints (so affinity, not quota, decides) and asserts the cut lands
-        on the `prefer` edge and FLIPS when hints reverse — PASS. NOTE: Pack/balanced
-        policies force a single auto node onto one host before the hint can act; the hint
-        decides only when ≥2 hosts have quota (empty hints, or enough auto nodes).
-        STILL PENDING: end-to-end on the live cluster (submit a hinted SymbolicDag via
-        node-agent, observe the coordinator's cut) — priority 2(a).
-    [~] STREAMING FAN-OUT (unified per-stage width + dynamic autoscaling). User wants
-        a unified mechanism: scale a hot stage (more workers in a stage) AND replicate
-        full pipelines (all stages wide), driven by dynamic autoscaling on load.
-        Unifying primitive = per-stage WIDTH. Phased; the static width mechanism is the
-        actuator the autoscaler will drive. Plan: ~/.claude/plans/encapsulated-splashing-fairy.md.
-        [x] PHASE 1 — static per-stage width (local + CLUSTER-verified 2026-06-11).
-            `width`/`max_width` added to StreamPipelineStage (types.rs). A widened stage
-            runs W persistent workers; each tick the host SCATTERS the per-tick input
-            batch round-robin into W private sub-slots (reserved band 1792.., dag_runner/
-            stage_fanout.rs), runs the workers, and GATHERS their outputs back into the
-            stage's slot in record order. Needed because slots are single-owner
-            (read_next load-then-fetch_add + chain append are not concurrency-safe).
-            `width==1` keeps the EXACT original path → existing DAGs byte-for-byte
-            unchanged (Tests/Streaming 34/34 still pass). New Tests/Streaming/width_test.py:
-            word-count filter×3+transform×2 == width:1 == analytic + deterministic
-            (correct sum proves all records were distributed across workers), image
-            widened-stage byte-identical. build.sh green.
-        [x] PHASE 2 — cross-host streaming via partitioner AUTO-SPLIT — DONE +
-            CLUSTER-VERIFIED 2026-06-11 (node-agent submit, 3/3 byte-identical to baseline).
-            Chosen form (user): auto-split ONE
-            StreamPipeline across machines at a stage cut, NOT cross-machine stage width.
-            New `cut_after: k` on the StreamPipeline kind (partitioner-only; executor never
-            sees it). New pass split_stream_pipelines (splitter.rs, after expand_fanout):
-            splits stages[0..=k] → pipe__a (machine A, embedded rdma_send boundary=stages[k]
-            .arg1, Stream) and stages[k+1..] → pipe__b (machine B, rdma_recv boundary +
-            rdma_send return=last.arg1, Io); converts the terminal Output into a StreamOutput
-            return sink on node 0. Pre-pinned so the placer skips them; halves use EMBEDDED
-            rdma (no injected RemoteSend/Recv). Per-stage width survives the split. Generates
-            byte-for-byte the verified combo topology. DAG: DAGs/symbolic_dag/img_pipeline_
-            split.json (cut_after:0, widths on 2 stages). VERIFIED: 21 partitioner tests
-            (new split_stream_pipeline_at_cut), 2-node loopback 3/3 byte-identical to baseline
-            (verify_combo.py), existing 7 symbolic DAGs still partition (no-op without
-            cut_after), Tests/Streaming 34/34, build.sh green.
-        [x] PHASE 2 N-WAY + SELF-OPTIMIZING + HINT-AWARE — DONE (local+loopback 2026-06-11).
-            Generalized split_stream_pipelines to M segments. New `segments: M` on the
-            StreamPipeline kind auto-picks the M-1 CHEAPEST stage boundaries via choose_cuts:
-            per-stage cost = split:"avoid"→∞ (never), split:"prefer"→0 (first), else
-            out_weight (default 1.0) — the locality-hint philosophy applied to stage
-            boundaries. `cut_after` (now int OR list) stays as explicit override. Segments
-            chained by embedded rdma (recv from prev + send to next; last sends the Io
-            return to node 0); placed by machine_order = coordinator + others by capacity
-            hint desc (homogeneous → sequential). `segments` CLAMPS to online node count
-            (segments:3 → 2 segments on a 2-node cluster). All partitioner-only; executor +
-            types.rs untouched (serde ignores the extra per-stage fields). VERIFIED: 22
-            partitioner tests (split_three_way_auto_cut asserts cheapest cuts + avoid skipped
-            + chain wiring); 2-segment AUTO loopback == baseline; 3-segment / 3-NODE loopback
-            == baseline; explicit cut_after still passes; 7 symbolic DAGs partition; Streaming
-            34/34. DAG: DAGs/symbolic_dag/img_pipeline_split_auto.json (segments:3 + hints).
-            Cost is a relative HINT (out_weight/split), not measured bytes — runtime-measured
-            volumes are a later idea. Placement reuses existing capacity hints (no new
-            scheduler). REMAINING streaming feature work: none (cluster e2e of segments:N is
-            the only open item, user-driven).
-            COORDINATOR FIX (NodeAgent/agent/src/cluster_dag.rs has_remote_nodes): the
-            node-agent attached the per-node `rdma` block only when a kind contained
-            RemoteSend/RemoteRecv — it MISSED EMBEDDED rdma_send/rdma_recv (StreamPipeline/
-            StreamOutput), so node 0's StreamOutput failed "requires dag.rdma" on the first
-            cluster submit. Added rdma_send/rdma_recv substring detection (additive). Latent
-            bug for ANY embedded-RDMA DAG submitted via the coordinator (Mode 2 too, had it
-            not been hand-split with an explicit rdma block). After fix: CLUSTER RUN GREEN.
-        [x] PHASE 3 — load signals (locally tested 2026-06-11). Per-stage input load
-            (records/tick delta) + active ticks accumulated in execute_stream_pipeline,
-            printed as a per-stage "load profile" at pipeline end (identifies the
-            bottleneck stage). Read-only; no behaviour change.
-        [x] PHASE 4 — dynamic autoscaling (locally tested 2026-06-11). Opt-in per stage
-            via `max_width`: pre-spawn max_width workers, and each tick set the stage's
-            ACTIVE width from a smoothed (EMA) per-tick load via desired_width
-            (≈ceil(load/SCALE_TARGET=8), clamped [width, max_width]), moving ±1/tick
-            (hysteresis) to avoid flapping. active_w==1 uses the byte-identical width-1
-            fast path. Signal = input LOAD not slot backlog (lockstep schedule keeps
-            backlog bounded). Test: new pipeline_source_var (bursty [4,4,40,40,40,4,4]);
-            Tests/Streaming/width_test.py [3] — dynamic filter (max_width 6) autoscaled
-            1→peak 4 under the burst, result byte-identical to width:1 baseline.
-            Backward-compat: Tests/Streaming 34/34 still pass, Phase-1 width test passes.
-            NOTE: dynamic targets windowed (pipe_read_window) stages; read_next stages
-            (1 rec/tick, e.g. images) use STATIC width, not max_width.
-
-    ── TEST STATUS (2026-06-11) ──────────────────────────────────────────────
-    COMBINED cross-node test (Tests/Streaming_CrossNode/node{0,1}_combo.json +
-    verify_combo.py) exercises in ONE 2-node run: streaming input + cross-node RDMA
-    (conn-3/4) + per-stage WIDTH:2 on two middle stages + Mode-2 per-round return.
-    CLUSTER-PASSED 3/3 images byte-identical to baseline (also 2-node loopback).
-    Cluster regression harness: Tests/Cluster_Eval/ (make_xnode_dags.py, verify.py,
-    wc_xnode.json, README). word-count via node-agent submit → coordinator RDMA-stages
-    the corpus to workers (stage_shared_inputs_rdma) → distributed run. NOTE: bare
-    `host dag` does NOT stage inputs (each node must have its data locally); the
-    node-agent coordinator flow does (RDMA, TCP fallback).
-      TESTED:  Mode 2 (cluster), per-stage width Phase 1 (cluster via combo + local),
-               load signals 3 (local), autoscaling 4 (local, 1→peak 4), locality hint
-               (local unit+structural), RDMA input staging (cluster), word-count
-               distributed RUN (cluster) + loopback==baseline, backward-compat
-               (Streaming 34/34, 20 partitioner tests, symbolic DAGs partition).
-      LEFT:    (1) word-count COUNTS==baseline on cluster (only timing confirmed);
-               (2) locality hint end-to-end on cluster; (3) autoscaling under cross-node
-               VARIABLE load; (4) Phase 2 follow-ons (multi-cut / N-machine / hint-auto-cut);
-               (5) peer-failure hardening; (6) the 24 rdma_workload_dag/rdma_demo_dag
-               hand-split DAGs not re-run (additive-schema-safe).
-    Phase 2 cross-host AUTO-SPLIT BUILT + CLUSTER-VERIFIED (img_pipeline_split.json via
-    node-agent submit, 3/3 == baseline) — see PHASE 2 above. Required the cluster_dag.rs
-    embedded-RDMA detection fix.
-
-[ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto
-    the table. Tests/Fan_out_remote/ is the starting point for the measurement side.
-
-[~] CROSS-NODE streaming processing — IN PROGRESS (loopback-verified single-path;
-    multi-path fix landing).
-
-    Done so far (2-node loopback, real mlx4_0 device):
-    [x] Round-handling bug FIXED. A watermark consumer (pipe_read_window) reading
-        an rdma_recv slot produced only round 0 then empties: rdma_recv frees +
-        refills the recv slot each round and reset the read_next cursor
-        (stream_cursor_{slot}) but NOT the watermark cursor (pipe_cursor_{slot}),
-        so after round 0 the cursor stayed at 10 while the slot count reset to 10
-        → every later round read an empty window. Fix: the host also resets
-        pipe_cursor_{slot} in the rdma_recv pre-fetch/free path (both
-        execute_stream_pipeline and execute_py_pipeline). cursor_idx map added.
-    [x] Single-path cross-node streaming VERIFIED. Minimal deterministic DAG
-        (node0 source+filter --rdma_send--> node1 rdma_recv+sink) gives the exact
-        analytic summaries (90,10090,...,40090), 5/5, deterministic over 5 runs.
-        Image pipeline alone across 2 nodes: 3/3 images, byte-identical to the
-        single-node baseline, deterministic.
-
-    Root-caused but NOT a streaming bug — multi-path RDMA control-channel
-    collision (this is what made img_pipeline_auto_placement drop round 0):
-        When two transfers run CONCURRENTLY between the same node pair — e.g.
-        Path A (StreamPipeline rdma_send, slot 40) and Path B (RemoteSend, slot
-        520) — they share the single per-peer control TCP stream. The SI
-        handshake carries only total_bytes (no transfer identity) and receivers
-        are matched by ARRIVAL ORDER, so they cross over: the 372-byte Path-B
-        payload landed in the pipeline's slot 40 and the 65 KB image landed in
-        Path-B's slot 600. Proven from the byte sizes in the logs.
-    [x] FIX IMPLEMENTED + VERIFIED — a dedicated per-peer *streaming* control
-        channel (conn-3 / conn-4 on BASE_PORT3 / BASE_PORT4) used only by
-        pipeline rdma_send / rdma_recv. RemoteSend/Recv, atomics, StateSync keep
-        conn-1 / conn-2 unchanged → no protocol change for non-streaming paths.
-        No serialization: the two paths run on separate TCP streams concurrently.
-        Chosen over (a) serializing whole transfers and (b) tagged
-        multiplexing/demux, because it leaves the non-streaming wire path
-        untouched.
-        Files: connect/src/mesh/{mod.rs (PeerLink + BASE_PORT3/4 + send/recv_
-        channel_stream), connect.rs (conn-3/4 setup)}; host pipeline.rs rdma_send/
-        recv now use *_channel_stream.
-        Verified on 2-node loopback (mlx4_0): auto_placement now delivers 3/3
-        images, all correct (gradient=c2d6a0e7, checker/rings=29c99210),
-        deterministic over 3 runs. Minimal deterministic stream (5/5) and
-        image-only (3/3) still pass after moving streaming to its own lane.
-
-    [x] Non-streaming RDMA unchanged — VERIFIED. (a) Clean 2-node RemoteSend/Recv
-        DAG (total=2): correct + deterministic. (b) In auto_placement, Path B
-        (RemoteSend 520 → RemoteRecv 600 → agg) now counts 18 (was a corrupt 7
-        before the fix when the image crossed into slot 600). So conn-1/conn-2
-        carry non-streaming transfers exactly as before.
-        NOTE: demo_auto_placement.sh times out, but that is PRE-EXISTING and
-        unrelated: word_count_auto.json declares total_nodes:3 (partitions to
-        hosts 0,1,2) while the script's run_pair launches only nodes 0 and 1, so
-        the mesh blocks waiting for the never-started node 2. Not a regression
-        from the conn-3/4 change (which only adds connections between the nodes
-        that DO run).
-
-    Still TODO:
-    [ ] (3) Cross-node streaming TEST HARNESS (Tests/Streaming, 2-node loopback):
-        lockstep rounds, per-tick hand-off correctness (no dropped/duplicated
-        rounds), result matches single-node baseline. Rust + Python.
-        PARTIAL: Tests/Streaming_CrossNode/ has the hand-split node0/node1 image
-        DAGs + verify.py (byte-compare vs single-node baseline). Still want the
-        deterministic analytic (pipeline_source→…→sink) lockstep version + Python.
-    [x] Real-cluster (not loopback) end-to-end verification — DONE 2026-06-10.
-        Two physical nodes (node-0 10.10.1.2, node-1 10.10.1.1, mlx4_0). Image
-        pipeline split across nodes (node0 decode → RDMA → node1 rotate/gray/
-        equalize/blur/export): 3/3 images byte-identical to the single-node
-        baseline (gradient=683910b9, checker/rings=c36c7705). conn-3/4 streaming
-        lanes + round-handling confirmed on real RDMA, not just loopback.
-        GOTCHAS hit (operational, not code): (a) both nodes must be on the SAME
-        commit + rebuilt — a node-1 binary predating the conn-3/4 commit (d52167e)
-        dials only conn-1/2 and deadlocks node-0's mesh setup; (b) a multi-path
-        Output needs `split_records: true` or it writes all N records into paths[0].
-        NOTE: the committed img DAGs (rdma_img_pipeline_node1, rdma_py_img_pipeline_
-        node1, img_pipeline_auto_placement save_images, pipeline_routing save_images)
-        all still MISSING split_records — latent same-bug.
-
-
-[ ] (4) [FUTURE WORK] Worker-drop scheduling grace period.
-    After a worker drops, wait 30s: if a job was submitted, exclude that worker from
-    job partitioning; after 30s with no response, remove it from the cluster for
-    scheduling decisions. (Deferred — not important now.)
+[ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto the
+    table; Tests/Fan_out_remote/ is the measurement starting point.
