@@ -26,63 +26,74 @@ Expected: `PASS — split hint controls the cut`
 
 ## 2. Cross-node word-count — end-to-end (CLUSTER)
 
-Regression for the full **partition → RDMA → distributed execute → cross-node
-aggregate → reduce** path after all the changes. `wc_xnode.json` is
-`word_count_auto_placement` on the 50 MB `corpus_large.txt`; `placement:"all"`
-runs map work on both nodes and the per-node partials are RDMA-aggregated on
-node-0. The distributed result must equal a single-node run of the same corpus.
+Regression for the full **partition → RDMA input staging → distributed execute →
+cross-node aggregate → reduce** path after all the changes, AND it exercises the
+partitioner placer (locality hint) against the live cluster.
 
-### Prerequisites (BOTH nodes)
-- Same commit + `./build.sh` on **both** nodes (the conn-3/4 rebuild gotcha —
-  a stale binary deadlocks the mesh).
-- `TestData/corpus_large.txt` present on both nodes.
+### 2a. Proper flow — via the node-agent (auto RDMA input staging)  ← recommended
 
-### Step A — single-node baseline (on node-0, once)
+The **coordinator** RDMA-stages `shared_inputs` to workers
+(`coordinator.rs::stage_shared_inputs_rdma`, TCP fallback), so the corpus only
+needs to live on **node-0** — it is RDMA-written to node-1 automatically. The
+coordinator also partitions the SymbolicDag against the live cluster (running the
+placer + `split` hint) and collects results.
+
+Prerequisites: same commit + `./build.sh` on both nodes; `corpus_large.txt` on
+**node-0 only** (the coordinator/owner).
+
 ```bash
+# node-0 (10.10.1.2) — coordinator:
+./node-agent start --config NodeAgent/agent.toml          # auto-detects node 0 = coordinator
+# node-1 (10.10.1.1) — worker:
+./node-agent start --config NodeAgent/agent.toml          # auto-detects node 1 = worker
+
+# submit the SymbolicDag (from node-0 / any host with coordinator access):
+./node-agent submit --config NodeAgent/agent.toml \
+    --dag DAGs/symbolic_dag/word_count_auto_placement.json
+```
+The coordinator partitions, RDMA-stages the corpus to node-1, runs, and collects
+the word-count result (the `save`/Output node; converges to the coordinator).
+Re-submit a few times to confirm determinism. To evaluate the **locality hint**
+end-to-end, submit a SymbolicDag carrying `split` hints and inspect the placement
+the coordinator logs.
+
+> NOTE: this is the path that does input distribution. Bare `host dag` (§2b) does
+> NOT stage inputs — it only sets up the RDMA mesh for `RemoteSend`/`RemoteRecv`
+> between compute stages, so each node must already have its input locally.
+
+### 2b. Lower-level flow — bare `host dag` (no node-agent; manual input)
+
+Direct executor path (like `Tests/Streaming_CrossNode/`). No coordinator, so
+**no input staging** — the corpus must be on BOTH nodes (`scp` it, or use a small
+committed corpus). Useful to test the executor without the daemon stack.
+
+```bash
+# baseline (node-0, once):
 Partitioner/target/release/partition Tests/Cluster_Eval/wc_xnode.json --nodes 1 \
   | python3 -c "import json,sys; c=json.load(sys.stdin); \
       json.dump({'shm_path':'/dev/shm/ce_base','wasm_path':'Executor/target/wasm32-unknown-unknown/release/guest.wasm','log_level':'error','nodes':c['node_dags']['0']}, open('/tmp/ce_base.json','w'))"
-Executor/target/release/host dag /tmp/ce_base.json
-cp TestOutput/cluster_eval_result.txt /tmp/baseline_counts.txt
-```
+Executor/target/release/host dag /tmp/ce_base.json && cp TestOutput/cluster_eval_result.txt /tmp/baseline_counts.txt
 
-### Step B — generate per-node DAGs (on node-0)
-```bash
+# per-node DAGs (node-0); copy out/node_1.json to node-1 (same path):
 python3 Tests/Cluster_Eval/make_xnode_dags.py Tests/Cluster_Eval/wc_xnode.json \
   --ips 10.10.1.2,10.10.1.1 --out Tests/Cluster_Eval/out
-```
-Copy `Tests/Cluster_Eval/out/node_1.json` to node-1 (same path). `save` (Output)
-lands on node-0, so the result file appears there.
 
-### Step C — run (start both close together; mesh blocks until both are up)
-```bash
-# node-1 (10.10.1.1):
-Executor/target/release/host dag Tests/Cluster_Eval/out/node_1.json
-# node-0 (10.10.1.2):
-Executor/target/release/host dag Tests/Cluster_Eval/out/node_0.json
-```
+# run (node-1 first, then node-0):
+Executor/target/release/host dag Tests/Cluster_Eval/out/node_1.json   # on 10.10.1.1
+Executor/target/release/host dag Tests/Cluster_Eval/out/node_0.json   # on 10.10.1.2
 
-### Step D — verify (on node-0)
-```bash
+# verify (node-0):
 python3 Tests/Cluster_Eval/verify.py /tmp/baseline_counts.txt TestOutput/cluster_eval_result.txt
 ```
-Expected: `PASS — identical`. Re-run Step C a few times to confirm determinism.
-
-### Local smoke test (optional, single machine)
-Validates the harness before using cluster time (both nodes on loopback; needs a
-local RDMA device — `mlx4_0` works):
-```bash
-python3 Tests/Cluster_Eval/make_xnode_dags.py Tests/Cluster_Eval/wc_xnode.json \
-  --ips 127.0.0.1,127.0.0.1 --out /tmp/xn_wc
-Executor/target/release/host dag /tmp/xn_wc/node_1.json &   # start first
-Executor/target/release/host dag /tmp/xn_wc/node_0.json
-python3 Tests/Cluster_Eval/verify.py /tmp/baseline_counts.txt TestOutput/cluster_eval_result.txt
-```
+Local loopback smoke test (one machine, real RDMA `mlx4_0`): same as above but
+`--ips 127.0.0.1,127.0.0.1` and run both processes locally (node-1 first). ✅
+Verified here: 2-node loopback result == single-node baseline.
 
 ---
 
 ## What each test covers
-| Test | Exercises | Verified locally |
-|------|-----------|------------------|
-| `check_locality.py` | partitioner placer + `split`/`out_weight` hint → cut placement | ✅ PASS |
-| cross-node word-count | partition → RDMA → distributed exec → aggregate → reduce, after all type/executor/partitioner changes | ✅ loopback PASS (== baseline) |
+| Test | Exercises | Status |
+|------|-----------|--------|
+| `check_locality.py` | partitioner placer + `split`/`out_weight` hint → cut placement | ✅ PASS (local) |
+| word-count via node-agent (§2a) | RDMA input staging + partition + distributed exec + aggregate + reduce | run on cluster |
+| word-count bare host dag (§2b) | executor distributed path (no staging) | ✅ loopback PASS (== baseline) |

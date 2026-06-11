@@ -1,0 +1,124 @@
+{
+  "shm_path": "/dev/shm/cluster_eval_wc_n1",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 1,
+    "total": 2,
+    "ips": [
+      "10.10.1.2",
+      "10.10.1.1"
+    ],
+    "transfer": true
+  },
+  "nodes": [
+    {
+      "deps": [],
+      "id": "load_1",
+      "kind": {
+        "Input": {
+          "path": "TestData/corpus_large.txt",
+          "prefetch": true,
+          "slice": [
+            0.5,
+            1.0
+          ],
+          "slot": 0
+        }
+      }
+    },
+    {
+      "deps": [
+        "load_1"
+      ],
+      "id": "distribute_1",
+      "kind": {
+        "WasmVoid": {
+          "arg": 262194,
+          "func": "wc_distribute"
+        }
+      }
+    },
+    {
+      "deps": [
+        "distribute_1"
+      ],
+      "id": "map_n_1_0",
+      "kind": {
+        "WasmVoid": {
+          "arg": 50,
+          "func": "wc_map"
+        }
+      }
+    },
+    {
+      "deps": [
+        "distribute_1"
+      ],
+      "id": "map_n_1_1",
+      "kind": {
+        "WasmVoid": {
+          "arg": 51,
+          "func": "wc_map"
+        }
+      }
+    },
+    {
+      "deps": [
+        "distribute_1"
+      ],
+      "id": "map_n_1_2",
+      "kind": {
+        "WasmVoid": {
+          "arg": 52,
+          "func": "wc_map"
+        }
+      }
+    },
+    {
+      "deps": [
+        "distribute_1"
+      ],
+      "id": "map_n_1_3",
+      "kind": {
+        "WasmVoid": {
+          "arg": 53,
+          "func": "wc_map"
+        }
+      }
+    },
+    {
+      "deps": [
+        "map_n_1_0",
+        "map_n_1_1",
+        "map_n_1_2",
+        "map_n_1_3"
+      ],
+      "id": "aggregate_1",
+      "kind": {
+        "Aggregate": {
+          "downstream": 155,
+          "upstream": [
+            150,
+            151,
+            152,
+            153
+          ]
+        }
+      }
+    },
+    {
+      "deps": [
+        "aggregate_1"
+      ],
+      "id": "rs_aggregate_1_to_0",
+      "kind": {
+        "RemoteSend": {
+          "peer": 0,
+          "slot": 155,
+          "slot_kind": "Stream"
+        }
+      }
+    }
+  ]
+}

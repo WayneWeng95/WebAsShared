@@ -1,0 +1,34 @@
+{
+  "_comment": "COMBINED streaming test — Node 1 (worker). Run on 10.10.1.1.",
+  "_comment2": "One StreamPipeline does per-round rdma_recv (input) + full pipeline + per-round",
+  "_comment3": "rdma_send (Mode-2 return). TWO middle stages run with per-stage WIDTH:2 (host",
+  "_comment4": "scatter/gather across private sub-slots) — composed with cross-node RDMA. Boundary",
+  "_comment5": "stages (rotate reads the rdma_recv slot; export feeds the rdma_send) stay width 1.",
+  "shm_path": "/dev/shm/xnode_combo_node1",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 1,
+    "total": 2,
+    "ips": ["10.10.1.2", "10.10.1.1"],
+    "transfer": true
+  },
+  "nodes": [
+    {
+      "id": "pipe",
+      "deps": [],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_rotate",     "arg0": 20, "arg1": 30 },
+          { "func": "img_grayscale",  "arg0": 30, "arg1": 40, "width": 2 },
+          { "func": "img_equalize",   "arg0": 40, "arg1": 50 },
+          { "func": "img_blur",       "arg0": 50, "arg1": 60, "width": 2 },
+          { "func": "img_export_ppm", "arg0": 60, "arg1": 5  }
+        ],
+        "rdma_recv": { "peer": 0, "slot": 20, "slot_kind": "Stream" },
+        "rdma_send": { "peer": 0, "slot": 5,  "slot_kind": "Io", "free_after": true }
+      }}
+    }
+  ]
+}

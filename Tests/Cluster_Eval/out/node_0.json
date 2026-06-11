@@ -1,0 +1,162 @@
+{
+  "shm_path": "/dev/shm/cluster_eval_wc_n0",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 0,
+    "total": 2,
+    "ips": [
+      "10.10.1.2",
+      "10.10.1.1"
+    ],
+    "transfer": true
+  },
+  "nodes": [
+    {
+      "deps": [],
+      "id": "rr_aggregate_1_from_1",
+      "kind": {
+        "RemoteRecv": {
+          "peer": 1,
+          "slot": 157,
+          "slot_kind": "Stream"
+        }
+      }
+    },
+    {
+      "deps": [],
+      "id": "load_0",
+      "kind": {
+        "Input": {
+          "path": "TestData/corpus_large.txt",
+          "prefetch": true,
+          "slice": [
+            0.0,
+            0.5
+          ],
+          "slot": 0
+        }
+      }
+    },
+    {
+      "deps": [
+        "load_0"
+      ],
+      "id": "distribute_0",
+      "kind": {
+        "WasmVoid": {
+          "arg": 262194,
+          "func": "wc_distribute"
+        }
+      }
+    },
+    {
+      "deps": [
+        "distribute_0"
+      ],
+      "id": "map_n_0_0",
+      "kind": {
+        "WasmVoid": {
+          "arg": 50,
+          "func": "wc_map"
+        }
+      }
+    },
+    {
+      "deps": [
+        "distribute_0"
+      ],
+      "id": "map_n_0_1",
+      "kind": {
+        "WasmVoid": {
+          "arg": 51,
+          "func": "wc_map"
+        }
+      }
+    },
+    {
+      "deps": [
+        "distribute_0"
+      ],
+      "id": "map_n_0_2",
+      "kind": {
+        "WasmVoid": {
+          "arg": 52,
+          "func": "wc_map"
+        }
+      }
+    },
+    {
+      "deps": [
+        "distribute_0"
+      ],
+      "id": "map_n_0_3",
+      "kind": {
+        "WasmVoid": {
+          "arg": 53,
+          "func": "wc_map"
+        }
+      }
+    },
+    {
+      "deps": [
+        "map_n_0_0",
+        "map_n_0_1",
+        "map_n_0_2",
+        "map_n_0_3"
+      ],
+      "id": "aggregate_0",
+      "kind": {
+        "Aggregate": {
+          "downstream": 154,
+          "upstream": [
+            150,
+            151,
+            152,
+            153
+          ]
+        }
+      }
+    },
+    {
+      "deps": [
+        "aggregate_0",
+        "rr_aggregate_1_from_1"
+      ],
+      "id": "aggregate_global",
+      "kind": {
+        "Aggregate": {
+          "downstream": 156,
+          "upstream": [
+            154,
+            157
+          ]
+        }
+      }
+    },
+    {
+      "deps": [
+        "aggregate_global"
+      ],
+      "id": "reduce",
+      "kind": {
+        "WasmVoid": {
+          "arg": 156,
+          "func": "wc_reduce"
+        }
+      }
+    },
+    {
+      "deps": [
+        "reduce"
+      ],
+      "id": "save",
+      "kind": {
+        "Output": {
+          "path": "TestOutput/cluster_eval_result.txt",
+          "slot": 1
+        }
+      }
+    }
+  ]
+}

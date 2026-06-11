@@ -1,0 +1,58 @@
+{
+  "_comment": "COMBINED streaming test — Node 0 (coordinator). Run on 10.10.1.2.",
+  "_comment2": "Exercises, in one cross-node run: streaming input (src, per-round rdma_send),",
+  "_comment3": "and Mode-2 per-round output RETURN (StreamOutput sink, per-round rdma_recv).",
+  "_comment4": "Node 1 additionally runs per-stage WIDTH on two middle stages. Output must be",
+  "_comment5": "byte-identical to the single-node baseline despite width + cross-node streaming.",
+  "shm_path": "/dev/shm/xnode_combo_node0",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "info",
+  "rdma": {
+    "node_id": 0,
+    "total": 2,
+    "ips": ["10.10.1.2", "10.10.1.1"],
+    "transfer": true
+  },
+  "nodes": [
+    {
+      "id": "load",
+      "deps": [],
+      "kind": { "Input": {
+        "paths": [
+          "TestData/img_gradient.ppm",
+          "TestData/img_checkerboard.ppm",
+          "TestData/img_rings.ppm"
+        ],
+        "slot": 10,
+        "binary": true
+      }}
+    },
+    {
+      "id": "src",
+      "deps": ["load"],
+      "kind": { "StreamPipeline": {
+        "rounds": 3,
+        "stages": [
+          { "func": "img_load_ppm", "arg0": 10, "arg1": 20 }
+        ],
+        "rdma_send": { "peer": 1, "slot": 20, "slot_kind": "Stream", "free_after": true }
+      }}
+    },
+    {
+      "id": "sink",
+      "deps": ["load"],
+      "kind": { "StreamOutput": {
+        "rounds": 3,
+        "slot": 5,
+        "slot_kind": "Io",
+        "binary": true,
+        "rdma_recv": { "peer": 1, "slot": 5, "slot_kind": "Io" },
+        "paths": [
+          "TestOutput/combo_return_out/gradient_processed.pgm",
+          "TestOutput/combo_return_out/checkerboard_processed.pgm",
+          "TestOutput/combo_return_out/rings_processed.pgm"
+        ]
+      }}
+    }
+  ]
+}
