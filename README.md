@@ -198,7 +198,15 @@ cd NodeAgent
 cargo build --release
 cp target/release/node-agent ..
 
-# 4. Optional: AOT pre-compile python.wasm for faster Python execution
+# 4. AOT pre-compile the Rust guest for `--aot` (matches the host's wasmtime;
+#    use the executor's own `compile`, NOT the wasmtime CLI). `./build.sh` does
+#    this automatically; for a manual build run it after step 2:
+./Executor/target/release/host compile \
+  Executor/target/wasm32-unknown-unknown/release/guest.wasm \
+  Executor/target/wasm32-unknown-unknown/release/guest.cwasm
+
+# 5. Optional: AOT pre-compile python.wasm for faster Python execution (uses the
+#    wasmtime CLI, since Python runs via `wasmtime run`)
 wasmtime compile /opt/myapp/python-3.12.0.wasm -o /opt/myapp/python-3.12.0.cwasm
 ```
 
@@ -207,11 +215,19 @@ wasmtime compile /opt/myapp/python-3.12.0.wasm -o /opt/myapp/python-3.12.0.cwasm
 All commands run from the `WebAsShared/` root directory:
 
 ```bash
-# Rust/WASM workloads
+# Rust/WASM workloads (JIT by default)
 ./node-agent run DAGs/workload_dag/word_count_demo.json
 ./node-agent run DAGs/workload_dag/finra_demo.json
 ./node-agent run DAGs/workload_dag/ml_training_demo.json
 ./node-agent run DAGs/workload_dag/tfidf_demo.json
+
+# Rust/WASM with AOT (--aot): runs the precompiled guest.cwasm instead of
+# JIT-compiling guest.wasm in every worker process. The fan-out maps are
+# separate OS processes, so JIT cost is paid per worker — AOT turns each into a
+# cheap mmap+relocate (≈2× faster at small/medium inputs). node-agent runs
+# `host compile guest.wasm → guest.cwasm` on demand (cached when fresh) and
+# rewrites the DAG's wasm_path to the .cwasm.
+./node-agent run DAGs/workload_dag/word_count_demo.json --aot
 
 # Python execution (--python flag)
 ./node-agent run DAGs/workload_dag/word_count_demo.json --python
@@ -226,6 +242,17 @@ All commands run from the `WebAsShared/` root directory:
 ./node-agent run DAGs/demo_dag/img_pipeline_demo.json
 ./node-agent run DAGs/demo_dag/img_pipeline_demo.json --python
 ```
+
+> **`--aot` (Rust guest) details.** The guest `.cwasm` is produced by the
+> executor's own `host compile` — **not** the standalone `wasmtime` CLI — because
+> the host loads it via `Module::deserialize_file` with its embedded wasmtime
+> engine (`create_wasmtime_engine`). wasmtime embeds a version + `Config`
+> compatibility hash in the `.cwasm` and **rejects** a mismatch, so the artifact
+> must come from the same build as the `host` binary. `./build.sh` always
+> regenerates `guest.cwasm` after building the guest, keeping them in lockstep.
+> **On a cluster, every node's `host` binary and `guest.cwasm` must come from the
+> same `build.sh`** (same wasmtime + rustc) — `submit --aot` only rewrites the
+> path; each worker loads its own local `.cwasm`.
 
 Results are written to `/tmp/` (e.g., `/tmp/finra_result.txt`, `/tmp/ml_training_result.txt`).
 

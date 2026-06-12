@@ -107,30 +107,35 @@ Native `Executor/guest/src/workloads/word_count.rs`: `Input → wc_distribute
 map worker is a **separate OS process**; data moves through the SHM page-chain
 with **zero serialization**.
 
-**AOT vs JIT (critical for fairness).** The benchmark DAG runs `guest.wasm`,
-which each worker **JIT-compiles** (Cranelift) — a fixed ~600 ms cost that
-dominates at small corpus. The Faasm demo uses AOT WASM, so to compare fairly we
-**precompile our guest** and sweep with it:
+**AOT vs JIT (critical for fairness).** By default the benchmark DAG runs
+`guest.wasm`, which each worker **JIT-compiles** (Cranelift) — a fixed ~600 ms
+cost that dominates at small corpus (each fan-out map is a separate process, so
+JIT is paid N×). The Faasm demo uses AOT WASM, so to compare fairly we sweep our
+guest **AOT-precompiled** too. node-agent's **`--aot`** flag (added 2026-06-12)
+does this automatically — `host compile`s `guest.wasm → guest.cwasm` (matching
+the host's wasmtime engine; cached when fresh) and rewrites the DAG's wasm_path.
 
 ```bash
-cd WebAsShared
-# 1) AOT-compile the guest once
-./Executor/target/release/host compile \
-  Executor/target/wasm32-unknown-unknown/release/guest.wasm \
-  Executor/target/wasm32-unknown-unknown/release/guest.cwasm
+cd WebAsShared && ./build.sh        # also produces guest.cwasm
 
 cd Tests/Application_Benchmark/WordCount
-# 2) JIT sweep (reference) → results.csv
+# JIT sweep (reference) → results.csv
 ./run.sh "corpus_large.txt corpus_xlarge.txt corpus.txt" "1 2 4 8 16" 5
-# 3) AOT sweep (the line the plot uses) → results_aot.csv
+# AOT sweep (the line the plot uses) → results_aot.csv
 WC_WASM="Executor/target/wasm32-unknown-unknown/release/guest.cwasm" \
 WC_CSV="$PWD/results_aot.csv" \
   ./run.sh "corpus_large.txt corpus_xlarge.txt corpus.txt" "1 2 4 8 16" 5
 ```
 
-- `gen_dag.py` honors `WC_WASM` to point the DAG at the `.cwasm`; `run.sh` honors
-  `WC_CSV` for the output path. 5 reps, median reported; `peak_mem_mb` sampled
-  out-of-band at 50 ms (RSS of host tree + SHM file).
+- The benchmark harness selects AOT via `WC_WASM=<.cwasm>` (which `gen_dag.py`
+  stamps into the DAG's `wasm_path`); `run.sh` honors `WC_CSV` for the output
+  path. (For an ad-hoc single run, `node-agent run <dag> --aot` is the equivalent
+  — it `host compile`s + rewrites the path for you.) 5 reps, median reported;
+  `peak_mem_mb` sampled out-of-band at 50 ms.
+- **Important:** the `.cwasm` MUST come from `host compile` (the executor's
+  embedded wasmtime), **not** the standalone `wasmtime` CLI — the host loads it
+  via `Module::deserialize_file`, which rejects a wasmtime-version/`Config`
+  mismatch. `build.sh` keeps `guest.cwasm` in lockstep with the `host` binary.
 - **Low-N OOMs on big corpora** are expected (a single mapper's `read_all`
   exceeds the guest heap) → recorded as `CRASH` rows; the plot skips them and
   takes the best (max-throughput / min-latency) N per size.
