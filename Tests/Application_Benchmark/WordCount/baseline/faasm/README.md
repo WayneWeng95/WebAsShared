@@ -51,3 +51,58 @@ inv invoke wordcount wordcount --input 8
 > Use the **same corpus and the same N** as the other three systems. Metric:
 > Faasm's billable memory + per-function exec time; the `partial_<i>` writes are
 > the serialized state-transfer cost (contrast: ours = 0).
+
+## Reproduction status (2026-06-12) — BLOCKED on this dev box (images removed upstream)
+
+Tried to stand Faasm up here. **The pinned v0.2.3 Docker images required to compile
+and run are no longer on Docker Hub**, so neither the compile path nor the runtime
+stack can come up on this box:
+
+| Image (needed for) | Status on Docker Hub |
+|--------------------|----------------------|
+| `faasm/toolchain:0.2.3` (compile C++→WASM via `bin/cli.sh`) | **repo deleted** — `object not found` |
+| `faasm/knative-worker:0.2.3` (the `worker` in `docker-compose.yml`) | **repo deleted** — `object not found` |
+| `faasm/cpp:0.2.3` | **repo deleted** — `object not found` |
+| `faasm/cli:0.2.3` (all-in-one dev container) | **no such tag** — the `cli` repo only starts at `0.4.x` |
+| `faasm/upload:0.2.3`, `faasm/redis:0.2.3` | still present (but useless without toolchain + worker) |
+
+Root cause: the ATC'20-era (0.2.x) images were retired when the project moved to the
+GRANNY-era (`main`, 0.33.x) — same reason `func/` was removed upstream
+(see `Benchmarks/benchmark_workloads.md`). The local `faasm/` submodules
+(`third-party/WAVM`, `llvm-project`, …) are **not checked out**, and `/` has only
+~16 GB free, so a from-source toolchain/LLVM build isn't viable here either.
+
+**Paths to a real Faasm number (all off this box):**
+1. **Eval cluster / a provisioned Faasm host** — build the v0.2.x toolchain from source
+   (submodules + LLVM + wasm sysroot, needs disk), `inv compile wordcount wordcount`,
+   `docker-compose up`, then the Run recipe above. *(Phase 0.)*
+2. **Port the func to a current Faasm** (`faasm/cli:0.9.4` exists) — but the GRANNY-era
+   host interface differs from the `faasm/faasm.h` API this `wordcount.cpp` uses
+   (`FAASM_FUNC`, `faasmChainThisInput`, `faasmReadState/WriteState`), so it's a real
+   port, not a recompile. Only worth it if v0.2.x can't be rebuilt.
+
+The port itself is complete and its word-count/serialization logic is host-compile
+verified; only the Faasm runtime is blocked here.
+
+### Could the new GRANNY-era Faasm (0.32/0.33) work instead? — investigated 2026-06-12
+
+Checked, because the old 0.2.x images are gone. Findings:
+
+- **Images exist** on **ghcr.io** (not Docker Hub): `ghcr.io/faasm/{worker,planner,upload,
+  minio,redis,cli,cpp-sysroot}` — pinned by `faasmctl` (`FAASM_VERSION=0.32/0.33`,
+  `CPP_VERSION=0.8.0`, `FAABRIC/planner 0.22.0`). `pip install faasmctl` works.
+- **The cluster DOES deploy here.** `faasmctl deploy.compose --workers 1` brought up
+  planner + worker + upload + minio + redis successfully (worker `faasm-…-worker-1`).
+- **BUT it exhausts the disk.** The GRANNY image set + worker filled `/` to **100% (109 MB
+  left)** on this box (63 GB disk, ~87% used by other project data). Compiling our function
+  needs the `cpp-sysroot` toolchain + a **conan/boost** build on top — several more GB that
+  don't fit. Torn back down and reclaimed.
+- **And the port would need rewriting** to the GRANNY host interface (cpp `0.8.0`): the ATC'20
+  `FAASM_FUNC` / `faasmChainThisInput` / `faasmReadState/WriteState` API this `wordcount.cpp`
+  uses changed in the GRANNY line — a real port, not a recompile.
+
+**Verdict: ABORT on this box.** GRANNY is viable *in principle* (images current, cluster
+deploys) but not here — no disk headroom for the toolchain/conan build, and the func needs an
+API port. Right home is the **eval cluster** (provision disk, deploy the 0.32/0.33 cluster,
+port `wordcount.cpp` to the cpp-0.8 interface, compile + sweep). Left the box clean (images
+removed).

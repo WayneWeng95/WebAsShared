@@ -140,15 +140,56 @@ map-reduce **DAG** (`baseline/cloudburst/wordcount.py`), installed at
       result in `TestOutput/word_count_result.txt` (2026-06-10).
 - [x] Faasm port written + build/run recipe ([`baseline/faasm/`](./baseline/faasm/)); logic verified.
 - [x] Cloudburst port written + run recipe ([`baseline/cloudburst/`](./baseline/cloudburst/)); logic verified.
-- [ ] **Phase 0** on the eval cluster (lock nodes + RDMA, `./build.sh`, stand up RMMap/Faasm/Cloudburst).
-- [ ] Write `gen_dag.py` (parametrize corpus + `fanout:N`) and `run.sh` (sweep → `results.csv`) for our side.
-- [ ] RMMap: point its splitter at our `TestData/corpus_*`, sweep `mapperNum` × `PROTOCOL` ∈
-      {`DMERGE`, `ES`}, collect reducer profile → `baseline/rmmap/results.csv`.
-- [ ] Faasm: build the func, upload corpus state, sweep N → `baseline/faasm/results.csv`.
-- [ ] Cloudburst: start local cluster (Redis), sweep `WC_NUM_MAPPERS` → `baseline/cloudburst/results.csv`.
-- [ ] `plot.py`: throughput / memory / serialization-cost vs N, ours vs the three baselines.
+- [x] Write `gen_dag.py` + `run.sh` for our side (`./run.sh "<corpora>" "<fanouts>" <reps>`). **(2026-06-12)**
+- [x] **Our side — full intra-node sweep DONE.** Two guest builds:
+      - **`results.csv` (JIT)** — guest `.wasm`, Cranelift-JIT'd per worker process. Up to **94 MB/s**.
+      - **`results_aot.csv` (AOT)** — guest precompiled to `.cwasm` (`host compile`), `WC_WASM=…/guest.cwasm`.
+        Up to **104 MB/s**. This is the **fair** line vs Faasm's AOT WASM, so the plot uses it as the
+        primary "ours".
+      Both: size {50,500,1000 MB} × N {1,2,4,8,16}, 5 reps; counts fan-out-invariant and linear
+      (8.94M / 89.4M / 179M); `serialization = 0`; low-N OOMs on big corpora (`CRASH`).
+      **JIT vs AOT (peak MB/s): 50 MB 37.6→86, 500 MB 80→104, 1 GB 94→104.** The per-worker JIT is a
+      *fixed* cost (compiling the ~750 KB guest in each of N processes), so it dominates at small corpus
+      and explains why JIT plateaus at ~37 while AOT scales — `gen_dag.py` takes `WC_WASM`, `run.sh` takes
+      `WC_CSV`.
+- [x] **Cloudburst baseline — RUNNING on Redis here** ([`baseline/cloudburst/`](./baseline/cloudburst/)):
+      added a Redis-backed runner (`redis_kvs.py` + `redis_runner.py`) to the Cloudburst tree that
+      executes the real `wordcount.py` DAG through Redis. 50 MB × N {1,2,4,8,16}, 3 requests →
+      `baseline/cloudburst/results.csv`. ~9 MB/s, **~600 MB serialized through the KVS** for 150 MB
+      processed (≈4× amplification); count `8940339` matches ours exactly. *Caveat: single-process,
+      so mappers run sequentially — compare per-N absolute numbers + KVS byte volume, not the scaling
+      slope.*
+- [x] **Cloudburst 500 MB / 1 GB** done (`baseline/cloudburst/results.csv`) — needed Redis
+      `proto-max-bulk-len` raised (1 GB corpus > 512 MB default value cap). Counts match ours at every
+      size (89.4M / 179M); ~9 MB/s flat, ~4× serialization amplification through Redis.
+- [x] **RMMap — ES protocol RUNNING here** ([`baseline/rmmap/`](./baseline/rmmap/)): bypassed the
+      private custom-CPython by building the dmerge `bindings` on stock `python:3.7` (no kernel
+      module); a driver runs RMMap's real ES handlers (splitter→mapper×N→reducer) through Redis.
+      50 MB × N{1,2,4,8,16}; count `8940339` matches ours. Profile splits serialization (`sd_ms`
+      pickle) + external-store (`es_ms` Redis), both growing with N — what our zero-copy path = 0.
+- [ ] **RMMap — DMERGE** (the RDMA serialization-free headline, our closest twin): needs the MITOSIS
+      **Rust kernel module** built+`insmod`'d (parked per no-kernel-module scope). Box has RoCE
+      (`mlx4_0`) + module-load caps, so attemptable later.
+- [~] **Faasm — real stack BLOCKED, but a Faasm-LIKE demo RUNS** here
+      ([`baseline/faasm/demo/`](./baseline/faasm/demo/)). The pinned v0.2.3 images are gone from
+      Docker Hub and GRANNY (0.32/0.33) deploys but exhausts disk + needs an API port (details in
+      [`baseline/faasm/README.md`](./baseline/faasm/README.md)). So we **abstracted Faasm's mechanism**:
+      `wc.rs` → wasm32-wasip1, each map/reduce a fresh **wasmtime** instance (Faaslet), state through
+      **Redis** (partitioned). 50/500/1000 MB × N{1,2,4,8,16}; counts validated; peaks **64–67 MB/s**
+      (compiled WASM) at a **constant ~19 MB Faaslet footprint**.
+- [x] **`plot.py` overlay DONE** → [`figs/wordcount_overlay.png`](./figs/wordcount_overlay.png).
+      3 panels from the three `results.csv`: (1) throughput vs fan-out N at 500 MB — ours 36→80 MB/s,
+      Cloudburst flat ~9, RMMap-ES *declines* 8→3 as serialization grows with N; (2) peak throughput
+      vs corpus size — ours 38→94 MB/s, baselines ~7–9; (3) **serialization through the external store
+      (× corpus bytes): ours 0×, RMMap-ES 1.1×, Cloudburst 4×** — the headline.
 
-> **Note on builds.** The Faasm and Cloudburst runs need their full stacks (Faasm WASM toolchain;
-> Cloudburst local cluster + Redis), which aren't installed in this dev environment — the ports are
-> written, wired into each system tree, and logic-verified, but their *end-to-end* runs happen in
-> Phase 0 on the eval cluster. Our side is verified here.
+> **Correction (2026-06-12): Cloudburst is Anna-native, not Redis-native.** The suite docs said
+> "Cloudburst supports Redis natively" — it does not; its state plane is the Anna KVS, and the
+> `redis`/`s3` benchmarks are data-locality micro-benchmarks, not the backing store. We made the
+> Redis comparison real by **adding a Redis-backed runner** to the Cloudburst tree (details +
+> fidelity caveats in [`baseline/cloudburst/README.md`](./baseline/cloudburst/README.md)).
+>
+> **Environment note.** This dev box is a **single node** (no RDMA fabric, Python 3.14). So **our
+> intra-node SHM sweep** and the **Cloudburst-on-Redis** baseline run here; **inter-node RDMA (ours),
+> RMMap (Knative+RDMA), and Faasm (WASM toolchain)** are deferred to Phase 0 on the eval cluster.
+> Faasm + Cloudburst ports were already written/logic-verified; Cloudburst now runs end-to-end here.
