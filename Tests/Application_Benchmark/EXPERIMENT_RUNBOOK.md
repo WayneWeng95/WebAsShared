@@ -28,7 +28,7 @@ three vector PDFs:
 | `baseline/cloudburst/results.csv` | **Cloudburst** on Redis |
 | `figs/wordcount_overlay.pdf` | throughput: vs-N line (500 MB) + per-size bars |
 | `figs/wordcount_latency.pdf` | latency: vs-N line + per-size bars |
-| `figs/wordcount_bars.pdf` | **the paper figure**: throughput bars ‖ latency bars (broken axis) |
+| `figs/wordcount_bars.pdf` | **the paper figure**: latency bars, one panel per corpus size |
 
 **Correctness gate:** every system must report identical `total_occurrences` at
 each corpus size — `8940339` (50 MB) / `89403388` (500 MB) / `179060000` (1 GB).
@@ -256,14 +256,36 @@ figures** (`Tests/StateSync/plot_compare.py`) for a coherent paper:
   WasMem `#2057c7` `o`, Faasm `#2a9d8f` `D` (shm-copy), RMMap `#1d7a3e` `*`
   (shm-zerocopy), Cloudburst `#edae49` `v` (redis-local).
 - **Fonts:** `TICK_SIZE=16`, `LABEL_SIZE=16`, `LEGEND_SIZE=17`, `YLABEL_SIZE=16`.
-- **Legend:** frameless, at the top, **order Cloudburst → RMMap → Faasm → WasMem**
-  (handles reversed); 1×4 in the bars figure, 2-col elsewhere.
-- **`wordcount_bars.pdf`** (the paper figure), fixed **9×4.5** (no tight crop):
-  - left = throughput per size (linear bars); right = latency per size on a
-    **2-stage broken y-axis** — body `0–25 s`, band `38–56 s` (ticks 40/50),
-    and the **104 s outlier capped with its value written *inside* the bar**;
-  - **no panel titles** (panels identified by the y-axes: `Throughput (MB/s)` /
-    `Latency (s)`); bar value labels bold, size 9.
+- **Legend:** frameless, at the top, **order Cloudburst → RMMap → Faasm → WasMem**.
+  The bar **group order matches this legend order** (draw order is cb, rm, fa,
+  ours; no handle reversal). 1×4 in the bars figure, 2-col elsewhere.
+- **`wordcount_bars.pdf`** (the paper figure), **11×4.2**: **one panel per corpus
+  size** (50 / 500 / 1000 MB), each showing the four systems' best end-to-end
+  **latency (s)** as 4 bars in legend order. Per-panel auto-scaling makes the
+  **104 s outlier** at 1000 MB readable without a broken axis; the size sits at
+  the **bottom** as the panel's x-label; `Latency (s)` y-label on the leftmost
+  panel; bar labels bold, size 11. (Throughput-per-size lives in `_overlay.pdf`.)
+
+### Figure conventions (apply to *every* workload's `plot.py`)
+
+These are the agreed conventions the FINRA and WordCount plots already follow —
+keep them when adding a new workload's figure:
+
+1. **Bar group order == legend order** (Cloudburst → RMMap → Faasm → WasMem).
+   Draw bars in that order (`order = ['cloudburst','rmmap','faasm','ours']`) and
+   **do not reverse** the legend handles. Build the shared legend from explicit
+   `matplotlib.patches.Patch` proxies so it is independent of per-panel artists.
+2. **The cross-system bar figure is latency, one panel per input size.** Drop the
+   throughput panel from the bar figure (throughput lives in the overlay/line
+   figure). N input sizes → a `1×N` grid; each panel = that size's latency for the
+   four systems (4 bars). Per-panel auto-scaling — **no broken/log axes** — so
+   each size is readable on its own scale.
+3. **Input-size label goes at the BOTTOM** of each panel (`axis.set_xlabel(...)`
+   with `set_xticks([])`), not as a title. FINRA: `10k/100k/1M trades`;
+   WordCount: `50/500/1000 MB`.
+4. **PDF only — no PNG.** Each figure does a single `fig.savefig(out)` to a
+   `.pdf`. (PNGs were used only transiently for review and are not committed.)
+5. **Fonts/colors** as listed above; bar value labels bold, size ~11.
 
 `plot.py` reads `results_aot.csv` as "ours" (the AOT/fair line). To switch ours
 back to JIT, point `OURS` at `results.csv`.

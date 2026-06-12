@@ -1,0 +1,4 @@
+size_trades,topo,e2e_ms,throughput_trades_s,peak_mem_mb,kvs_put_mb,kvs_get_mb,total_violations
+10000,redis-es,459.6,21760,66.7,0.57,4.56,6183
+100000,redis-es,1371.7,72900,202.2,5.71,45.68,49763
+1000000,redis-es,9573.3,104458,1590.4,57.10,456.79,456574

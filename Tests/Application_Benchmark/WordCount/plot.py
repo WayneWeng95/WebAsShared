@@ -13,6 +13,7 @@ import os
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+from matplotlib.patches import Patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, 'figs')
@@ -133,8 +134,7 @@ def lat_best_by_size(rows, sizes, key):
 
 
 def top_legend(fig, ax, ncol=2):
-    handles, labels = ax.get_legend_handles_labels()
-    handles, labels = handles[::-1], labels[::-1]   # Cloudburst…WasMem
+    handles, labels = ax.get_legend_handles_labels()   # already Cloudburst…WasMem
     fig.legend(handles, labels, loc='upper center', ncol=ncol, frameon=False,
                fontsize=LEGEND_SIZE, bbox_to_anchor=(0.5, 1.0),
                columnspacing=1.5, handletextpad=0.5)
@@ -189,85 +189,39 @@ def latency_fig(systems, sizes):
 
 
 def bars_fig(systems, sizes):
-    """The two bar charts merged: throughput per size (left, full height) and
-    e2e latency per size (right, a 2-stage broken y-axis instead of log — a
-    0–55 s body and a 95–110 s cap that isolates the 104 s outlier)."""
-    fig = plt.figure(figsize=(9, 4.5))
-    gs = fig.add_gridspec(2, 2, height_ratios=[1, 1.7],
-                          hspace=0.12, wspace=0.32,
-                          top=0.88, bottom=0.13, left=0.10, right=0.985)
-    axL = fig.add_subplot(gs[:, 0])               # throughput, full height
-    axT = fig.add_subplot(gs[0, 1])               # latency cap (104 outlier)
-    axB = fig.add_subplot(gs[1, 1])               # latency body
-    width = 0.2
-    xpos = list(range(len(sizes)))
-
-    def grouped(axis, val_by_key, fmt, label_ok=lambda y: True, **txt):
-        for i, (rows, key) in enumerate(systems):
-            ys = [val_by_key[key].get(s, 0) for s in sizes]
-            bars = axis.bar([x + (i - 1.5) * width for x in xpos], ys, width,
-                            color=STYLE[key]['color'], label=STYLE[key]['label'])
-            for b, y in zip(bars, ys):
-                if y and label_ok(y):
-                    axis.text(b.get_x() + b.get_width() / 2, y, fmt(y),
-                              ha='center', va='bottom', fontsize=9,
-                              fontweight='bold', **txt)
-
-    # Left: throughput per size (linear).
-    tput = {k: dict(best_tput_by_size(r, sizes)) for r, k in systems}
-    grouped(axL, tput, lambda y: '%.0f' % y)
-    axL.set_xlabel('corpus size (MB)', fontsize=LABEL_SIZE)
-    axL.set_ylabel('Throughput (MB/s)', fontsize=YLABEL_SIZE)
-    axL.margins(y=0.18)
-    axL.set_xticks(xpos)
-    axL.set_xticklabels([str(s) for s in sizes])
-    axL.tick_params(axis='both', labelsize=TICK_SIZE)
-    axL.grid(True, axis='y', alpha=.3)
-
-    # Right: e2e latency per size — 2-stage broken axis (body 0–25 s, band
-    # 38–56 s), with the 104 s outlier drawn out of the roof + its value.
+    """One panel per corpus size; each shows the four systems' best end-to-end
+    latency (s) for that size. Per-panel auto-scaling makes the 104 s outlier at
+    1000 MB readable without a broken axis."""
+    fig, ax = plt.subplots(1, len(sizes), figsize=(11, 4.2))
+    if len(sizes) == 1:
+        ax = [ax]
+    keys = [k for _, k in systems]                # already legend order
     lat = {k: dict(lat_best_by_size(r, sizes, k)) for r, k in systems}
     fmt_l = lambda y: ('%.1f' % y) if y < 10 else '%.0f' % y
-    ROOF = 56
-    grouped(axB, lat, fmt_l, label_ok=lambda y: y <= 25)
-    grouped(axT, lat, fmt_l, label_ok=lambda y: 25 < y <= ROOF)
-    # Out-of-roof bars: clipped at the band top; value written INSIDE the bar,
-    # just below the roof.
-    for i, (rows, key) in enumerate(systems):
-        for j, s in enumerate(sizes):
-            y = lat[key].get(s, 0)
-            if y > ROOF:
-                xc = j + (i - 1.5) * width + width / 2
-                axT.text(xc, ROOF - 0.6, '%.0f' % y, ha='center', va='top',
-                         fontsize=9, fontweight='bold', color='black')
-    axB.set_ylim(0, 25)
-    axB.set_yticks([0, 10, 20])
-    axT.set_ylim(38, ROOF)
-    axT.set_yticks([40, 50])
-    axB.set_ylabel('Latency (s)', fontsize=YLABEL_SIZE)
-    axB.yaxis.set_label_coords(-0.16, 0.75)  # center label across both stages
-    for a in (axT, axB):
-        a.set_xticks(xpos)
-        a.tick_params(axis='both', labelsize=TICK_SIZE)
-        a.grid(True, axis='y', alpha=.3)
-    axT.set_xticklabels([])
-    axB.set_xticklabels([str(s) for s in sizes])
-    axB.set_xlabel('corpus size (MB)', fontsize=LABEL_SIZE)
 
-    # Hide the spines facing the break and draw diagonal break marks.
-    axT.spines['bottom'].set_visible(False)
-    axB.spines['top'].set_visible(False)
-    axT.tick_params(bottom=False)
-    d = .012
-    kw = dict(color='k', clip_on=False, lw=1)
-    axT.plot((-d, +d), (-d, +d), transform=axT.transAxes, **kw)
-    axT.plot((1 - d, 1 + d), (-d, +d), transform=axT.transAxes, **kw)
-    axB.plot((-d, +d), (1 - d * 1.7, 1 + d * 1.7), transform=axB.transAxes, **kw)
-    axB.plot((1 - d, 1 + d), (1 - d * 1.7, 1 + d * 1.7), transform=axB.transAxes, **kw)
+    for j, s in enumerate(sizes):
+        axis = ax[j]
+        ys = [lat[k].get(s, 0) for k in keys]
+        bars = axis.bar(range(len(keys)), ys,
+                        color=[STYLE[k]['color'] for k in keys])
+        for b, y in zip(bars, ys):
+            if y:
+                axis.text(b.get_x() + b.get_width() / 2, y, fmt_l(y),
+                          ha='center', va='bottom', fontsize=11, fontweight='bold')
+        axis.set_xlabel('%d MB' % s, fontsize=LABEL_SIZE)
+        axis.set_xticks([])
+        axis.margins(y=0.16)
+        axis.tick_params(axis='y', labelsize=TICK_SIZE)
+        axis.grid(True, axis='y', alpha=.3)
+    ax[0].set_ylabel('Latency (s)', fontsize=YLABEL_SIZE)
 
-    top_legend(fig, axL, ncol=4)
+    handles = [Patch(color=STYLE[k]['color'], label=STYLE[k]['label']) for k in keys]
+    fig.legend(handles, [STYLE[k]['label'] for k in keys], loc='upper center',
+               ncol=4, frameon=False, fontsize=LEGEND_SIZE,
+               bbox_to_anchor=(0.5, 1.0), columnspacing=1.5, handletextpad=0.5)
+    fig.tight_layout(rect=[0, 0, 1, 0.90])
     out = os.path.join(FIGS, 'wordcount_bars.pdf')
-    fig.savefig(out)   # fixed 9x4.5 (no tight crop)
+    fig.savefig(out)
     print('wrote', out)
 
 
@@ -280,7 +234,7 @@ def main():
     xpos = list(range(len(sizes)))
 
     # ── Panel 1: throughput vs N at 500 MB (drop N=1) ─────────────────────────
-    for rows, key in ((ours, 'ours'), (fa, 'faasm'), (rm, 'rmmap'), (cb, 'cloudburst')):
+    for rows, key in ((cb, 'cloudburst'), (rm, 'rmmap'), (fa, 'faasm'), (ours, 'ours')):
         pts = [(n, t) for n, t in series_tput_vs_n(rows, 500) if n >= 2]
         if pts:
             xs, ys = zip(*pts)
@@ -295,7 +249,7 @@ def main():
     ax[0].grid(True, alpha=.3)
 
     # ── Panel 2: peak throughput per corpus size — grouped bars ───────────────
-    order = ((ours, 'ours'), (fa, 'faasm'), (rm, 'rmmap'), (cb, 'cloudburst'))
+    order = ((cb, 'cloudburst'), (rm, 'rmmap'), (fa, 'faasm'), (ours, 'ours'))
     for i, (rows, key) in enumerate(order):
         bysize = dict(best_tput_by_size(rows, sizes))
         ys = [bysize.get(s, 0) for s in sizes]
@@ -313,9 +267,9 @@ def main():
     ax[1].tick_params(axis='both', labelsize=TICK_SIZE)
     ax[1].grid(True, axis='y', alpha=.3)
 
-    # Single 2x2 legend at the top, no frame (Cloudburst…WasMem order).
+    # Single 2x2 legend at the top, no frame (Cloudburst…WasMem order, matching
+    # the bar group order — handles already come in that order).
     handles, labels = ax[0].get_legend_handles_labels()
-    handles, labels = handles[::-1], labels[::-1]
     fig.legend(handles, labels, loc='upper center', ncol=2, frameon=False,
                fontsize=LEGEND_SIZE, bbox_to_anchor=(0.5, 1.0),
                columnspacing=1.5, handletextpad=0.5)
@@ -324,7 +278,7 @@ def main():
     fig.savefig(out)  # vector PDF
     print('wrote', out)
 
-    systems = ((ours, 'ours'), (fa, 'faasm'), (rm, 'rmmap'), (cb, 'cloudburst'))
+    systems = ((cb, 'cloudburst'), (rm, 'rmmap'), (fa, 'faasm'), (ours, 'ours'))
     latency_fig(systems, sizes)
     bars_fig(systems, sizes)
 

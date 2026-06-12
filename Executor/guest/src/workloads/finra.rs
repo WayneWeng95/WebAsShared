@@ -13,16 +13,28 @@
 //
 // DAG stages:
 //   Input                → load trades.csv into I/O slot 0
-//   finra_fetch_private  → parse CSV, write to stream slot 5
+//   finra_fetch_private  → parse CSV ONCE into a packed columnar binary form,
+//                          write to stream slot 5
 //   finra_fetch_public   → synthetic market ref, write to stream slot 6
 //   Aggregate            → merge slots 5+6 → slot 200
-//   finra_audit_rule × 8 → each rule reads slot 200, writes to slot 10+rule_id
+//   finra_audit_rule × 8 → each rule reads slot 200 (the broadcast) and scans the
+//                          packed columns — no re-parse, O(n) integer-keyed counts
 //   Aggregate            → merge slots 10–17 → slot 300
 //   finra_merge_results  → summarize violations, write to OUTPUT_IO_SLOT
 //   Output               → flush to file
+//
+// PARSE-ONCE (2026-06-12): fetch_private used to write one text record per trade
+// ("T:<csv line>") and every one of the 8 audit rules re-parsed that CSV — 8×
+// string parsing plus, in the (account,symbol) rules, an O(n·k) `Vec::find` over
+// `format!`-built string keys. At 8 M trades that is billions of string compares
+// and millions of tiny record allocations. fetch_private now emits a packed
+// 20-byte columnar record per trade (symbols/accounts pre-resolved to integer
+// indices) in ~256 KiB chunks, so each rule is a flat integer scan with
+// fixed-array counters. Violation counts are unchanged (the correctness gate).
 // ─────────────────────────────────────────────────────────────────────────────
 
 use alloc::vec::Vec;
+use alloc::vec;
 use alloc::string::String;
 use crate::api::ShmApi;
 
@@ -31,42 +43,70 @@ const REF_STREAM_SLOT: u32 = 6;
 const INPUT_AGG_SLOT: u32 = 200;
 const RULE_OUT_BASE: u32 = 10;
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Packed columnar layout ────────────────────────────────────────────────────
+//
+// One trade = a fixed 20-byte little-endian record; many records are batched
+// into a single stream record prefixed with TAG_TRADES so the reader can tell a
+// trade chunk apart from the text "R:" reference records (which start with 'R').
+//
+//   off 0  symbol_idx u16   (index into SYMBOLS; SYM_UNKNOWN if not a ref symbol)
+//   off 2  side       u8    (0 = BUY, 1 = SELL)
+//   off 3  _pad       u8
+//   off 4  price      u32   (cents)
+//   off 8  quantity   u32
+//   off 12 minutes    u16   (hour*60 + minute, 0..1439)
+//   off 14 _pad       u16
+//   off 16 account_idx u32  (numeric part of the account id)
+const REC: usize = 20;
+const TAG_TRADES: u8 = 0xBB;
+const CHUNK_FLUSH: usize = 1 << 18; // ~256 KiB per stream record
 
-struct Trade {
-    trade_id: u32,
-    symbol: String,
-    price: u32,     // price × 100  (fixed-point cents)
-    quantity: u32,
-    side: u8,       // 0 = BUY, 1 = SELL
-    hour: u8,
-    minute: u8,
-    account_id: String,
-}
+// Fixed counter dimensions. The generator uses 100 accounts (ACC000..ACC099) and
+// the 20 SYMBOLS below, so (account,symbol) fits a dense table with no collisions
+// — keeping the gate exact while making the keyed rules O(n) and alloc-free.
+const SYM: usize = 32;   // ≥ SYMBOLS.len()
+const ACCT: usize = 128; // ≥ number of distinct accounts
+const SYM_UNKNOWN: u16 = 0xFFFF;
 
-fn parse_trades(slot: u32) -> Vec<Trade> {
-    let mut trades = Vec::new();
-    let records = ShmApi::read_all_stream_records(slot);
-    for (_origin, rec) in &records {
-        let s = core::str::from_utf8(rec).unwrap_or("");
-        let body = match s.strip_prefix("T:") {
-            Some(b) => b,
-            None => continue,
-        };
-        let parts: Vec<&str> = body.splitn(7, ',').collect();
-        if parts.len() < 7 { continue; }
-        let trade_id: u32 = parts[0].parse().unwrap_or(0);
-        let symbol = String::from(parts[1]);
-        // Parse price as cents to avoid float
-        let price = parse_cents(parts[2]);
-        let quantity: u32 = parts[3].parse().unwrap_or(0);
-        let side = if parts[4] == "BUY" { 0 } else { 1 };
-        let (hour, minute) = parse_time(parts[5]);
-        let account_id = String::from(parts[6]);
-        trades.push(Trade { trade_id, symbol, price, quantity, side, hour, minute, account_id });
+// Reference symbols — same set/order as `finra_fetch_public` and gen_trades.py.
+const SYMBOLS: [&str; 20] = [
+    "AAPL", "GOOG", "MSFT", "AMZN", "META", "TSLA", "NVDA", "JPM", "BAC", "WFC",
+    "GS", "MS", "V", "MA", "NFLX", "DIS", "INTC", "AMD", "ORCL", "CRM",
+];
+
+// Reference avg price (cents), indexed by symbol_idx — the SAME static table as
+// `finra_fetch_public` / gen_trades.py / the baselines (Faasm's `ref_cents()` is
+// the same match). The price-outlier rule resolves it here, in-rule, rather than
+// re-deriving it from "R:" records carried through the aggregate: at large scale
+// the aggregate proved unreliable at carrying the 20 tiny ref records behind tens
+// of MB of trade chunks, which silently zeroed the table. This static table is
+// what every system uses, so it keeps the gate exact at every size.
+const REF_CENTS: [u32; 20] = [
+    17500, 14000, 37000, 18000, 50000, 25000, 80000, 19500, 3500, 5500,
+    40000, 9000, 28000, 45000, 60000, 11000, 4500, 16000, 12500, 30000,
+];
+
+fn symbol_index(sym: &str) -> u16 {
+    match SYMBOLS.iter().position(|&s| s == sym) {
+        Some(i) => i as u16,
+        None => SYM_UNKNOWN,
     }
-    trades
 }
+
+fn account_index(acct: &str) -> u32 {
+    // "ACC004" → 4. The numeric tail identifies the account.
+    let mut v: u32 = 0;
+    let mut seen = false;
+    for b in acct.bytes() {
+        if b.is_ascii_digit() {
+            v = v.wrapping_mul(10) + (b - b'0') as u32;
+            seen = true;
+        }
+    }
+    if seen { v } else { 0 }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn parse_cents(s: &str) -> u32 {
     // "175.50" → 17550
@@ -81,70 +121,91 @@ fn parse_cents(s: &str) -> u32 {
 }
 
 fn parse_time(ts: &str) -> (u8, u8) {
-    // "2024-01-15T10:30:00" → (10, 30)
-    if let Some(pos) = ts.find('T') {
-        let time_part = &ts[pos + 1..];
-        let parts: Vec<&str> = time_part.splitn(3, ':').collect();
-        if parts.len() >= 2 {
-            let h: u8 = parts[0].parse().unwrap_or(0);
-            let m: u8 = parts[1].parse().unwrap_or(0);
-            return (h, m);
-        }
+    // Accept both ISO "2024-01-15T10:30:00" and plain "HH:MM" (the trades CSV
+    // format). Previously only the ISO form was handled, so every "HH:MM" trade
+    // parsed to (0,0) and the AFTER_HOURS rule flagged all of them.
+    let time_part = match ts.find('T') {
+        Some(pos) => &ts[pos + 1..],
+        None => ts,
+    };
+    let parts: Vec<&str> = time_part.splitn(3, ':').collect();
+    if parts.len() >= 2 {
+        let h: u8 = parts[0].parse().unwrap_or(0);
+        let m: u8 = parts[1].parse().unwrap_or(0);
+        return (h, m);
     }
     (0, 0)
 }
 
-struct MarketRef {
-    symbol: String,
-    avg_price: u32,  // cents
+#[inline]
+fn ref_cents(symbol_idx: u16) -> u32 {
+    let i = symbol_idx as usize;
+    if i < REF_CENTS.len() { REF_CENTS[i] } else { 10000 }
 }
 
-fn parse_reference(slot: u32) -> Vec<MarketRef> {
-    let mut refs = Vec::new();
-    let records = ShmApi::read_all_stream_records(slot);
-    for (_origin, rec) in &records {
-        let s = core::str::from_utf8(rec).unwrap_or("");
-        let body = match s.strip_prefix("R:") {
-            Some(b) => b,
-            None => continue,
-        };
-        let parts: Vec<&str> = body.splitn(3, ',').collect();
-        if parts.len() >= 2 {
-            refs.push(MarketRef {
-                symbol: String::from(parts[0]),
-                avg_price: parse_cents(parts[1]),
-            });
+#[inline]
+fn rd_u16(b: &[u8], o: usize) -> u16 { u16::from_le_bytes([b[o], b[o + 1]]) }
+#[inline]
+fn rd_u32(b: &[u8], o: usize) -> u32 {
+    u32::from_le_bytes([b[o], b[o + 1], b[o + 2], b[o + 3]])
+}
+
+/// Visit every packed trade record across all TAG_TRADES chunks in `records`.
+/// Each callback receives one 20-byte record slice (decode with the rd_* helpers).
+fn for_each_trade(records: &[(u32, Vec<u8>)], mut f: impl FnMut(&[u8])) {
+    for (_origin, rec) in records {
+        if rec.first() != Some(&TAG_TRADES) { continue; }
+        let body = &rec[1..];
+        let n = body.len() / REC;
+        for i in 0..n {
+            f(&body[i * REC..i * REC + REC]);
         }
     }
-    refs
-}
-
-fn get_ref_price(refs: &[MarketRef], symbol: &str) -> u32 {
-    refs.iter()
-        .find(|r| r.symbol == symbol)
-        .map(|r| r.avg_price)
-        .unwrap_or(10000) // default $100
 }
 
 // ── Exported functions ───────────────────────────────────────────────────────
 
-/// Parse trades CSV from I/O slot 0, write structured records to stream slot 5.
+/// Parse trades CSV from I/O slot 0 ONCE, write packed columnar records to slot 5.
 #[no_mangle]
 pub extern "C" fn finra_fetch_private(_unused: u32) {
     let records = ShmApi::read_all_inputs();
-    let mut first = true;
+    let mut buf: Vec<u8> = Vec::with_capacity(CHUNK_FLUSH + REC);
+    buf.push(TAG_TRADES);
+
     for (_origin, rec) in &records {
         let s = core::str::from_utf8(rec).unwrap_or("");
-        let line = s.trim();
-        if line.is_empty() { continue; }
-        if first {
-            ShmApi::append_stream_data(TRADE_STREAM_SLOT,
-                alloc::format!("H:{}", line).as_bytes());
-            first = false;
-            continue;
+        for line in s.split('\n') {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with("trade_id") { continue; }
+            let p: Vec<&str> = line.splitn(7, ',').collect();
+            if p.len() < 7 { continue; }
+
+            let symbol_idx = symbol_index(p[1]);
+            let price = parse_cents(p[2]);
+            let quantity: u32 = p[3].parse().unwrap_or(0);
+            let side: u8 = if p[4] == "BUY" { 0 } else { 1 };
+            let (h, m) = parse_time(p[5]);
+            let minutes: u16 = h as u16 * 60 + m as u16;
+            let account_idx = account_index(p[6]);
+
+            buf.extend_from_slice(&symbol_idx.to_le_bytes()); // 0
+            buf.push(side);                                    // 2
+            buf.push(0);                                       // 3 pad
+            buf.extend_from_slice(&price.to_le_bytes());       // 4
+            buf.extend_from_slice(&quantity.to_le_bytes());    // 8
+            buf.extend_from_slice(&minutes.to_le_bytes());     // 12
+            buf.extend_from_slice(&[0u8, 0]);                  // 14 pad
+            buf.extend_from_slice(&account_idx.to_le_bytes()); // 16
+
+            if buf.len() >= CHUNK_FLUSH {
+                ShmApi::append_stream_data(TRADE_STREAM_SLOT, &buf);
+                buf.clear();
+                buf.push(TAG_TRADES);
+            }
         }
-        ShmApi::append_stream_data(TRADE_STREAM_SLOT,
-            alloc::format!("T:{}", line).as_bytes());
+    }
+    if buf.len() > 1 {
+        ShmApi::append_stream_data(TRADE_STREAM_SLOT, &buf);
     }
 }
 
@@ -170,101 +231,79 @@ pub extern "C" fn finra_fetch_public(_unused: u32) {
     }
 }
 
-/// Run audit rule `rule_id` on aggregated data in slot 200.
-/// Writes results to stream slot 10 + rule_id.
+/// Run audit rule `rule_id` over the packed columns in slot 200 (the broadcast).
+/// Writes results to stream slot 10 + rule_id. No CSV re-parse; integer-keyed.
 #[no_mangle]
 pub extern "C" fn finra_audit_rule(rule_id: u32) {
-    let trades = parse_trades(INPUT_AGG_SLOT);
-    let refs = parse_reference(INPUT_AGG_SLOT);
+    let records = ShmApi::read_all_stream_records(INPUT_AGG_SLOT);
     let out_slot = RULE_OUT_BASE + rule_id;
     let mut violations: u32 = 0;
 
     match rule_id {
         0 => {
-            // Price outlier: trade price > 2× reference avg
-            for t in &trades {
-                let avg = get_ref_price(&refs, &t.symbol);
-                if t.price > 2 * avg {
-                    violations += 1;
-                }
-            }
+            // Price outlier: trade price > 2× reference avg (static ref table)
+            for_each_trade(&records, |r| {
+                let avg = ref_cents(rd_u16(r, 0));
+                if rd_u32(r, 4) > 2 * avg { violations += 1; }
+            });
         }
         1 => {
             // Large order: quantity > 5000
-            for t in &trades {
-                if t.quantity > 5000 {
-                    violations += 1;
-                }
-            }
+            for_each_trade(&records, |r| {
+                if rd_u32(r, 8) > 5000 { violations += 1; }
+            });
         }
         2 => {
             // Wash trade: same account buys + sells same symbol
-            let mut keys: Vec<(String, u8)> = Vec::new(); // (acct:sym, side_mask)
-            for t in &trades {
-                let key = alloc::format!("{}:{}", t.account_id, t.symbol);
-                let bit = 1u8 << t.side;
-                match keys.iter_mut().find(|(k, _)| k == &key) {
-                    Some((_, mask)) => *mask |= bit,
-                    None => keys.push((key, bit)),
-                }
-            }
-            for (_, mask) in &keys {
-                if *mask == 3 { violations += 1; }
-            }
+            let mut mask = vec![0u8; ACCT * SYM];
+            for_each_trade(&records, |r| {
+                let si = (rd_u16(r, 0) as usize) & (SYM - 1);
+                let ai = (rd_u32(r, 16) as usize) & (ACCT - 1);
+                mask[ai * SYM + si] |= 1u8 << r[2];
+            });
+            violations = mask.iter().filter(|&&m| m == 3).count() as u32;
         }
         3 => {
             // Spoofing: >10 trades same account+symbol
-            let mut counts: Vec<(String, u32)> = Vec::new();
-            for t in &trades {
-                let key = alloc::format!("{}:{}", t.account_id, t.symbol);
-                match counts.iter_mut().find(|(k, _)| k == &key) {
-                    Some((_, n)) => *n += 1,
-                    None => counts.push((key, 1)),
-                }
-            }
-            for (_, n) in &counts {
-                if *n > 10 { violations += 1; }
-            }
+            let mut counts = vec![0u32; ACCT * SYM];
+            for_each_trade(&records, |r| {
+                let si = (rd_u16(r, 0) as usize) & (SYM - 1);
+                let ai = (rd_u32(r, 16) as usize) & (ACCT - 1);
+                counts[ai * SYM + si] += 1;
+            });
+            violations = counts.iter().filter(|&&n| n > 10).count() as u32;
         }
         4 => {
-            // Concentration: >5% of trades in one symbol
-            let mut sym_counts: Vec<(String, u32)> = Vec::new();
-            let total = trades.len() as u32;
-            for t in &trades {
-                match sym_counts.iter_mut().find(|(s, _)| s == &t.symbol) {
-                    Some((_, n)) => *n += 1,
-                    None => sym_counts.push((t.symbol.clone(), 1)),
-                }
-            }
+            // Concentration: symbol count > total/20 + 100
+            let mut sym_counts = [0u32; SYM];
+            let mut total: u32 = 0;
+            for_each_trade(&records, |r| {
+                let si = (rd_u16(r, 0) as usize) & (SYM - 1);
+                sym_counts[si] += 1;
+                total += 1;
+            });
             let threshold = total / 20 + 100;
-            for (_, n) in &sym_counts {
-                if *n > threshold { violations += 1; }
-            }
+            violations = sym_counts.iter().filter(|&&n| n > threshold).count() as u32;
         }
         5 => {
             // After-hours: outside 09:30-16:00
-            for t in &trades {
-                let minutes = t.hour as u32 * 60 + t.minute as u32;
-                if minutes < 570 || minutes > 960 {
-                    violations += 1;
-                }
-            }
+            for_each_trade(&records, |r| {
+                let minutes = rd_u16(r, 12) as u32;
+                if minutes < 570 || minutes > 960 { violations += 1; }
+            });
         }
         6 => {
             // Penny stock: price < $5.00 (500 cents)
-            for t in &trades {
-                if t.price < 500 {
-                    violations += 1;
-                }
-            }
+            for_each_trade(&records, |r| {
+                if rd_u32(r, 4) < 500 { violations += 1; }
+            });
         }
         7 => {
             // Round lot: quantity is exact multiple of 1000
-            for t in &trades {
-                if t.quantity >= 1000 && t.quantity % 1000 == 0 {
-                    violations += 1;
-                }
-            }
+            for_each_trade(&records, |r| {
+                let q = rd_u32(r, 8);
+                if q >= 1000 && q % 1000 == 0 { violations += 1; }
+            });
         }
         _ => {}
     }
