@@ -34,6 +34,13 @@
     { "id": "map_9", "deps": ["distribute"], "kind": { "Func": { "func": "wc_map", "arg": 19, "arg2": 119 } } },
 
     {
+      "_comment": "Free the per-worker input slots 10-19 (the original input pages, relinked by distribute) once every mapper has read them — reclaimed before aggregate/reduce/output run.",
+      "id": "free_input",
+      "deps": ["map_0","map_1","map_2","map_3","map_4","map_5","map_6","map_7","map_8","map_9"],
+      "kind": { "FreeSlots": { "stream": [10,11,12,13,14,15,16,17,18,19] } }
+    },
+
+    {
       "id": "aggregate",
       "deps": ["map_0","map_1","map_2","map_3","map_4","map_5","map_6","map_7","map_8","map_9"],
       "kind": { "Aggregate": { "upstream": [110, 111, 112, 113, 114, 115, 116, 117, 118, 119], "downstream": 200 } }

@@ -61,6 +61,73 @@ fn pin_converge_to_coordinator(nodes: &mut [SymbolicNode], coordinator_id: u32) 
 /// The output has the same shape as a ClusterDag (shm_path_prefix, transfer,
 /// node_dags, shared_inputs, …) and can be fed directly to
 /// `dag_transform::transform_cluster_dag` and `ClusterDag::from_json`.
+/// Auto-reclaim fan-out worker input slots once their consumers have run.
+///
+/// A fan-out `Func` (one declaring `out_base`, e.g. `wc_distribute`) zero-copy
+/// **relinks** the input pages into per-worker stream slots that its consumer
+/// `Func`s (e.g. `wc_map`) read.  Those pages are dead after the consumers run,
+/// but the host auto-reclaimer can't see generic `Func` slot semantics, so they
+/// would sit in SHM for the rest of the DAG.  For every fan-out source we emit a
+/// `FreeSlots` node (one per machine) that depends on the **same-machine**
+/// consumers and frees the stream slots they read.  Cross-machine consumers are
+/// fed via `RemoteRecv`, whose produced slots are already reclaimed when the
+/// consumer finishes — so we skip those to avoid double-freeing.
+///
+/// Runs after `assign_slots`, when each fan-out source still carries `out_base`
+/// and each consumer's input slot is in its `Func.arg`.
+fn inject_fanout_frees(nodes: &mut Vec<SymbolicNode>) {
+    // fan-out source id → its machine
+    let fanout_src: HashMap<String, u32> = nodes
+        .iter()
+        .filter(|n| n.kind.get("Func").and_then(|f| f.get("out_base")).is_some())
+        .filter_map(|n| n.node_id.map(|m| (n.id.clone(), m)))
+        .collect();
+    if fanout_src.is_empty() {
+        return;
+    }
+
+    // (fanout_src_id, machine) → (consumer ids, stream slots to free)
+    let mut groups: HashMap<(String, u32), (Vec<String>, Vec<u32>)> = HashMap::new();
+    for n in nodes.iter() {
+        let Some(func) = n.kind.get("Func").and_then(|v| v.as_object()) else { continue };
+        // A consumer reads a fan-out worker slot via `output_offset` (input = arg).
+        if !func.contains_key("output_offset") {
+            continue;
+        }
+        let (Some(in_slot), Some(m)) =
+            (func.get("arg").and_then(|v| v.as_u64()), n.node_id) else { continue };
+        for dep in &n.deps {
+            if fanout_src.get(dep) == Some(&m) {
+                let e = groups.entry((dep.clone(), m)).or_default();
+                e.0.push(n.id.clone());
+                e.1.push(in_slot as u32);
+            }
+        }
+    }
+
+    let mut new_nodes: Vec<SymbolicNode> = groups
+        .into_iter()
+        .map(|((src_id, machine), (consumers, mut slots))| {
+            slots.sort_unstable();
+            slots.dedup();
+            SymbolicNode {
+                id: format!("free_{src_id}_m{machine}"),
+                deps: consumers,
+                node_id: Some(machine),
+                output_slot: None,
+                fanout: None,
+                placement: None,
+                barrier_group: None,
+                split: None,
+                out_weight: None,
+                kind: json!({ "FreeSlots": { "stream": slots } }),
+            }
+        })
+        .collect();
+    new_nodes.sort_by(|a, b| a.id.cmp(&b.id)); // deterministic output
+    nodes.append(&mut new_nodes);
+}
+
 pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Value> {
     // total_nodes is optional in the DAG: the coordinator sets it from the live
     // cluster size before partitioning; the standalone CLI defaults it.  Resolve
@@ -119,6 +186,9 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
 
     // ── 0b. Slot assignment ───────────────────────────────────────────────────
     assign_slots(&mut nodes)?;
+
+    // ── 0c. Auto-reclaim fan-out worker input slots after their consumers run ──
+    inject_fanout_frees(&mut nodes);
 
     // ── 1. Validate ──────────────────────────────────────────────────────────
 

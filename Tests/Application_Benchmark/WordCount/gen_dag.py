@@ -46,7 +46,13 @@ for i in range(N):
                                     "arg2": DIST_BASE + i + MAP_OUT}}})
 
 upstream = [DIST_BASE + i + MAP_OUT for i in range(N)]
+worker_slots = [DIST_BASE + i for i in range(N)]   # input pages, relinked by distribute
 nodes += [
+    # Free the per-worker input slots once every mapper has read them, so the
+    # original input pages (≈1× input) return to the SHM pool before the
+    # aggregate/reduce/output stages instead of leaking for the rest of the run.
+    {"id": "free_input", "deps": map_ids,
+     "kind": {"FreeSlots": {"stream": worker_slots}}},
     {"id": "aggregate", "deps": map_ids,
      "kind": {"Aggregate": {"upstream": upstream, "downstream": AGG_DOWN}}},
     {"id": "reduce", "deps": ["aggregate"],
