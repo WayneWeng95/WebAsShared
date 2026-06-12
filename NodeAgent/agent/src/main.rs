@@ -80,6 +80,15 @@ fn cmd_run(args: &[String]) -> Result<()> {
         python_wasm.as_deref(),
     )?;
 
+    // Rust guest AOT: swap the DAG's wasm_path to the precompiled .cwasm.
+    let dag_json = if aot_mode && !python_mode {
+        let j = apply_rust_aot(dag_json, &executor_bin)?;
+        println!("Mode: WASM (AOT)");
+        j
+    } else {
+        dag_json
+    };
+
     if python_mode {
         println!("Mode: Python{}", if aot_mode { " (AOT)" } else { "" });
     }
@@ -225,7 +234,27 @@ fn cmd_submit(args: &[String]) -> Result<()> {
     // it parses as JSON so obvious typos fail fast on the client.
     serde_json::from_str::<serde_json::Value>(&raw_json)
         .with_context(|| format!("DAG file is not valid JSON: {}", dag_path))?;
-    let cluster_dag_json = raw_json;
+
+    // Rust guest AOT (distributed): point `wasm_path` at the `.cwasm`. We only
+    // rewrite the path here — each worker node loads its OWN `guest.cwasm`
+    // (produced by `build.sh` on that node with its matching host/wasmtime), so
+    // every node's host binary and `.cwasm` must come from the same build.
+    let cluster_dag_json = if aot_mode && !python_mode {
+        let mut v: serde_json::Value = serde_json::from_str(&raw_json)
+            .context("parse DAG for AOT rewrite")?;
+        let cur = v.get("wasm_path").and_then(|x| x.as_str())
+            .unwrap_or(DEFAULT_GUEST_WASM).to_string();
+        if !cur.ends_with(".cwasm") {
+            let cwasm = cur.strip_suffix(".wasm")
+                .map(|b| format!("{b}.cwasm"))
+                .unwrap_or_else(|| format!("{cur}.cwasm"));
+            v["wasm_path"] = serde_json::json!(cwasm);
+        }
+        println!("Mode: WASM (distributed, AOT)");
+        serde_json::to_string(&v).context("serialize AOT-rewritten DAG")?
+    } else {
+        raw_json
+    };
 
     let coord_addr = format!("{}:{}", config.coordinator_ip(), config.cluster.agent_port);
     println!("Submitting job to coordinator at {}...", coord_addr);
@@ -386,6 +415,65 @@ fn has_flag(args: &[String], flag: &str) -> bool {
 
 // ── AOT compilation ────────────────────────────────────────────────────────
 
+/// Default Rust guest module path (when a DAG omits `wasm_path`).
+const DEFAULT_GUEST_WASM: &str =
+    "Executor/target/wasm32-unknown-unknown/release/guest.wasm";
+
+/// Precompile the **Rust guest** `.wasm` → `.cwasm` via the executor's OWN
+/// `compile` subcommand. This is deliberately NOT `aot_compile` (which uses the
+/// standalone `wasmtime` CLI, possibly a different version): the guest `.cwasm`
+/// is loaded by the host via `Module::deserialize_file` and must be produced by
+/// the host's embedded wasmtime with the identical engine `Config`, or it is
+/// rejected. Cached when the `.cwasm` is at least as new as the `.wasm`.
+fn aot_compile_guest(executor_bin: &str, wasm_path: &str) -> Result<String> {
+    let cwasm = wasm_path
+        .strip_suffix(".wasm")
+        .map(|b| format!("{b}.cwasm"))
+        .unwrap_or_else(|| format!("{wasm_path}.cwasm"));
+
+    let fresh = std::fs::metadata(&cwasm)
+        .ok()
+        .zip(std::fs::metadata(wasm_path).ok())
+        .and_then(|(c, w)| Some(c.modified().ok()? >= w.modified().ok()?))
+        .unwrap_or(false);
+    if fresh {
+        println!("[aot] using cached {}", cwasm);
+        return Ok(cwasm);
+    }
+    if !Path::new(wasm_path).exists() {
+        bail!("guest wasm not found for AOT: {}", wasm_path);
+    }
+    println!("[aot] {} compile {} → {}", executor_bin, wasm_path, cwasm);
+    let status = std::process::Command::new(executor_bin)
+        .arg("compile")
+        .arg(wasm_path)
+        .arg(&cwasm)
+        .status()
+        .with_context(|| format!("spawn `{} compile`", executor_bin))?;
+    if !status.success() {
+        bail!("`{} compile {}` failed", executor_bin, wasm_path);
+    }
+    Ok(cwasm)
+}
+
+/// For `--aot` on the Rust guest: rewrite the DAG's `wasm_path` to its AOT
+/// `.cwasm` (precompiling via the executor if needed). No-op if already `.cwasm`.
+fn apply_rust_aot(dag_json: String, executor_bin: &str) -> Result<String> {
+    let mut v: serde_json::Value =
+        serde_json::from_str(&dag_json).context("parse DAG for AOT rewrite")?;
+    let cur = v
+        .get("wasm_path")
+        .and_then(|x| x.as_str())
+        .unwrap_or(DEFAULT_GUEST_WASM)
+        .to_string();
+    if cur.ends_with(".cwasm") {
+        return Ok(dag_json); // already AOT
+    }
+    let cwasm = aot_compile_guest(executor_bin, &cur)?;
+    v["wasm_path"] = serde_json::json!(cwasm);
+    serde_json::to_string(&v).context("serialize AOT-rewritten DAG")
+}
+
 /// Pre-compile a .wasm file to .cwasm (Wasmtime AOT) if not already cached.
 /// Returns the path to the .cwasm file.
 fn aot_compile(wasm_path: &str) -> Result<String> {
@@ -463,14 +551,16 @@ fn print_usage() {
     eprintln!("NodeAgent v0.1.0 — Distributed DAG execution agent");
     eprintln!();
     eprintln!("Usage:");
-    eprintln!("  node-agent run    <dag.json> [--python] [--executor <path>]");
+    eprintln!("  node-agent run    <dag.json> [--python] [--aot] [--executor <path>]");
     eprintln!("  node-agent start  [--config agent.toml]");
     eprintln!("  node-agent submit [--config agent.toml] --dag <file> [--python] [--aot]");
     eprintln!("  node-agent status [--config agent.toml]");
     eprintln!();
     eprintln!("Run flags:");
     eprintln!("  --python                   Execute with Python guest (default: Rust/WASM)");
-    eprintln!("  --aot                      AOT-compile python.wasm to .cwasm (skips JIT at runtime)");
+    eprintln!("  --aot                      Run AOT-precompiled .cwasm (skips per-worker JIT).");
+    eprintln!("                             Rust guest: `host compile` guest.wasm→.cwasm (cached);");
+    eprintln!("                             Python: precompile python.wasm→.cwasm via wasmtime.");
     eprintln!("  --python-script <path>     Python runner script (default: Executor/py_guest/python/runner.py)");
     eprintln!("  --python-wasm <path>       Python WASM runtime (default: /opt/myapp/python-3.12.0.wasm)");
     eprintln!("  --executor <path>          Executor binary (default: {})", common::DEFAULT_EXECUTOR_BIN);
@@ -482,6 +572,7 @@ fn print_usage() {
     eprintln!("  node-agent run DAGs/workload_dag/finra_demo.json --python");
     eprintln!("  node-agent run DAGs/workload_dag/finra_demo.json --python --aot");
     eprintln!("  node-agent run DAGs/workload_dag/word_count_demo.json");
+    eprintln!("  node-agent run DAGs/workload_dag/word_count_demo.json --aot   (Rust guest, AOT)");
     eprintln!("  node-agent run DAGs/demo_dag/img_pipeline_demo.json");
     eprintln!("  node-agent submit --config agent.toml --dag cluster_dags/finra.json");
     eprintln!("  node-agent submit --config agent.toml --dag cluster_dags/finra.json --python");
