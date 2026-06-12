@@ -266,6 +266,7 @@ Start the coordinator and worker daemons, then submit jobs:
 # auto-placement
 
 ./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/symbolic_dag/word_count_auto_placement.json
+./node-agent submit --config NodeAgent/agent_coordinator.toml --dag DAGs/symbolic_dag/word_count_auto_placement.json --aot
 ```
 
 **SymbolicDag** files are detected automatically (by the presence of `"total_nodes"`): the Partitioner runs placement, assigns all slot numbers, injects `RemoteSend`/`RemoteRecv` pairs, and stages any `shared_inputs` files to workers before execution starts. To preview the generated ClusterDag JSON without running a job:
