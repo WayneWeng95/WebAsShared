@@ -129,7 +129,7 @@ curves overlay.
 | Workload | Our side | RMMap | Faasm | Cloudburst | State |
 |----------|----------|-------|-------|------------|-------|
 | WordCount    | native (`word_count.rs`, run-verified) | native | **ported** ✓ | **ported** ✓ | **all 4 have it; eval pending** |
-| FINRA        | native (`finra.rs`)      | native | port needed | port needed | backlog |
-| Matrix       | port needed              | port needed | native | native (summa) | backlog |
+| FINRA        | native (`finra.rs`)      | native | **ported** ✓ | **ported** ✓ | **done; all 4 reproduce gate** |
+| Matrix       | native (`matrix.rs`, SUMMA) | **ES port** ✓ | **ported** ✓ (-like) | **ported** ✓ (summa) | **done; all 4 reproduce gate** |
 | ML training  | native (`ml_training.rs`)| native | native (HOGWILD!) | port needed | backlog |
 | ML inference | port needed (MNIST guest)| native | port (tflite) | port (mobilenet→MNIST) | backlog |

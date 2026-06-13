@@ -83,3 +83,6 @@ cross-node-specific to test). Only deferred work + the benchmark track remain:
 
 [ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto the
     table; Tests/Fan_out_remote/ is the measurement starting point.
+
+
+One more thing: In the partitioner, we can adding an auto snapshot-resume point part which can automatically trigger our key point snapshot-resume feature to asynchronize offload state checkpoints. 

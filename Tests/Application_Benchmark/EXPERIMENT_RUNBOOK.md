@@ -239,6 +239,24 @@ through Redis (the serialization cost). Details in `baseline/cloudburst/README.m
    `client-query-buffer-limit` → 3gb) or large single values reset the connection.
 7. **Don't load the MITOSIS kernel module** (RMMap DMERGE) without explicit
    authorization — it manipulates page tables + RDMA in kernel space.
+8. **Run experiments ONE AT A TIME — never overlap systems.** Each system's sweep
+   must run alone; do not background one system's sweep and start another (or run
+   ad-hoc diagnostics) while it's going. Overlapping runs contend for CPU **and**
+   inflate the out-of-band memory sampler (it sums RSS of *all* matching `host`
+   processes), so timings *and* peak-memory numbers come out wrong — e.g. the
+   Matrix sweep's peak SHM read ~1.1 GB at 1024 under overlap vs ~195 MB run
+   solo. Drive the systems sequentially (one `run.sh` finishes before the next
+   starts); doc edits are fine during a run, CPU work is not.
+9. **Same compute kernel across systems for kernel-bound workloads.** For
+   compute-bound workloads (e.g. matrix-multiply, O(N³)) the GEMM *kernel* — not
+   the inter-stage transfer — dominates end-to-end time. To keep the comparison
+   about the **substrate** (our zero-copy SHM vs the baselines' serialized KV),
+   the Python baselines must use the **same naive kernel** as the WASM ones, NOT
+   tuned BLAS: use `np.einsum('ik,kj->ij', a, b, optimize=False)` (numpy's
+   nested-loop kernel, ~3 GFLOP/s, no BLAS dispatch), never `np.matmul`/`@`
+   (BLAS, 16–110 GFLOP/s). Otherwise the baselines win on kernel speed and the
+   substrate contribution is masked. (Data-movement-bound workloads like
+   WordCount/FINRA don't need this — each system's native kernel is fine there.)
 
 ---
 
