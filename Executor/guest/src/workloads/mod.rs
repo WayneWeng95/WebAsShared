@@ -19,6 +19,7 @@ pub(crate) fn unpack_fanout_arg(arg: u32, default_base: u32) -> (u32, u32) {
 }
 mod img_pipeline;
 mod matrix;
+mod ml_inference;
 mod ml_training;
 mod routing_tests;
 mod stream_pipeline;

@@ -132,4 +132,4 @@ curves overlay.
 | FINRA        | native (`finra.rs`)      | native | **ported** ✓ | **ported** ✓ | **done; all 4 reproduce gate** |
 | Matrix       | native (`matrix.rs`, SUMMA) | **ES port** ✓ | **ported** ✓ (-like) | **ported** ✓ (summa) | **done; all 4 reproduce gate** |
 | ML training  | native (`ml_training.rs`, SGD) | **ES port** ✓ | **ported** ✓ (-like) | **ported** ✓ | **done; all 4 reproduce gate** |
-| ML inference | port needed (MNIST guest)| native | port (tflite) | port (mobilenet→MNIST) | backlog |
+| ML inference | native (`ml_inference.rs`, MNIST) | **ES port** ✓ | **ported** ✓ (-like) | **ported** ✓ | **done; all 4 reproduce gate (WasMem leads on cold/one-shot once pod startup counted; warm-serving caveat noted)** |

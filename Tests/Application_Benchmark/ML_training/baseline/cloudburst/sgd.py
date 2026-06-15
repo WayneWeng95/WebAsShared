@@ -55,15 +55,16 @@ def main():
     uid = 'cb_%d_%d' % (n_samples, W)
     bounds = [(k * N // W, (k + 1) * N // W) for k in range(W)]
     ser_bytes = 0
+    Wt = core.init_weights(F)
+    # Timer starts after the raw file load (staging), before distribution —
+    # matching WasMem's TOTAL compute (counts partition/encode).
+    t0 = time.time()
     # split: each chunk put through the KVS once
     for i, (lo, hi) in enumerate(bounds):
         bx = cp.dumps(np.ascontiguousarray(X[lo:hi]))
         by = cp.dumps(np.ascontiguousarray(y[lo:hi]))
         r.set('%s_x_%d' % (uid, i), bx); r.set('%s_y_%d' % (uid, i), by)
         ser_bytes += len(bx) + len(by)
-
-    Wt = core.init_weights(F)
-    t0 = time.time()
     for _e in range(epochs):
         mbuf = cp.dumps(Wt)
         r.set('%s_model' % uid, mbuf)

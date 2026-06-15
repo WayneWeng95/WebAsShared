@@ -75,15 +75,16 @@ def main():
     # KV state: each shard's raw bytes (the host re-reads them every epoch).
     ser_bytes = 0
     shard_bytes = []
+    Wt = core.init_weights(F)
+    pool = ThreadPoolExecutor(max_workers=W)
+    # Timer starts after the raw file load (staging), before distribution +
+    # Faaslet spawns — matching WasMem's TOTAL compute.
+    t0 = time.time()
     for i, (lo, hi) in enumerate(bounds):
         sb = np.ascontiguousarray(X[lo:hi]).tobytes()
         yb = np.ascontiguousarray(y[lo:hi]).tobytes()
         r.set('%s_x_%d' % (uid, i), sb); r.set('%s_y_%d' % (uid, i), yb)
         shard_bytes.append((len(sb), len(yb), lo, hi))
-
-    Wt = core.init_weights(F)
-    pool = ThreadPoolExecutor(max_workers=W)
-    t0 = time.time()
     for _e in range(epochs):
         mbuf = Wt.astype('<i8').tobytes()
         r.set('%s_model' % uid, mbuf)

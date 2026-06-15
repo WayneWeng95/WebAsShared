@@ -123,17 +123,17 @@ Best end-to-end **training latency** (s, min over W) — the paper figure
 
 | dataset | WasMem | Faasm-like | RMMap-ES | Cloudburst |
 |---------|--------|-----------|----------|------------|
-| 100k    | 0.66   | 1.03      | **0.60** | 1.33       |
-| 300k    | **1.43** | 3.64    | 3.41     | 3.99       |
-| 600k    | **2.66** | 7.92    | 6.67     | 8.56       |
+| 100k    | **0.66** | 1.18    | 0.98     | 1.32       |
+| 300k    | **1.43** | 3.95    | 3.80     | 4.23       |
+| 600k    | **2.66** | 7.85    | 7.43     | 8.33       |
 
 Peak **throughput** (M sample-gradients/s, max over W):
 
 | dataset | WasMem | Faasm-like | RMMap-ES | Cloudburst |
 |---------|--------|-----------|----------|------------|
-| 100k    | 1.51   | 0.97      | **1.65** | 0.75       |
-| 300k    | **2.10** | 0.82    | 0.88     | 0.75       |
-| 600k    | **2.26** | 0.76    | 0.90     | 0.70       |
+| 100k    | **1.51** | 0.85    | 1.02     | 0.76       |
+| 300k    | **2.10** | 0.76    | 0.79     | 0.71       |
+| 600k    | **2.26** | 0.76    | 0.81     | 0.72       |
 
 State **serialized through the KVS** per run (the cost our SHM avoids) — **WasMem = 0**;
 baselines re-serialize the data + model + gradients every epoch:
@@ -144,28 +144,39 @@ baselines re-serialize the data + model + gradients every epoch:
 | 300k    | **0**  | 390 MB | 429 MB | 429 MB |
 | 600k    | **0**  | 779 MB | 857 MB | 857 MB |
 
-> **The result.** With the kernel held identical across all four systems, WebAsShared's
-> zero-copy substrate **wins decisively at 300k and 600k** — ~**2.4–2.5× faster than the next
-> baseline (RMMap-ES)** on latency, and the margin **grows with dataset size**: the baselines
-> re-serialize the data + model + gradients through Redis *every epoch* (130 MB → **857 MB** by
-> 600k), exactly the transfer our SHM page-chain reports as **0**. WasMem also holds the
-> **lowest peak memory** at 600k (249 MB vs 356–435 MB) — the data sits once in SHM instead of
-> being duplicated through Redis + pickle buffers.
+### Timing methodology (fairness)
+
+Latency is measured **apples-to-apples**: the timer starts after the raw training file is read
+from disk (the only "input staging" excluded for every system) and covers **data distribution
+(splitter) + worker startup + the E-epoch loop + gather** — exactly what WasMem's `TOTAL
+compute` covers (its `partition`/`encode` waves + a fresh process spawn per gradient worker).
+So each baseline's timer includes its splitter Redis-writes **and** its worker startup (RMMap's
+`multiprocessing.Pool` of W pods; Faasm's per-shard `wasmtime` spawns; Cloudburst is
+single-process — no fork). The Python-interpreter + numpy-import bootstrap (~870 ms, constant
+and independent of size/epochs) is excluded for all baselines — the analog of WasMem's
+`node-agent` launch, likewise outside `TOTAL compute`. *(An earlier version started the
+baselines' timers after pool creation + the splitter, hiding RMMap's ~400 ms pool cold-start;
+corrected here — it makes the baselines a little slower, widening WasMem's lead.)*
+
+> **The result.** With the kernel held identical and startup counted consistently, WebAsShared's
+> zero-copy substrate **wins at every size on both latency and throughput**, and the margin
+> **grows with dataset size** (~**1.5× at 100k → ~2.8× at 600k** vs the next baseline): the
+> baselines re-serialize the data + model + gradients through Redis *every epoch* (130 MB →
+> **857 MB** by 600k), exactly the transfer our SHM page-chain reports as **0**. WasMem also
+> holds the **lowest peak memory** at 600k (249 MB vs 356–435 MB) — data resident once in SHM,
+> not duplicated through Redis + pickle.
 >
-> At the **smallest size (100k) WasMem essentially ties RMMap-ES** (0.66 s vs 0.60 s) and beats
-> Faasm (1.03 s) and Cloudburst (1.33 s). The residual gap to RMMap is honest: our DAG spawns a
-> *fresh OS process per gradient worker per epoch* (E·W ≈ 160 spawns even with AOT — AOT removes
-> the JIT, not the process+instantiate cost), whereas RMMap reuses a persistent worker pool, and
-> at 100k the ~140 MB of Redis traffic it pays is still cheap relative to that fixed spawn cost.
-> So the substrate advantage **starts neutral when the serialized volume is small and dominates
-> once it is large** — the mirror image of Matrix's nuance (there the zero-copy win *shrank* as
-> O(N³) compute amortized the transfer; here it *grows* as the per-epoch serialized state
-> outpaces a fixed spawn overhead). The WasMem curve flattens past W≈8 at 100k (spawn overhead
-> ≈ parallelism gain), whereas at 600k more workers keep helping.
+> The win compounds two effects, both favouring the substrate as scale grows: (1) the per-epoch
+> serialized volume the baselines pay rises linearly while WasMem pays zero, and (2) WasMem's
+> *fresh-process-per-worker* spawn cost (E·W spawns even with AOT — AOT removes the JIT, not the
+> process+instantiate) is a fixed overhead that amortizes as the dataset grows. At 100k both
+> effects are smallest, so the lead is "only" ~1.5×; by 600k the iterative serialization
+> dominates and it's ~2.8×. (Cf. Matrix's converse nuance, where the zero-copy win *shrank* as
+> O(N³) compute amortized the transfer.)
 >
 > *(Earlier, before the `sgd_encode` parse-once optimization, WasMem re-parsed each text shard
 > every epoch and 100k was a clear loss at 1.11 s; hoisting the parse out of the E-loop ~halved
-> our times and turned 100k into a tie and 300k/600k into ~2.5× wins.)*
+> our times — combined with counting baseline startup, 100k is now a clean WasMem win.)*
 
 ## Plot
 

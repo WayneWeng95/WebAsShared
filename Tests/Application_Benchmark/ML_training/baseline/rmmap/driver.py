@@ -71,18 +71,20 @@ def main():
 
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
     uid = 'sgd_%d_%d' % (n_samples, W)
-    # ── splitter: pickle each contiguous shard into Redis (ES state) ──────────
+    # Timer starts AFTER the raw file load (staging) but BEFORE splitter +
+    # worker startup — matching WasMem's TOTAL compute (counts partition/encode
+    # + per-worker spawns). Only the disk read of the training file is excluded.
     bounds = [(k * N // W, (k + 1) * N // W) for k in range(W)]
     ser_bytes = 0
+    Wt = core.init_weights(F)
+    t0 = time.time()
+    # ── splitter: pickle each contiguous shard into Redis (ES state) ──────────
     for i, (lo, hi) in enumerate(bounds):
         bx = pickle.dumps(np.ascontiguousarray(X[lo:hi]), protocol=_P)
         by = pickle.dumps(np.ascontiguousarray(y[lo:hi]), protocol=_P)
         r.set('%s_x_%d' % (uid, i), bx); r.set('%s_y_%d' % (uid, i), by)
         ser_bytes += len(bx) + len(by)
-
-    Wt = core.init_weights(F)
-    pool = Pool(processes=W)
-    t0 = time.time()
+    pool = Pool(processes=W)                          # worker-pod startup (counted)
     for _e in range(epochs):
         mbuf = pickle.dumps(Wt, protocol=_P)
         r.set('%s_model' % uid, mbuf)

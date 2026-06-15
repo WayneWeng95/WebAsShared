@@ -99,4 +99,8 @@ cross-node-specific to test). Only deferred work + the benchmark track remain:
     runtime/remote/*, so a blind bump enlarges every RDMA registration — needs care).
 
 
+
+    Also adding a single process local node testing for the base performance comparison. 
+
+
 One more thing: In the partitioner, we can adding an auto snapshot-resume point part which can automatically trigger our key point snapshot-resume feature to asynchronize offload state checkpoints. 
