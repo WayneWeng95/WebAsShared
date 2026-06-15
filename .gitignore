@@ -1,17 +1,23 @@
-NodeAgent/target/
-Executor/target/
+# Rust build artifacts (any crate)
+target/
 node-agent
-Executor/.claude/
+
+# Editor / tooling
 .claude/
-Partitioner/target/
+Executor/.claude/
+
+# Test data / output
 TestData/
 TestOutput/
 Tests/Micro-Benchmarks/StateSync-local/.run
 Tests/Micro-Benchmarks/StateSync-remote/.run
 
-# Build artifacts
+# Python build artifacts
 __pycache__/
 *.pyc
+
+# Environment files (may contain secrets)
+*.env
 
 # Regenerable test corpora — create via scripts/gen_corpora.sh.
 # Only the small corpus.txt seed is tracked.
