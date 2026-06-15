@@ -84,5 +84,19 @@ cross-node-specific to test). Only deferred work + the benchmark track remain:
 [ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto the
     table; Tests/Fan_out_remote/ is the measurement starting point.
 
+[ ] [FRAMEWORK] SHM dynamic-growth past INITIAL_SHM_SIZE (64 MiB) is unreliable for the
+    unrolled-DAG / many-subprocess fan-out pattern. Repro: ML_training SGD DAG with i32
+    binary shards at 600k samples (~40 MB binary + ~20 MB text > 64 MiB) — the run reports
+    success (TOTAL compute prints) but validate produces NO output (model chain silently
+    broken), at W=1 too (so not a concurrent-grow race). The growth path EXISTS and is wired
+    (guest page_allocator::try_allocate_page → host_remap → shm::try_grow_shm, geometric
+    doubling to the 2 GiB CAPACITY_HARD_LIMIT; siblings/main re-sync via
+    sync_mapping_to_capacity), so crossing 64 MiB *should* just grow — but in this pattern it
+    corrupts/loses state instead. Worked around in the benchmark by packing features as i8
+    (Tests/Application_Benchmark/ML_training) so total SHM stays < 64 MiB. Options to fix
+    properly: (a) harden the cross-subprocess grow+remap handshake; (b) make INITIAL_SHM_SIZE
+    configurable per-DAG/env (currently a const also used as the RDMA MR size in
+    runtime/remote/*, so a blind bump enlarges every RDMA registration — needs care).
+
 
 One more thing: In the partitioner, we can adding an auto snapshot-resume point part which can automatically trigger our key point snapshot-resume feature to asynchronize offload state checkpoints. 

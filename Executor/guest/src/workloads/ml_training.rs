@@ -286,3 +286,281 @@ pub extern "C" fn ml_validate(agg_slot: u32) {
             "class_{}: feat={} thresh={} train_score={}", cls, feat, thresh, score));
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Synchronous data-parallel SGD — fixed-point, integer-exact, fan-out-invariant.
+//
+// Added ADDITIVELY for the Application_Benchmark (workload #5). It does NOT touch
+// the PCA/decision-stump stages above; it implements the "ML training (SGD)"
+// workload the cross-system suite actually compares (RMMap ml-pipeline / Faasm
+// HOGWILD! / Cloudburst) with a runbook-style correctness gate.
+//
+// Model: a multi-class LINEAR classifier (one weight row per class) trained by
+// full-batch gradient descent on a least-squares (one-hot target) objective —
+// no transcendental functions, so it is reproducible to the bit in ANY language.
+//
+// Why the gate holds (EXPERIMENT_RUNBOOK §1/§5.2):
+//   • The per-epoch gradient is a SUM of per-sample contributions. Integer
+//     addition is associative+commutative, so Σ over the whole dataset is
+//     identical no matter how samples are sharded across workers → the result
+//     is FAN-OUT-INVARIANT (same checksum at every W).
+//   • The single learning-rate division is applied ONCE, centrally, to the
+//     aggregated gradient sum (never per-worker), with toward-zero truncation
+//     (`i64 /`) — replicated bit-for-bit by the Python/WASM baselines → the
+//     result is CROSS-SYSTEM-EXACT.
+//   • All arithmetic is integer i64 → no float drift between Rust-WASM and numpy.
+// Gate value: `weight_checksum` = Σ of all model weights after E epochs.
+//
+// DAG (gen_dag.py unrolls E epochs):
+//   Input(slot 0) → sgd_init → sgd_partition(W) → shards[10..10+W]
+//   per epoch e:  sgd_grad × W (read shard + latest model) → Aggregate → sgd_update
+//   → sgd_validate → Output
+//
+// Model lives in ONE stream slot (SGD_MODEL_SLOT); sgd_update APPENDS the new
+// model each epoch and every worker broadcast-reads the latest (reads are
+// non-destructive pointer traversals, so one slot fans out to all workers).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SGD_MODEL_SLOT: u32 = 1900;  // single slot; new model appended each epoch
+const SGD_TARGET: i64 = 1024;      // fixed-point one-hot target for the true class
+const SGD_LR_K: i64 = 16;          // LR_DEN = n_samples * SGD_LR_K (size-independent step)
+
+/// Toward-zero integer division — matches Rust `i64 /` and the baselines' helper.
+#[inline]
+fn sgd_trunc_div(n: i64, d: i64) -> i64 { if d == 0 { 0 } else { n / d } }
+
+/// Parse a "label,f0,f1,..." data line into (label, features). `None` for
+/// blank / header / non-data lines.
+fn sgd_parse_sample(rec: &[u8]) -> Option<(i64, Vec<i64>)> {
+    let s = core::str::from_utf8(rec).unwrap_or("").trim();
+    if s.is_empty() || s.starts_with("label") || s.starts_with("model")
+        || s.starts_with("grad") { return None; }
+    let mut it = s.split(',');
+    let label: i64 = it.next()?.parse().ok()?;
+    let feats: Vec<i64> = it.map(|v| v.parse().unwrap_or(0)).collect();
+    if feats.is_empty() { return None; }
+    Some((label, feats))
+}
+
+/// Read the latest model record: returns (classes, features, n_samples, lr_den, weights).
+/// `None` before the first sgd_update has written one (epoch 0 sees no model).
+fn sgd_read_model() -> Option<(usize, usize, i64, i64, Vec<i64>)> {
+    let (_o, rec) = ShmApi::read_latest_stream_data(SGD_MODEL_SLOT)?;
+    let s = core::str::from_utf8(&rec).unwrap_or("").trim();
+    let mut it = s.split(',');
+    if it.next()? != "model" { return None; }
+    let c: usize = it.next()?.parse().ok()?;
+    let f: usize = it.next()?.parse().ok()?;
+    let n: i64 = it.next()?.parse().ok()?;
+    let lr_den: i64 = it.next()?.parse().ok()?;
+    let w: Vec<i64> = it.map(|v| v.parse().unwrap_or(0)).collect();
+    if w.len() != c * f { return None; }
+    Some((c, f, n, lr_den, w))
+}
+
+fn sgd_write_model(c: usize, f: usize, n: i64, lr_den: i64, w: &[i64]) {
+    let mut parts = alloc::vec![
+        alloc::string::String::from("model"),
+        alloc::format!("{}", c), alloc::format!("{}", f),
+        alloc::format!("{}", n), alloc::format!("{}", lr_den),
+    ];
+    for v in w { parts.push(alloc::format!("{}", v)); }
+    ShmApi::append_stream_data(SGD_MODEL_SLOT, parts.join(",").as_bytes());
+}
+
+/// Partition: zero-copy contiguous split of input slot 0 into `W` shards at
+/// `base` (arg packs `base | (W<<16)`). The SOLE reader of slot 0 (the input
+/// is consumed once, like word_count's wc_distribute). Same SHM page-chain split.
+#[no_mangle]
+pub extern "C" fn sgd_partition(arg: u32) {
+    let (base, n) = super::unpack_fanout_arg(arg, PARTITION_BASE);
+    if n == 0 { return; }
+    ShmApi::split_input_contiguous(common::INPUT_IO_SLOT, base, n);
+}
+
+// ── Binary shard encoding (parse-once optimization) ───────────────────────────
+// The gradient workers run E times (epochs are unrolled), so parsing the TEXT
+// shard every epoch is the dominant per-epoch cost. `sgd_encode` parses each
+// text shard ONCE into a compact little-endian binary blob; the per-epoch
+// gradient workers then skip text parsing entirely (a flat byte→i32 read, no
+// per-sample String/Vec allocation). One-time work hoisted out of the E-loop —
+// the same trick the baselines get for free by unpickling a binary numpy array.
+//
+// Binary block record: [count:u32][f:u32] then count×([label:i32][f×i8]) (LE).
+// Features are packed as i8 (this workload's values are small, 0..FEAT_MAX) so the
+// binary shard stays SMALLER than the text — keeping total SHM well under the
+// 64 MiB initial pool at the largest sweep size.
+const SGD_BIN_BLK: usize = 4096;
+
+#[inline]
+fn rd_i32(b: &[u8], off: usize) -> i32 {
+    i32::from_le_bytes([b[off], b[off + 1], b[off + 2], b[off + 3]])
+}
+
+fn sgd_flush_block(bin_slot: u32, body: &mut Vec<u8>, count: u32, f: usize) {
+    if count == 0 { return; }
+    let mut rec = Vec::with_capacity(8 + body.len());
+    rec.extend_from_slice(&count.to_le_bytes());
+    rec.extend_from_slice(&(f as u32).to_le_bytes());
+    rec.extend_from_slice(body);
+    ShmApi::append_stream_data(bin_slot, &rec);
+    body.clear();
+}
+
+/// Encode: parse this worker's TEXT shard ONCE into compact binary blocks at
+/// `bin_slot`. `arg` packs `text_slot | (bin_slot << 16)`. Runs once (a wave
+/// after partition), so per-epoch gradient workers never re-parse text.
+#[no_mangle]
+pub extern "C" fn sgd_encode(arg: u32) {
+    let text_slot = arg & 0xFFFF;
+    let bin_slot = arg >> 16;
+    let mut f: usize = 0;
+    let mut body: Vec<u8> = Vec::new();
+    let mut count: u32 = 0;
+    for (_o, rec) in &ShmApi::read_all_stream_records(text_slot) {
+        let (label, feats) = match sgd_parse_sample(rec) { Some(s) => s, None => continue };
+        if f == 0 { f = feats.len(); }
+        if feats.len() != f { continue; }
+        body.extend_from_slice(&(label as i32).to_le_bytes());
+        for &v in &feats { body.push(v as u8); }   // i8 feature (0..FEAT_MAX)
+        count += 1;
+        if count as usize >= SGD_BIN_BLK { sgd_flush_block(bin_slot, &mut body, count, f); count = 0; }
+    }
+    sgd_flush_block(bin_slot, &mut body, count, f);
+}
+
+/// Read F (feature count) from the first binary block's header, or 0 if empty.
+fn sgd_bin_features(recs: &[(u32, Vec<u8>)]) -> usize {
+    recs.iter().find_map(|(_o, b)| if b.len() >= 8 { Some(rd_i32(b, 4) as usize) } else { None })
+        .unwrap_or(0)
+}
+
+/// Gradient worker: read this worker's BINARY shard + the latest model (zero
+/// weights on epoch 0, before any model exists), accumulate the integer gradient
+/// SUM over the shard, emit `grad,count,F,g0,…`. `arg` packs
+/// `bin_slot | (grad_out_slot << 16)`. The shard count + F let sgd_update
+/// bootstrap n_samples / lr_den without re-reading the (consumed) input slot.
+#[no_mangle]
+pub extern "C" fn sgd_grad(arg: u32) {
+    let bin_slot = arg & 0xFFFF;
+    let grad_out = arg >> 16;
+    let recs = ShmApi::read_all_stream_records(bin_slot);
+
+    // Feature count + classes: from the model if present, else from the shard header.
+    let model = sgd_read_model();
+    let c = match &model { Some((c, ..)) => *c, None => N_CLASSES };
+    let f = match &model { Some((_, f, ..)) => *f, None => sgd_bin_features(&recs) };
+    if f == 0 { return; }
+    let zero;
+    let w: &[i64] = match &model { Some((.., w)) => w, None => { zero = alloc::vec![0i64; c * f]; &zero } };
+
+    let mut g = alloc::vec![0i64; c * f];
+    let mut feats = alloc::vec![0i64; f];
+    let mut count: i64 = 0;
+    for (_o, b) in &recs {
+        if b.len() < 8 { continue; }
+        let n = rd_i32(b, 0) as usize;
+        if rd_i32(b, 4) as usize != f { continue; }
+        let mut off = 8;
+        for _ in 0..n {
+            let label = rd_i32(b, off) as i64; off += 4;
+            for j in 0..f { feats[j] = (b[off] as i8) as i64; off += 1; }
+            count += 1;
+            for cls in 0..c {
+                let mut pred: i64 = 0;
+                for j in 0..f { pred += w[cls * f + j] * feats[j]; }
+                let target = if cls as i64 == label { SGD_TARGET } else { 0 };
+                let err = pred - target;
+                for j in 0..f { g[cls * f + j] += err * feats[j]; }
+            }
+        }
+    }
+    let mut parts = alloc::vec![
+        alloc::string::String::from("grad"),
+        alloc::format!("{}", count), alloc::format!("{}", f),
+    ];
+    for v in &g { parts.push(alloc::format!("{}", v)); }
+    ShmApi::append_stream_data(grad_out, parts.join(",").as_bytes());
+}
+
+/// Update: sum every worker's gradient record (aggregated into `arg`'s slot),
+/// take ONE central toward-zero step, append the new model. On epoch 0 (no model
+/// yet) it bootstraps the model: n_samples = Σ worker counts, lr_den = n*SGD_LR_K,
+/// initial weights = 0. The element-wise integer sum + single division is what
+/// makes the result fan-out-invariant.
+#[no_mangle]
+pub extern "C" fn sgd_update(arg: u32) {
+    let recs = ShmApi::read_all_stream_records(arg);
+
+    // First pass: discover F and the total sample count from the grad records.
+    let mut f: usize = 0;
+    let mut n: i64 = 0;
+    for (_o, rec) in &recs {
+        let s = core::str::from_utf8(rec).unwrap_or("").trim();
+        if !s.starts_with("grad,") { continue; }
+        let mut it = s["grad,".len()..].split(',');
+        let cnt: i64 = it.next().and_then(|t| t.parse().ok()).unwrap_or(0);
+        let ff: usize = it.next().and_then(|t| t.parse().ok()).unwrap_or(0);
+        n += cnt;
+        if f == 0 { f = ff; }
+    }
+    if f == 0 { return; }
+
+    let (c, n_model, lr_den, mut w) = match sgd_read_model() {
+        Some((c, _f, nm, lr, w)) => (c, nm, lr, w),
+        None => (N_CLASSES, n, n * SGD_LR_K, alloc::vec![0i64; N_CLASSES * f]),
+    };
+
+    let mut gsum = alloc::vec![0i64; c * f];
+    for (_o, rec) in &recs {
+        let s = core::str::from_utf8(rec).unwrap_or("").trim();
+        if !s.starts_with("grad,") { continue; }
+        // skip the two header fields (count, F), then the c*f gradient values
+        for (k, tok) in s["grad,".len()..].split(',').skip(2).enumerate() {
+            if k < c * f { gsum[k] += tok.parse::<i64>().unwrap_or(0); }
+        }
+    }
+    for k in 0..c * f { w[k] -= sgd_trunc_div(gsum[k], lr_den); }
+    sgd_write_model(c, f, n_model, lr_den, &w);
+}
+
+/// Validate: read all `W` BINARY shards + the final model, compute the weight
+/// checksum (the gate) and train accuracy. `arg` packs `bin_base | (W<<16)`.
+#[no_mangle]
+pub extern "C" fn sgd_validate(arg: u32) {
+    let (base, w_count) = super::unpack_fanout_arg(arg, PARTITION_BASE);
+    let (c, f, n, _lr, w) = match sgd_read_model() { Some(m) => m, None => return };
+    let mut checksum: i64 = 0;
+    for v in &w { checksum += *v; }
+
+    let mut total: i64 = 0;
+    let mut correct: i64 = 0;
+    let mut feats = alloc::vec![0i64; f];
+    for shard in 0..w_count {
+        for (_o, b) in &ShmApi::read_all_stream_records(base + shard) {
+            if b.len() < 8 || rd_i32(b, 4) as usize != f { continue; }
+            let nrec = rd_i32(b, 0) as usize;
+            let mut off = 8;
+            for _ in 0..nrec {
+                let label = rd_i32(b, off) as i64; off += 4;
+                for j in 0..f { feats[j] = (b[off] as i8) as i64; off += 1; }
+                let mut best = 0usize;
+                let mut best_val = i64::MIN;
+                for cls in 0..c {
+                    let mut pred: i64 = 0;
+                    for j in 0..f { pred += w[cls * f + j] * feats[j]; }
+                    if pred > best_val { best_val = pred; best = cls; }
+                }
+                total += 1;
+                if best as i64 == label { correct += 1; }
+            }
+        }
+    }
+    let acc = if total > 0 { correct * 10000 / total } else { 0 };
+    ShmApi::write_output_str("=== sgd_training_results ===");
+    ShmApi::write_output_str(&alloc::format!("classes={} features={} samples={}", c, f, n));
+    ShmApi::write_output_str(&alloc::format!("weight_checksum={}", checksum));
+    ShmApi::write_output_str(&alloc::format!("train_correct={}", correct));
+    ShmApi::write_output_str(&alloc::format!("train_total={}", total));
+    ShmApi::write_output_str(&alloc::format!("accuracy={}.{}%", acc / 100, acc % 100));
+}
