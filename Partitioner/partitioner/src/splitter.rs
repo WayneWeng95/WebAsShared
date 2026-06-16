@@ -417,11 +417,13 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         }
 
         // For each peer that has both a recv and a send on this machine, check
-        // whether adding send→dep of recv is safe (no cycle).
-        let all_peers: Vec<u32> = recvs_by_peer.keys()
+        // whether adding send→dep of recv is safe (no cycle). Sort peers so the
+        // outcome is deterministic regardless of HashMap iteration order.
+        let mut all_peers: Vec<u32> = recvs_by_peer.keys()
             .filter(|p| sends_by_peer.contains_key(p))
             .cloned()
             .collect();
+        all_peers.sort_unstable();
 
         let mut deps_to_add: Vec<(String, String)> = Vec::new();
         for peer in all_peers {
@@ -430,8 +432,18 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
                     // Adding send as dep of recv is safe only if send is NOT
                     // already reachable from recv — i.e. no forward path
                     // recv → … → send exists (which would become a cycle).
+                    //
+                    // Crucially, check against the LIVE succ_map, which includes
+                    // edges committed earlier in this same pass: two send→recv
+                    // edges that are each individually safe against the original
+                    // graph can still combine to close a cycle (e.g. two cross-
+                    // node exchanges that chain recv→…→send through the other's
+                    // newly-added edge). Updating succ_map as we go makes each
+                    // later candidate see the edges already added.
                     if !dag_reachable(&succ_map, recv_id, send_id) {
                         deps_to_add.push((recv_id.clone(), send_id.clone()));
+                        // New edge: send_id → recv_id (recv now depends on send).
+                        succ_map.entry(send_id.clone()).or_default().push(recv_id.clone());
                     }
                 }
             }

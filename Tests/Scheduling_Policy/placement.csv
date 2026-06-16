@@ -1,0 +1,13 @@
+workload,policy,nodes,busy_hosts,imbalance,cross_node_edges,compute_per_host
+word_count,pack,4,4,2,6,6|4|4|4
+word_count,balanced,4,4,2,6,6|4|4|4
+word_count,spread,4,4,2,6,6|4|4|4
+word_count,random,4,4,2,6,6|4|4|4
+finra,pack,4,4,10,60,14|4|4|4
+finra,balanced,4,4,1,82,6|7|7|6
+finra,spread,4,4,6,78,11|5|5|5
+finra,random,4,4,5,76,6|9|7|4
+ml_training,pack,4,4,10,60,16|6|6|6
+ml_training,balanced,4,4,1,82,8|9|9|8
+ml_training,spread,4,4,6,78,13|7|7|7
+ml_training,random,4,4,3,82,10|8|7|9
