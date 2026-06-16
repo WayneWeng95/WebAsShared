@@ -1371,4 +1371,66 @@ mod tests {
         assert_eq!(sink["kind"]["StreamOutput"]["rdma_recv"]["peer"], json!(2));
         assert_eq!(sink["kind"]["StreamOutput"]["slot"], json!(5));
     }
+
+    /// Every node's local DAG must be acyclic, or the executor rejects it at run
+    /// time with "DAG contains a cycle". Returns the offending machine on failure.
+    fn assert_all_node_dags_acyclic(out: &Value) {
+        let node_dags = out["node_dags"].as_object().expect("node_dags object");
+        for (machine, nodes_val) in node_dags {
+            let nodes: Vec<Value> = serde_json::from_value(nodes_val.clone()).unwrap();
+            let present: HashSet<&str> =
+                nodes.iter().filter_map(|n| n["id"].as_str()).collect();
+            // Kahn's algorithm over intra-node deps (deps outside this machine,
+            // e.g. cross-node slots, are not local edges and are ignored).
+            let mut indeg: HashMap<&str, usize> = present.iter().map(|&id| (id, 0)).collect();
+            let mut succ: HashMap<&str, Vec<&str>> = HashMap::new();
+            for n in &nodes {
+                let id = n["id"].as_str().unwrap();
+                for dep in n["deps"].as_array().into_iter().flatten() {
+                    if let Some(d) = dep.as_str() {
+                        if present.contains(d) {
+                            *indeg.get_mut(id).unwrap() += 1;
+                            succ.entry(d).or_default().push(id);
+                        }
+                    }
+                }
+            }
+            let mut queue: VecDeque<&str> =
+                indeg.iter().filter(|(_, &d)| d == 0).map(|(&id, _)| id).collect();
+            let mut sorted = 0usize;
+            while let Some(u) = queue.pop_front() {
+                sorted += 1;
+                for &v in succ.get(u).into_iter().flatten() {
+                    let e = indeg.get_mut(v).unwrap();
+                    *e -= 1;
+                    if *e == 0 { queue.push_back(v); }
+                }
+            }
+            assert_eq!(
+                sorted, present.len(),
+                "node_dags[\"{}\"] contains a cycle ({} of {} nodes topo-sorted)",
+                machine, sorted, present.len()
+            );
+        }
+    }
+
+    const FINRA_SANDWICH_SYMBOLIC: &str =
+        include_str!("../tests/finra_sandwich_symbolic.json");
+
+    /// Regression: a `placement:"all"` producer → AUTO-placed fan → `placement:"all"`
+    /// per-machine aggregator → distributed convergence tail (the finra/ml_training
+    /// shape) used to emit a CYCLIC ClusterDag under any distributing policy. The
+    /// wave-0 deadlock-prevention pass added two `send→recv` ordering edges that were
+    /// each individually safe against the original graph but together closed a loop,
+    /// because the cycle check ran against a `succ_map` frozen at the original deps.
+    /// The fix updates `succ_map` as edges are committed. Every node_dag must
+    /// topo-sort.
+    #[test]
+    fn sandwich_placement_is_acyclic() {
+        let dag = SymbolicDag::from_json(FINRA_SANDWICH_SYMBOLIC).expect("parse");
+        // No external hints → the DAG's embedded `balanced` policy distributes the
+        // rule fan across all 4 nodes, which is the condition that produced the cycle.
+        let out = partition(&dag, None).expect("partition");
+        assert_all_node_dags_acyclic(&out);
+    }
 }
