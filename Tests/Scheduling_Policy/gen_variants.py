@@ -57,7 +57,7 @@ def source_dag(workload: str) -> str:
     return os.path.join(ROOT, "DAGs", "symbolic_dag", f"{workload}_auto_placement.json")
 
 
-def build(workload: str, policy: str, nodes: int) -> dict:
+def build(workload: str, policy: str, nodes: int, input_path: str | None = None) -> dict:
     if workload not in FAN_PREFIX:
         sys.exit(f"unknown workload {workload!r}; expected one of {list(FAN_PREFIX)}")
     if policy not in POLICIES:
@@ -71,6 +71,19 @@ def build(workload: str, policy: str, nodes: int) -> dict:
 
     d["total_nodes"] = nodes
     d["placement_policy"] = policy
+
+    # Optional input-size override: rewrite every Input node's `path`. The
+    # partitioner re-derives shared_inputs from these, so the override propagates
+    # to RDMA staging automatically. Used by the word_count size sweep.
+    if input_path is not None:
+        touched = 0
+        for n in d.get("nodes", []):
+            k = n.get("kind", {})
+            if isinstance(k, dict) and "Input" in k and "path" in k["Input"]:
+                k["Input"]["path"] = input_path
+                touched += 1
+        if touched == 0:
+            sys.exit(f"[gen] no Input node with a 'path' in {workload} to override")
 
     fan = FAN_PREFIX[workload]
     if fan is not None:
@@ -92,10 +105,11 @@ def main() -> int:
     ap.add_argument("workload", choices=list(FAN_PREFIX))
     ap.add_argument("policy", choices=POLICIES)
     ap.add_argument("--nodes", type=int, default=4)
+    ap.add_argument("--input", default=None, help="override Input node path (size sweep)")
     ap.add_argument("--out", default=None, help="output path (default: stdout)")
     args = ap.parse_args()
 
-    d = build(args.workload, args.policy, args.nodes)
+    d = build(args.workload, args.policy, args.nodes, args.input)
     text = json.dumps(d, indent=2)
     if args.out:
         with open(args.out, "w") as f:

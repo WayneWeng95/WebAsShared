@@ -1,168 +1,150 @@
-# Scheduling_Policy — impact of placement policy on a 4-node cluster
+# Scheduling_Policy — placement policy vs. input size (word_count)
 
 Sweeps the partitioner's **placement policy** — `pack`, `balanced`, `spread`,
-`random` — across three workloads (**word_count**, **finra**, **ml_training**) on
-a **4-node** cluster, and measures how the placement decision moves end-to-end
-latency and cross-node RDMA traffic.
+`random` — against **input corpus size** for the **word_count** workload on a
+**4-node** cluster, and compares it to a multi-node **Faasm-like** baseline.
 
-Node convention (same as the other cluster tests): node-0 = `10.10.1.2`
-(coordinator), node-1 = `10.10.1.1`, node-2 = `10.10.1.3`, node-3 = `10.10.1.4`,
-as listed in `NodeAgent/agent.toml`.
+Node convention: node-0 = `10.10.1.2` (coordinator), node-1 = `10.10.1.1`,
+node-2 = `10.10.1.3`, node-3 = `10.10.1.4` (see `NodeAgent/agent.toml`).
+
+> **Scope note.** This experiment currently covers **word_count only**.
+> finra and ml_training are deferred: auto-placing their parallel fan under a
+> *distributing* policy makes the executor deadlock at runtime in the cross-node
+> many-to-many RDMA gather (a `placement:"all"` per-machine aggregator pulling
+> from a scattered fan). `pack` is the only policy that runs them today. See
+> "Status / deferred work" below.
 
 ---
 
-## What "policy" means here
+## What "policy" means
 
-The policy lives in the **Partitioner** (`Partitioner/partitioner/src/policies.rs`)
-and is selected per-DAG via the `placement_policy` field:
+The policy lives in the Partitioner (`Partitioner/partitioner/src/policies.rs`),
+selected per-DAG via `placement_policy`:
 
-| policy     | rule                                                        |
-|------------|-------------------------------------------------------------|
+| policy     | rule                                                          |
+|------------|---------------------------------------------------------------|
 | `pack`     | concentrate auto-placed nodes on the single most-capable host |
-| `balanced` | spread proportionally across all hosts                      |
-| `spread`   | at most one auto-placed node per host                       |
-| `random`   | each auto-placed node to a uniformly random host            |
+| `balanced` | spread proportionally across all hosts                        |
+| `spread`   | at most one auto-placed node per host                         |
+| `random`   | each auto-placed node to a uniformly random host              |
 
-(The coordinator's live SCX advisor — `NodeAgent/scheduler/` with the
-`ADVISOR_W_*` weights in `NodeAgent/common/src/lib.rs` — is a *separate*, fifth
-strategy. This experiment isolates the four named policies; see "Why offline"
-below for how we keep the advisor from overriding them.)
+### word_count is the policy-INSENSITIVE control
 
----
+word_count's heavy stages use `placement:"all"` (the partitioner replicates them
+on *every* host regardless of policy), and its only auto-placed nodes — the
+convergence tail — are pinned to node 0 by `converge_on_coordinator`. So all four
+policies place the work **identically**. Confirmed earlier: at 500 MB the four
+policies landed within ~2.6 % of each other (8070–8282 ms).
 
-## Two things you must know (they shaped this harness)
+That makes word_count a clean **control**: sweeping input size shows
+(a) how the system scales with corpus size, and (b) that placement policy does
+**not** move latency at any size. Any divergence across policies here would
+indicate noise or a real placement effect leaking in — useful either way.
 
-**1. The stock `_auto_placement` DAGs are policy-INSENSITIVE.**
-Their heavy parallel stages use `placement: "all"`, so the partitioner replicates
-them on *every* host no matter the policy; the only auto-placed nodes are the
-convergence tail, which `converge_on_coordinator` pins to node 0. Result: all
-four policies place work identically. To make the policy matter, `gen_variants.py`
-**auto-places the parallel fan**:
-
-- `finra`       → the 8 `rule_*` audit rules become auto-placed
-- `ml_training` → the 8 `train_*` SGD shards become auto-placed
-- `word_count`  → **left unchanged — it is the CONTROL.** Its `map_n` fan is welded
-  to `wc_distribute`'s output-slot layout and cannot be auto-placed without
-  restructuring. Seeing it stay flat while the other two move *is a result*:
-  workloads dominated by `placement:"all"` stages don't respond to placement
-  policy.
-
-**2. Why offline pre-partitioning.**
-On a live cluster the coordinator hands the partitioner SCX-derived capacity
-hints, and `hints.or(policy_hints)` (`splitter.rs:142`) means those hints
-**override** the embedded `placement_policy`. So we partition **offline** with the
-`partition` binary (no `--hints`), which makes the policy authoritative, and
-submit the finished `ClusterDag`. `resolve_dag()` sees a pre-partitioned DAG and
-passes it through unchanged — the policy is preserved exactly.
+(Why offline pre-partitioning is still used: on a live cluster the coordinator's
+SCX hints would override the embedded policy — `splitter.rs`,
+`hints.or(policy_hints)`. Pre-partitioning with the `partition` binary keeps the
+policy authoritative and the cluster_dag is passed through unchanged.)
 
 ---
 
 ## Files
 
-| file                 | role                                                       |
-|----------------------|------------------------------------------------------------|
-| `gen_variants.py`    | emit a policy-sensitive SymbolicDag for one (workload,policy) |
-| `placement_stats.py` | static decision metrics (imbalance, cross-node edges) of a ClusterDag |
-| `prepartition.sh`    | generate + offline-partition all 12 cells → `cluster_dags/`, write `placement.csv` |
-| `run_sweep.sh`       | submit each ClusterDag to the live cluster, time it → `results.csv` |
-| `analyze.py`         | join decision + latency → `summary.csv` and a per-workload table |
+| file                 | role                                                           |
+|----------------------|----------------------------------------------------------------|
+| `wc_size_sweep.sh`   | the experiment: (size × policy) → pre-partition, submit, time → `results_wc_size.csv` |
+| `gen_variants.py`    | emit a policy variant of a workload; `--input PATH` overrides corpus size |
+| `placement_stats.py` | static placement metrics (imbalance, cross-node edges) of a ClusterDag |
 
-Generated (gitignored): `variants/`, `cluster_dags/`, `logs/`,
-`placement.csv`, `results.csv`, `summary.csv`.
+Generated (gitignored): `cluster_dags/`, `logs_wc_size/`.
+`gen_variants.py` still carries finra/ml_training support for the deferred work.
 
 ---
 
-## Run it
+## Run
 
-### Step 1 — pre-partition (LOCAL, no cluster needed)
-
-```bash
-cd Tests/Scheduling_Policy
-./prepartition.sh 4         # 4 = node count
-```
-
-Writes `cluster_dags/<wl>__<policy>.json` and `placement.csv`. You can inspect the
-scheduling decisions immediately:
-
-```bash
-python3 analyze.py          # placement columns only, latency blank
-```
-
-Expected (decision metrics are deterministic):
-
-```
-=== finra ===
-policy     busy  imbal  edges compute/host
-pack          4     10     60 14|4|4|4      ← concentrated, fewest RDMA edges
-spread        4      6     78 11|5|5|5
-random        4      4     80 9|5|6|6
-balanced      4      1     82 6|7|7|6        ← even, most RDMA edges
-```
-
-word_count stays `6|4|4|4` across all four policies — the control.
-
-### Step 2 — measure on the cluster
-
-Prerequisites (do these yourself):
-
-1. Same commit + `./build.sh` on all 4 nodes.
-2. Start the agent on every node (identical command — role auto-detected):
-   ```bash
-   # node-0 (10.10.1.2, coordinator), node-1, node-2, node-3:
-   ./node-agent start --config NodeAgent/agent.toml
-   ```
-3. Stage each workload's input on **node-0** (the coordinator RDMA-stages
-   `shared_inputs` to the workers). The DAGs read, e.g.,
-   `TestData/corpus_xlarge.txt` (word_count) and the finra / ml_training datasets
-   under `Benchmarks/RMMap/`.
-
-Then sweep:
+Prerequisites: cluster up (coordinator + 3 workers), corpora on **node-0**:
+`TestData/corpus_large.txt` (50 MB), `corpus_xlarge.txt` (500 MB),
+`corpus.txt` (1 GB). The coordinator RDMA-stages them to the workers.
 
 ```bash
 cd Tests/Scheduling_Policy
-./run_sweep.sh 5                       # 5 repeats/cell, median reported
+./wc_size_sweep.sh 3                       # 3 sizes × 4 policies × 3 reps (median)
 # subset:
-WORKLOADS="finra ml_training" POLICIES="pack balanced" ./run_sweep.sh 5
+SIZES="corpus_large.txt corpus_xlarge.txt" POLICIES="pack balanced" ./wc_size_sweep.sh 5
 ```
 
-`run_sweep.sh` submits each pre-partitioned ClusterDag, measures end-to-end
-wall-clock (submit → JobResult), and writes `results.csv`. Per-run agent output is
-kept in `logs/` (grep for `[DAG][timing] TOTAL compute` there if you want
-compute-only timing instead of wall-clock).
+Output `results_wc_size.csv`:
 
-### Step 3 — analyze
-
-```bash
-python3 analyze.py
+```
+size_mb,corpus,policy,wall_ms_median,wall_ms_min,wall_ms_max,maxcompute_ms_median,throughput_mb_s,success,reps
 ```
 
-Joins `placement.csv` + `results.csv` into `summary.csv` and prints, per workload,
-the policies sorted by latency plus the headline `balanced vs pack` delta.
+- `wall_ms_*`     end-to-end latency (coordinator-reported "total wall time", median of N)
+- `maxcompute_ms` slowest per-node compute (straggler) from the job Summary
+- `throughput_mb_s` = size_mb / (wall_ms/1000)
+
+Expected shape: latency grows ~linearly with size; the four policies overlap at
+every size (the control holding across the size axis).
 
 ---
 
-## Metrics
+## Baseline — multi-node Faasm-like word_count (TO BUILD)
 
-| column             | meaning                                                      |
-|--------------------|--------------------------------------------------------------|
-| `busy_hosts`       | hosts that received ≥1 compute sandbox                       |
-| `imbalance`        | max−min compute sandboxes across hosts (0 = perfectly even)  |
-| `cross_node_edges` | RemoteSend/RemoteRecv endpoints = cross-host RDMA wiring     |
-| `compute_per_host` | compute sandboxes on host 0\|1\|2\|3                         |
-| `wall_ms_median`   | end-to-end latency (submit → result), median of N repeats    |
+To make the numbers comparable we need a baseline that runs the **same**
+map-reduce word_count across the **same** 4 nodes, but with a different system's
+data-movement model. **Reuse the existing Faasm-like WordCount baseline** — don't
+write a new one — at:
 
-**The story:** `pack` minimizes cross-node edges but piles work on one host (high
-imbalance → CPU bottleneck); `balanced` evens the load but pays maximal RDMA
-traffic; `spread`/`random` sit between. Which one wins on latency depends on
-whether the workload is CPU-bound (favors `balanced`) or network-bound (favors
-`pack`) — that trade-off is exactly what the cluster run reveals.
+```
+Tests/Inter-Node Application_Benchmark/WordCount/baseline/faasm/demo/
+  wc.rs / wc.cwasm   the Faaslet WASM module (map + reduce), AOT-compiled
+  driver.py          orchestrates Faaslets, moves state through Redis KV
+  run.sh             sweeps size × fan-out N → results.csv
+```
 
-## Tweaking further
+That baseline already models the Faasm mechanism we want to contrast: each
+map/reduce stage is a fresh `wasmtime` Faaslet running `wc.cwasm`, and the driver
+ships corpus chunks + partial counts through **Redis KV** (`chunk_<i>` → mappers →
+`partial_<i>` → reducer). The serialized KV blobs are exactly the inter-stage
+transfer our zero-copy RDMA/SHM page-chain avoids. It already sweeps the **same**
+corpus sizes {50, 500, 1000 MB} and emits the same CSV column shape — so its rows
+line up against `results_wc_size.csv` directly.
 
-- **Different policy mix / weights:** edit `POLICIES` in the scripts, or add a
-  `weighted` cell — `gen_variants.py` can be extended to emit
-  `{"type":"weighted","weights":[...]}`.
-- **The live advisor instead of static policies:** change the `ADVISOR_W_*`
-  weights in `NodeAgent/common/src/lib.rs`, rebuild, and submit the *raw*
-  SymbolicDags (not the pre-partitioned ones) so the coordinator's hints apply.
-- **Node count:** `./prepartition.sh N` and update `NodeAgent/agent.toml` IPs.
+**Only change needed to make it multi-node** (reusing `wc.cwasm` + `driver.py`
+unchanged as far as possible):
+
+1. **One shared Redis on node-0** (`redis-server --bind 0.0.0.0`); point every
+   node's driver at `REDIS_HOST=10.10.1.2`. The KV transfer now crosses the
+   network — the realistic distributed-Faasm behaviour (state shipped through the
+   store between nodes), vs. our RDMA path. `driver.py` already takes
+   `REDIS_HOST/PORT`, so this is config, not code.
+2. **Place mapper Faaslets across the 4 nodes** instead of all-local: have the
+   driver launch mapper `i` on node `i % 4` (the only real code change — a remote
+   `wasmtime` launch; SSH/`node-agent` exec, whichever is already wired). Mapper
+   still reads its `chunk_<i>` and writes `partial_<i>` through the shared Redis,
+   so its logic is untouched. Splitter/reducer stay on node-0.
+3. **Same axes, same columns:** corpus size {50, 500, 1000 MB} × fan-out N. Faasm
+   has no placement-policy analogue — that's the point: it's the "no placement
+   control" reference our four policies are measured against.
+
+Deliverable: extend the demo's `run.sh` with a `NODES=`/remote-dispatch mode (or a
+thin wrapper next to it) emitting `results_baseline.csv` in the shared shape — then
+plot ours-vs-Faasm latency and throughput against corpus size. The headline
+contrast: our page-chain moves state zero-copy between nodes; Faasm serializes it
+through the KV, so the gap should widen with corpus size.
+
+---
+
+## Status / deferred work
+
+- ✅ **Partitioner cycle fixed.** Distributing policies used to emit a *cyclic*
+  per-node DAG (rejected at run time with "DAG contains a cycle"). Fixed in
+  `splitter.rs` (the wave-0 deadlock-prevention pass now updates its reachability
+  map incrementally); regression test `sandwich_placement_is_acyclic`.
+- ⏳ **finra / ml_training distributing policies** still **deadlock at runtime**
+  in the executor's cross-node many-to-many gather (separate, deeper issue in
+  `Executor/host`). Only `pack` runs them. Revisit when extending past
+  word_count.
+- ⏳ **Coordinator robustness:** a hung job currently crashes the coordinator
+  rather than timing out cleanly — worth hardening before long unattended sweeps.
