@@ -1,0 +1,7 @@
+size_mb,workers,topo,compute_ms,throughput_mb_s,words_per_s,peak_mem_mb,reps,total_occurrences
+50,1,bare-metal,3461.54,14.4,2582763,162.2,1,8940339
+50,4,bare-metal,4935.52,10.1,1811428,257.1,1,8940339
+50,16,bare-metal,5630.96,8.9,1587711,232.4,1,8940339
+500,1,bare-metal,34029.09,14.7,2627264,612.4,1,89403388
+500,4,bare-metal,48831.32,10.2,1830862,905.8,1,89403388
+500,16,bare-metal,50906.83,9.8,1756216,1312.3,1,89403388

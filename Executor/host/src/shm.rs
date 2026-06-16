@@ -4,7 +4,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::num::NonZeroUsize;
 use std::sync::{Mutex, OnceLock};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use common::*;
 
@@ -66,13 +66,45 @@ pub fn expand_mapping(file: &File, addr: usize, new_size: usize) -> Result<()> {
 /// Registered once at startup by `register_shm_for_growth`.
 static SHM_GROW: OnceLock<Mutex<(File, usize)>> = OnceLock::new();
 
+/// The capacity (bytes) THIS process currently has mmap'd at `splice_addr`.
+///
+/// Distinct from the superblock's `global_capacity`: that is the cluster-/file-
+/// wide capacity any process may have grown the SHM to, whereas this tracks the
+/// extent of *our* local VMA.  A subprocess can grow the file (advancing
+/// `global_capacity`) while our mapping stays at its old, smaller size — reads
+/// past `MAPPED_CAP` then land in the zero-filled wasm-reserved region (silent
+/// data loss).  `sync_mapping_if_grown` uses this to remap exactly when, and
+/// only when, the file outgrew our mapping.
+static MAPPED_CAP: AtomicU32 = AtomicU32::new(INITIAL_SHM_SIZE);
+
 /// Register the SHM file for host-driven capacity growth.
 ///
 /// Must be called once per process after `setup_vma_environment` sets
 /// the `splice_addr`.  Any subsequent call is silently ignored (the
 /// `OnceLock` keeps only the first registration).
 pub fn register_shm_for_growth(file: File, splice_addr: usize) {
+    // The main process maps INITIAL_SHM_SIZE at startup (setup_vma_environment),
+    // so seed the tracker to match before any growth occurs.
+    MAPPED_CAP.store(INITIAL_SHM_SIZE, Ordering::Release);
     let _ = SHM_GROW.set(Mutex::new((file, splice_addr)));
+}
+
+/// Re-sync THIS process's mapping to `global_capacity`, but ONLY when the file
+/// has been grown past what we currently have mapped.  Cheap to call on a hot
+/// path: the common case is a single relaxed atomic compare with no syscall.
+///
+/// Use this in the main DAG-runner process before host-side operations that
+/// read or walk SHM page chains (Aggregate, Output, reclamation): a worker
+/// subprocess in a prior wave may have grown the SHM via `host_remap`, leaving
+/// our mapping stale.  Unlike `sync_mapping_to_capacity` this skips the mmap
+/// syscall when nothing grew, so it is safe to call once per wave.
+pub fn sync_mapping_if_grown(splice_addr: usize) -> Result<()> {
+    let sb = unsafe { &*(splice_addr as *const Superblock) };
+    let cap = sb.global_capacity.load(Ordering::Acquire);
+    if cap <= MAPPED_CAP.load(Ordering::Acquire) {
+        return Ok(()); // our mapping already covers the file — nothing to do
+    }
+    sync_mapping_to_capacity(splice_addr)
 }
 
 /// Re-sync THIS process's mapping to the superblock's current `global_capacity`.
@@ -95,7 +127,9 @@ pub fn sync_mapping_to_capacity(splice_addr: usize) -> Result<()> {
     if (file.metadata()?.len() as usize) < cap {
         file.set_len(cap as u64)?;
     }
-    map_into_memory(file, *base, cap)
+    map_into_memory(file, *base, cap)?;
+    MAPPED_CAP.store(cap as ShmOffset, Ordering::Release);
+    Ok(())
 }
 
 /// Grow the SHM file so that at least `required` bytes are accessible.
@@ -137,6 +171,7 @@ pub fn try_grow_shm(splice_addr: usize, required: ShmOffset) -> Result<ShmOffset
     }
 
     expand_mapping(file, *base, new_cap as usize)?;
+    MAPPED_CAP.store(new_cap, Ordering::Release);
     sb.global_capacity.store(new_cap, Ordering::Release);
     eprintln!(
         "[SHM] grew: {} MiB → {} MiB",

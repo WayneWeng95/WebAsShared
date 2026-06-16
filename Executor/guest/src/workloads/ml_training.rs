@@ -386,10 +386,13 @@ pub extern "C" fn sgd_partition(arg: u32) {
 // per-sample String/Vec allocation). One-time work hoisted out of the E-loop —
 // the same trick the baselines get for free by unpickling a binary numpy array.
 //
-// Binary block record: [count:u32][f:u32] then count×([label:i32][f×i8]) (LE).
-// Features are packed as i8 (this workload's values are small, 0..FEAT_MAX) so the
-// binary shard stays SMALLER than the text — keeping total SHM well under the
-// 64 MiB initial pool at the largest sweep size.
+// Binary block record: [count:u32][f:u32] then count×([label:i32][f×i32]) (LE).
+// Features are stored as full i32 — the natural width for arbitrary integer
+// feature data. At the largest sweep sizes this pushes total SHM past the
+// 64 MiB initial pool, which is now handled correctly by the host's per-wave
+// mapping re-sync (dag_runner::sync_mapping_if_grown); see problems.md. The old
+// i8 packing was a workaround for a latent SHM-growth bug and is no longer
+// needed.
 const SGD_BIN_BLK: usize = 4096;
 
 #[inline]
@@ -422,7 +425,7 @@ pub extern "C" fn sgd_encode(arg: u32) {
         if f == 0 { f = feats.len(); }
         if feats.len() != f { continue; }
         body.extend_from_slice(&(label as i32).to_le_bytes());
-        for &v in &feats { body.push(v as u8); }   // i8 feature (0..FEAT_MAX)
+        for &v in &feats { body.extend_from_slice(&(v as i32).to_le_bytes()); }   // i32 feature
         count += 1;
         if count as usize >= SGD_BIN_BLK { sgd_flush_block(bin_slot, &mut body, count, f); count = 0; }
     }
@@ -464,7 +467,7 @@ pub extern "C" fn sgd_grad(arg: u32) {
         let mut off = 8;
         for _ in 0..n {
             let label = rd_i32(b, off) as i64; off += 4;
-            for j in 0..f { feats[j] = (b[off] as i8) as i64; off += 1; }
+            for j in 0..f { feats[j] = rd_i32(b, off) as i64; off += 4; }
             count += 1;
             for cls in 0..c {
                 let mut pred: i64 = 0;
@@ -543,7 +546,7 @@ pub extern "C" fn sgd_validate(arg: u32) {
             let mut off = 8;
             for _ in 0..nrec {
                 let label = rd_i32(b, off) as i64; off += 4;
-                for j in 0..f { feats[j] = (b[off] as i8) as i64; off += 1; }
+                for j in 0..f { feats[j] = rd_i32(b, off) as i64; off += 4; }
                 let mut best = 0usize;
                 let mut best_val = i64::MIN;
                 for cls in 0..c {

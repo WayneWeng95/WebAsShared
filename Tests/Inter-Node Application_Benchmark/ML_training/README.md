@@ -80,12 +80,13 @@ JIT).
 > **Parse-once optimization (`sgd_encode`).** Because the E epochs are unrolled, naively
 > re-reading + re-parsing each worker's TEXT shard *every* epoch was the dominant per-epoch
 > cost. A one-time `sgd_encode` stage parses each shard ONCE into a compact little-endian
-> binary blob (label `i32` + features `i8`); the per-epoch gradient workers then do a flat
+> binary blob (label `i32` + features `i32`); the per-epoch gradient workers then do a flat
 > byte→int read with no per-sample `String`/`Vec` allocation — the same advantage the
 > baselines get for free by unpickling a binary numpy array. This ~**doubled** our throughput
-> at every size (e.g. 600k/W=16: 5.0 s → 2.66 s) with the checksum gate unchanged. The `i8`
-> feature packing also keeps total SHM under the 64 MiB initial pool at 600k (the `i32` form
-> overflowed it and exposed a latent SHM-growth bug — see `problems.md`).
+> at every size (e.g. 600k/W=16: 5.0 s → 2.85 s) with the checksum gate unchanged. At 600k the
+> `i32` form pushes total SHM past the 64 MiB initial pool; the host now re-syncs its SHM
+> mapping per wave after a worker grows the file (`dag_runner::sync_mapping_if_grown`), so the
+> growth is handled correctly. 
 
 > **Framework note (additive, no edits to existing stages):** a `Func` node passes the guest
 > only **one** u32 (`Func`→`WasmVoid` keeps `arg`, drops `arg2`), so `sgd_grad` packs
@@ -123,17 +124,17 @@ Best end-to-end **training latency** (s, min over W) — the paper figure
 
 | dataset | WasMem | Faasm-like | RMMap-ES | Cloudburst |
 |---------|--------|-----------|----------|------------|
-| 100k    | **0.66** | 1.18    | 0.98     | 1.32       |
-| 300k    | **1.43** | 3.95    | 3.80     | 4.23       |
-| 600k    | **2.66** | 7.85    | 7.43     | 8.33       |
+| 100k    | **0.63** | 1.18    | 0.98     | 1.32       |
+| 300k    | **1.64** | 3.95    | 3.80     | 4.23       |
+| 600k    | **2.85** | 7.85    | 7.43     | 8.33       |
 
 Peak **throughput** (M sample-gradients/s, max over W):
 
 | dataset | WasMem | Faasm-like | RMMap-ES | Cloudburst |
 |---------|--------|-----------|----------|------------|
-| 100k    | **1.51** | 0.85    | 1.02     | 0.76       |
-| 300k    | **2.10** | 0.76    | 0.79     | 0.71       |
-| 600k    | **2.26** | 0.76    | 0.81     | 0.72       |
+| 100k    | **1.59** | 0.85    | 1.02     | 0.76       |
+| 300k    | **1.83** | 0.76    | 0.79     | 0.71       |
+| 600k    | **2.11** | 0.76    | 0.81     | 0.72       |
 
 State **serialized through the KVS** per run (the cost our SHM avoids) — **WasMem = 0**;
 baselines re-serialize the data + model + gradients every epoch:
@@ -160,10 +161,10 @@ corrected here — it makes the baselines a little slower, widening WasMem's lea
 
 > **The result.** With the kernel held identical and startup counted consistently, WebAsShared's
 > zero-copy substrate **wins at every size on both latency and throughput**, and the margin
-> **grows with dataset size** (~**1.5× at 100k → ~2.8× at 600k** vs the next baseline): the
+> **grows with dataset size** (~**1.5× at 100k → ~2.6× at 600k** vs the next baseline): the
 > baselines re-serialize the data + model + gradients through Redis *every epoch* (130 MB →
 > **857 MB** by 600k), exactly the transfer our SHM page-chain reports as **0**. WasMem also
-> holds the **lowest peak memory** at 600k (249 MB vs 356–435 MB) — data resident once in SHM,
+> holds the **lowest peak memory** at 600k (331 MB vs 356–435 MB) — data resident once in SHM,
 > not duplicated through Redis + pickle.
 >
 > The win compounds two effects, both favouring the substrate as scale grows: (1) the per-epoch
@@ -171,7 +172,7 @@ corrected here — it makes the baselines a little slower, widening WasMem's lea
 > *fresh-process-per-worker* spawn cost (E·W spawns even with AOT — AOT removes the JIT, not the
 > process+instantiate) is a fixed overhead that amortizes as the dataset grows. At 100k both
 > effects are smallest, so the lead is "only" ~1.5×; by 600k the iterative serialization
-> dominates and it's ~2.8×. (Cf. Matrix's converse nuance, where the zero-copy win *shrank* as
+> dominates and it's ~2.6×. (Cf. Matrix's converse nuance, where the zero-copy win *shrank* as
 > O(N³) compute amortized the transfer.)
 >
 > *(Earlier, before the `sgd_encode` parse-once optimization, WasMem re-parsed each text shard

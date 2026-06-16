@@ -84,19 +84,29 @@ cross-node-specific to test). Only deferred work + the benchmark track remain:
 [ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto the
     table; Tests/Fan_out_remote/ is the measurement starting point.
 
-[ ] [FRAMEWORK] SHM dynamic-growth past INITIAL_SHM_SIZE (64 MiB) is unreliable for the
-    unrolled-DAG / many-subprocess fan-out pattern. Repro: ML_training SGD DAG with i32
-    binary shards at 600k samples (~40 MB binary + ~20 MB text > 64 MiB) — the run reports
-    success (TOTAL compute prints) but validate produces NO output (model chain silently
-    broken), at W=1 too (so not a concurrent-grow race). The growth path EXISTS and is wired
-    (guest page_allocator::try_allocate_page → host_remap → shm::try_grow_shm, geometric
-    doubling to the 2 GiB CAPACITY_HARD_LIMIT; siblings/main re-sync via
-    sync_mapping_to_capacity), so crossing 64 MiB *should* just grow — but in this pattern it
-    corrupts/loses state instead. Worked around in the benchmark by packing features as i8
-    (Tests/Application_Benchmark/ML_training) so total SHM stays < 64 MiB. Options to fix
-    properly: (a) harden the cross-subprocess grow+remap handshake; (b) make INITIAL_SHM_SIZE
-    configurable per-DAG/env (currently a const also used as the RDMA MR size in
-    runtime/remote/*, so a blind bump enlarges every RDMA registration — needs care).
+[x] [FRAMEWORK] SHM dynamic-growth past INITIAL_SHM_SIZE (64 MiB) FIXED (2026-06-16). Root
+    cause was NOT the grow/remap handshake but a STALE MAPPING in the main DAG-runner process:
+    host-side nodes (Aggregate, Output, Input) and post-wave reclamation walk SHM page chains
+    IN the main process, which maps INITIAL_SHM_SIZE at startup and only re-synced its mapping
+    in chunked mode (dag_runner mod.rs:442/867). In a one-shot/unrolled DAG a worker subprocess
+    grows the file via host_remap, but the main process's mapping stays at 64 MiB — so a later
+    wave's Aggregate/Output reads land in the zero-filled wasm-reserved region past the stale
+    VMA → gradients/model silently read as zeros (validate emits nothing). Happens at W=1 too
+    (cross-wave staleness, not a concurrent race). Fix: shm::sync_mapping_if_grown — a guarded
+    re-sync (one atomic compare; mmap only when global_capacity outgrew our VMA, tracked in
+    MAPPED_CAP) called once per wave after subprocess join, before reclamation (the one-shot
+    analogue of the chunked-loop sync). i8 feature workaround in ML_training reverted to i32.
+    A/B verified: fix OFF → 600k W=1 grows to 128 MiB, "success", but 0-byte validate output;
+    fix ON → weight_checksum=852 @97.97%, fan-out-invariant across W=1..16; ML_inference 600k
+    likewise invariant (checksum=1861022). Build: ./build.sh.
+    Official ML_training results regenerated with i32 (full sweep, E=10, 3 reps): checksums
+    831/841/828 and accuracy UNCHANGED (i32≡i8 numerically — features promote to i64), so the
+    i8 packing only ever shrank the footprint. peak_mem rose where i32 crosses 64 MiB (AOT 600k
+    +28–33%; lowest-peak-mem claim still holds, 331 vs 356–435 MB) and latency ~+5–11% at the
+    larger sizes (4× bigger binary shard to scan); cross-system wins intact (latency margin now
+    ~1.5×→2.6×). README + figs (plot.py) updated. i8 was the odd one out: faasm uses i32,
+    rmmap/cloudburst int64 — none used i8, so i32 is the fair representation. ML_inference never
+    packed features (text→i64), so nothing to revert there; it only needed the host-side fix.
 
 
 

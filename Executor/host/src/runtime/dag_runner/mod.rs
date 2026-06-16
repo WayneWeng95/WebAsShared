@@ -134,7 +134,7 @@ use crate::runtime::input_output::logger::HostLogger;
 use crate::runtime::mem_operation::reclaimer::{self, SlotKind};
 use crate::runtime::worker::{create_wasmtime_engine, setup_vma_environment, WorkerState};
 use crate::runtime::input_output::persistence::PersistenceWriter;
-use crate::shm::{format_shared_memory, sync_mapping_to_capacity};
+use crate::shm::{format_shared_memory, sync_mapping_if_grown, sync_mapping_to_capacity};
 use common::WASM_PATH;
 use plan::{build_barrier_assignments, build_slot_refcounts, build_waves, is_oneshot_node, node_owned_slots, node_routed_upstream_slots, parse_level, topo_sort, validate_barrier_groups, validate_dag};
 use workers::{spawn_python_subprocess, spawn_wasm_subprocess};
@@ -687,6 +687,15 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
 
             // 4. Post-wave slot reclamation for all nodes in wave.
             let splice_addr = store.data().splice_addr;
+            // A WASM worker in THIS wave may have grown the SHM past our mapping
+            // (host_remap runs in the subprocess, not here). Re-sync before we
+            // walk any page chain — both the reclamation below and the next
+            // wave's host-side nodes (Aggregate/Output) read through this
+            // mapping, and an unsynced read lands in the zero-filled
+            // wasm-reserved region (silent data loss). Cheap no-op when nothing
+            // grew. This is the one-shot/unrolled-DAG analogue of the chunked
+            // loop's sync_mapping_to_capacity calls.
+            sync_mapping_if_grown(splice_addr)?;
             for &idx in wave {
                 let node = &dag.nodes[idx];
 
