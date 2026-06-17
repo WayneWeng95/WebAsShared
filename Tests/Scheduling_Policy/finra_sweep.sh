@@ -11,8 +11,9 @@
 # per-record rules into S = round((fanout-3)/5) slices each (each scans a disjoint
 # 1/S of the trades; merge SUMS the partials → exact total) and keeps the 3
 # STATEFUL rules (wash/spoofing/concentration) as single full-data nodes. So
-# effective fan = 3 + 5·S: fanout 32 → 33 workers, fanout 48 → 48. With PACK_CAP=17
-# pack consolidates first-fit (33 → 2 nodes [17,16]; 48 → 3 nodes [17,17,14]) while
+# the stateless shards are tiled so the total fan == fanout exactly (32 → 3 stateful
+# + 29 stateless [6,6,6,6,5]; 48 → 3 + 45 [9,9,9,9,9]). With PACK_CAP=16 pack
+# consolidates first-fit (32 → 2 nodes [16,16]; 48 → 3 nodes [16,16,16]) while
 # balanced spreads across all 4 — matching word_count's node placement.
 #
 # CORRECTNESS: per size, a single-node ground-truth run establishes the expected
@@ -57,9 +58,11 @@ FANOUTS="${FANOUTS:-32 48}"
 # pack vs balanced is the headline contrast (same as wc_size_sweep.sh).
 POLICIES="${POLICIES:-pack balanced}"
 SETTLE_S="${SETTLE_S:-3}"
-# Per-node worker cap driving pack's first-fit consolidation. 17 makes the 33-worker
-# fanout-32 config pack into 2 nodes ([17,16]) and fanout-48 into 3 ([17,17,14]).
-PACK_CAP="${PACK_CAP:-17}"
+# Per-node worker cap driving pack's first-fit consolidation, set to the executor's
+# per-node worker limit (16). With exact fanouts (gen_variants tiles the stateless
+# rules so total == fanout), pack fits 32 → [16,16] (2 nodes) and 48 → [16,16,16]
+# (3 nodes), every node ≤16 — no node exceeds the worker stage-width cap.
+PACK_CAP="${PACK_CAP:-16}"
 
 NODE_AGENT="$ROOT/node-agent"
 [ -x "$NODE_AGENT" ] || NODE_AGENT="$ROOT/NodeAgent/target/release/node-agent"

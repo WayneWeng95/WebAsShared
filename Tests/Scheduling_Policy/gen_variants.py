@@ -81,6 +81,10 @@ FINRA_STATELESS = (0, 1, 5, 6, 7)     # PRICE_OUTLIER, LARGE_ORDER, AFTER_HOURS,
 FINRA_RULE_OUT_BASE = 10              # stateful rule i → slot 10+i (matches guest)
 FINRA_SHARD_OUT_BASE = 400           # stateless shard → 400 + rule_id*16 + shard_idx (matches guest)
 FINRA_SHARD_STRIDE = 16
+# Max rule-workers a WORKER node may run (the executor's per-node stage-width cap;
+# a worker beyond this fails the job). Node 0 (local executor) is exempt — see
+# _fan_placement. Empirically 16 runs, 17 fails on workers.
+FINRA_MAX_WORKER_RULES = 16
 
 
 def _finra_pack_arg(rule_id: int, shard_idx: int, n_shards: int) -> int:
@@ -263,7 +267,16 @@ def _build_finra_hybrid(d: dict, policy: str, nodes: int, fanout: int,
     shard → 1000 + i*16 + shard) so the partitioner derives DISTINCT per-machine
     aggregate inputs (no slot collision, no double-count)."""
     n_state, n_stateless = len(FINRA_STATEFUL), len(FINRA_STATELESS)
-    S = max(1, round((fanout - n_state) / n_stateless))
+    # Distribute EXACTLY (fanout - n_state) stateless shards across the 5 rules so
+    # the total fan == fanout exactly (32 → 29 stateless = [6,6,6,6,5]; 48 →
+    # [9,9,9,9,9]). With pack_cap=16 this lets pack fit 32 into [16,16] and 48 into
+    # [16,16,16] — EVERY node, including coordinator node 0, at ≤16 workers, so the
+    # placement never relies on node 0's worker-cap exemption. Different rules may
+    # get different shard counts; each rule's shards still tile its own data
+    # disjointly (n_shards is per-rule), so per-rule partials sum exactly.
+    total_stateless = max(n_stateless, fanout - n_state)
+    base, rem = divmod(total_stateless, n_stateless)
+    shard_counts = [base + (1 if idx < rem else 0) for idx in range(n_stateless)]
 
     # Grab the original rule template (deps → aggregate_inputs) then drop the
     # stock rule_0..7 nodes; we re-emit the fan below.
@@ -281,9 +294,10 @@ def _build_finra_hybrid(d: dict, policy: str, nodes: int, fanout: int,
     # stateless shards. Composition per machine doesn't affect correctness — only
     # the per-node COUNT drives the pack/balanced placement we're measuring.
     fan = [rule_node(f"rule_{i}", i, FINRA_RULE_OUT_BASE + i) for i in FINRA_STATEFUL]
-    for i in FINRA_STATELESS:
-        for k in range(S):
-            fan.append(rule_node(f"rule_{i}_s{k}", _finra_pack_arg(i, k, S),
+    for idx, i in enumerate(FINRA_STATELESS):
+        sr = shard_counts[idx]
+        for k in range(sr):
+            fan.append(rule_node(f"rule_{i}_s{k}", _finra_pack_arg(i, k, sr),
                                   FINRA_SHARD_OUT_BASE + i * FINRA_SHARD_STRIDE + k))
 
     node_ids = _fan_placement(len(fan), nodes, policy, pack_cap)
@@ -326,12 +340,22 @@ def _build_finra_hybrid(d: dict, policy: str, nodes: int, fanout: int,
 def _fan_placement(n_fan: int, nodes: int, policy: str, pack_cap: int | None) -> list[int]:
     """node_id per fan node (index order) for a given policy.
     pack: fill node 0 (up to pack_cap, default all) then spill; balanced/spread:
-    round-robin across nodes; random: seeded uniform (reproducible)."""
+    round-robin across nodes; random: seeded uniform (reproducible).
+
+    WORKER nodes (id ≥ 1) are hard-capped at FINRA_MAX_WORKER_RULES: a worker that
+    runs more than that many parallel rule-workers exceeds the executor's per-node
+    stage-width limit and the job fails (the gather stalls). The COORDINATOR (node
+    0) runs its rules through the in-process local executor and isn't subject to
+    that limit, so it may hold up to pack_cap. e.g. 33 → [17,16] (2 nodes),
+    48 → [17,16,15] (3 nodes) — pack stays consolidated without overloading a worker.
+    Only `pack` can exceed the cap (balanced/spread/random round-robin, so their
+    per-node count is ⌈n_fan/nodes⌉ ≤ 16 for the sizes we sweep)."""
     if policy == "pack":
-        cap = pack_cap if pack_cap else n_fan
+        base_cap = pack_cap if pack_cap else n_fan
+        cap_for = lambda nid: base_cap if nid == 0 else min(base_cap, FINRA_MAX_WORKER_RULES)
         ids, node, cnt = [], 0, 0
         for _ in range(n_fan):
-            if cnt >= cap and node < nodes - 1:
+            while node < nodes - 1 and cnt >= cap_for(node):
                 node += 1
                 cnt = 0
             ids.append(node)

@@ -1,3 +1,13 @@
-policy,working_nodes,makespan_ms,total_exec_ms,idle_excluded_ms,reps
-pack,1,937,779,1800,5
-balanced,4,1293,4539,0,5
+trades,corpus,fanout,policy,working_nodes,makespan_ms,total_exec_ms,idle_excluded_ms,reps
+10000,trades_10000,32,balanced,4,1829,6086,0,5
+10000,trades_10000,32,pack,2,2579,4308,1205,5
+10000,trades_10000,48,balanced,4,2278,7289,0,5
+10000,trades_10000,48,pack,3,2646,6244,594,5
+100000,trades_100000,32,balanced,4,2132,6287,0,5
+100000,trades_100000,32,pack,2,3000,4945,2376,5
+100000,trades_100000,48,balanced,4,2605,7766,0,5
+100000,trades_100000,48,pack,3,2996,7013,1179,5
+1000000,trades_1000000,32,balanced,4,4992,13666,0,5
+1000000,trades_1000000,32,pack,2,5683,8908,4887,5
+1000000,trades_1000000,48,balanced,4,5384,15148,0,5
+1000000,trades_1000000,48,pack,3,5731,12473,2413,5

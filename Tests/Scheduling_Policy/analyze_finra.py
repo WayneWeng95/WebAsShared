@@ -83,9 +83,16 @@ def working_nodes(tag: str, times: dict) -> set:
 
 def main():
     cells = collections.defaultdict(list)  # tag -> list of (makespan, total_exec, idle_excl, nwork)
+    skipped = 0
     for log in sorted(glob.glob(os.path.join(LOGDIR, "*.rep*.log"))):
         tag = re.sub(r"\.rep\d+\.log$", "", os.path.basename(log))
         text = open(log).read()
+        # Only count reps that SUCCEEDED — a failed job exits early (e.g. a worker
+        # that never ran), so its node timings are meaningless and would otherwise
+        # make the failing cell look misleadingly fast.
+        if not re.search(r"Success:\s*true", text, re.I):
+            skipped += 1
+            continue
         times = {int(n): int(ms) for n, ms in NODE_RE.findall(text)}
         if not times:
             continue
@@ -134,7 +141,8 @@ def main():
             mk = d["balanced"]["makespan_ms"] / d["pack"]["makespan_ms"]
             te = d["balanced"]["total_exec_ms"] / d["pack"]["total_exec_ms"]
             print(f"{'':>15} → makespan {mk:.2f}× | total_exec {te:.2f}×  (balanced/pack)")
-    print("\n(finra is coordination-bound: expect pack to win, i.e. ratios ≥ 1)")
+    if skipped:
+        print(f"\n(excluded {skipped} failed rep-log(s) — Success:false)")
     print(f"wrote {out}")
 
 
