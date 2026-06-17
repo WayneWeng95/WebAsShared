@@ -84,6 +84,14 @@ cross-node-specific to test). Only deferred work + the benchmark track remain:
 [ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto the
     table; Tests/Fan_out_remote/ is the measurement starting point.
 
+[ ] [PERF] Memory cost on WordCount + Matrix — investigate why our peak memory (incl. KV)
+    is uncompetitive on these two workloads while we lead on Finra/ML_training/ML_inference.
+    At the largest load (WordCount 1001MB/16w, Matrix 2048/16w) WasMem-AOT is NOT the lowest:
+    WordCount AOT 4005 MB vs Faasm 2022; Matrix AOT 1088 MB vs RMMap 430 / Faasm 404. Our
+    footprint also grows with worker count (per-worker SHM/RSS) where baselines stay flat.
+    Data + chart: Tests/Inter-Node Application_Benchmark/analysis/ (mem_footprint*.md/csv,
+    figs/mem_largest_load.pdf).
+
 [x] [FRAMEWORK] SHM dynamic-growth past INITIAL_SHM_SIZE (64 MiB) FIXED (2026-06-16). Root
     cause was NOT the grow/remap handshake but a STALE MAPPING in the main DAG-runner process:
     host-side nodes (Aggregate, Output, Input) and post-wave reclamation walk SHM page chains
