@@ -1,0 +1,223 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "load_trades",
+        "kind": {
+          "Input": {
+            "path": "TestData/trades.csv",
+            "prefetch": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_trades"
+        ],
+        "id": "fetch_private",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_private"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "fetch_public",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6,
+            "func": "finra_fetch_public"
+          }
+        }
+      },
+      {
+        "deps": [
+          "fetch_private",
+          "fetch_public"
+        ],
+        "id": "aggregate_inputs",
+        "kind": {
+          "Aggregate": {
+            "downstream": 200,
+            "upstream": [
+              5,
+              6
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rule_0",
+          "rule_1",
+          "rule_2",
+          "rule_3",
+          "rule_4",
+          "rule_5",
+          "rule_6",
+          "rule_7"
+        ],
+        "id": "aggregate_rules",
+        "kind": {
+          "Aggregate": {
+            "downstream": 300,
+            "upstream": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_rules"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 301,
+            "upstream": [
+              300
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "merge",
+        "kind": {
+          "WasmVoid": {
+            "arg": 301,
+            "func": "finra_merge_results"
+          }
+        }
+      },
+      {
+        "deps": [
+          "merge"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/finra_ap_result.txt",
+            "slot": 1
+          }
+        }
+      }
+    ],
+    "1": [],
+    "2": [],
+    "3": []
+  },
+  "shm_path_prefix": "/dev/shm/rdma_finra_ap",
+  "transfer": true
+}

@@ -289,15 +289,24 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         .map(|i| (i, Vec::new()))
         .collect();
 
+    // Optional handshake-protocol override for every cross-edge this DAG emits.
+    // `None` (default) → omit the field entirely → executor default `SenderInit`,
+    // so DAGs that don't set it are byte-for-byte unchanged. `Some("receiver_init")`
+    // switches the pair to RI to avoid the multi-peer gather rendezvous stall.
+    let remote_proto: Option<&str> = dag
+        .remote_protocol
+        .as_deref()
+        .filter(|p| *p != "sender_init");
+
     // 5a. RemoteRecv nodes — one per cross-edge, placed on dest_machine.
     //     Empty deps so they can start receiving as early as possible.
     for ((src_id, _dest), edge) in &cross_edges {
         let recv_id = format!("rr_{}_from_{}", src_id, edge.src_machine);
-        let recv_node = json!({
-            "id": recv_id,
-            "deps": [],
-            "kind": { "RemoteRecv": { "slot": edge.recv_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.src_machine } }
-        });
+        let mut recv_kind = json!({ "RemoteRecv": { "slot": edge.recv_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.src_machine } });
+        if let Some(p) = remote_proto {
+            recv_kind["RemoteRecv"]["protocol"] = json!(p);
+        }
+        let recv_node = json!({ "id": recv_id, "deps": [], "kind": recv_kind });
         machine_nodes.get_mut(&edge.dest_machine).unwrap().push(recv_node);
     }
 
@@ -349,13 +358,14 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
     }
 
     // 5c. RemoteSend nodes — one per cross-edge, placed on src_machine.
+    //     Protocol must MATCH the paired RemoteRecv (same `remote_proto`).
     for ((src_id, _dest), edge) in &cross_edges {
         let send_id = format!("rs_{}_to_{}", src_id, edge.dest_machine);
-        let send_node = json!({
-            "id": send_id,
-            "deps": [src_id],
-            "kind": { "RemoteSend": { "slot": edge.src_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.dest_machine } }
-        });
+        let mut send_kind = json!({ "RemoteSend": { "slot": edge.src_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.dest_machine } });
+        if let Some(p) = remote_proto {
+            send_kind["RemoteSend"]["protocol"] = json!(p);
+        }
+        let send_node = json!({ "id": send_id, "deps": [src_id], "kind": send_kind });
         machine_nodes
             .get_mut(&edge.src_machine)
             .unwrap()
@@ -567,7 +577,16 @@ fn translate_func_kind(kind: Value, n_consumers: u32) -> Value {
         return kind;
     };
     let func = func_obj.get("func").cloned().unwrap_or(Value::Null);
-    let arg_val = func_obj.get("arg").cloned().unwrap_or(Value::Null);
+    // The argument actually passed to the guest function. Prefer `wasm_arg` — the
+    // explicit guest-side parameter (e.g. finra's rule_id 0–7) — when present;
+    // otherwise `arg`, which for most funcs doubles as the guest arg. Without this
+    // the rule_id was dropped and every finra rule ran with arg=200 (the input
+    // slot), hitting the default branch → 0 violations. (`arg2` is host-side
+    // metadata only and is intentionally not forwarded.)
+    let arg_val = func_obj.get("wasm_arg")
+        .or_else(|| func_obj.get("arg"))
+        .cloned()
+        .unwrap_or(Value::Null);
 
     // Fan-out node: pack (base | n_consumers << 16) so the guest gets both.
     if func_obj.contains_key("out_base") && n_consumers > 0 {
@@ -804,16 +823,29 @@ fn expand_all_placements(
                 expanded.push(copy);
             }
         } else {
-            // Regular node: broadcast-expand any deps on "all" templates.
+            // Regular node depending on an "all" template.
+            //
+            // - PLACED (has `node_id`): wire to the SAME-MACHINE copy only. Such a
+            //   consumer reads the replicated producer's *local* SHM slot, so it
+            //   needs only a same-machine ordering dep; broadcasting would create
+            //   needless cross-node edges (a scatter) and, for a hub node, the
+            //   bidirectional send+recv deadlock. (e.g. finra's per-node audit
+            //   rules reading their local `aggregate_inputs`.)
+            // - UNPLACED (auto, `node_id == None`): broadcast to all copies — a
+            //   global gather, since the placer hasn't assigned a machine yet
+            //   (e.g. word_count's `aggregate_global` fanning in every machine).
             let mut regular = node.clone();
             regular.deps = node
                 .deps
                 .iter()
                 .flat_map(|dep| {
                     if all_templates.contains(dep) {
-                        (0..total_nodes as u32)
-                            .map(|m| format!("{}_{}", dep, m))
-                            .collect::<Vec<_>>()
+                        match node.node_id {
+                            Some(m) => vec![format!("{}_{}", dep, m)],
+                            None => (0..total_nodes as u32)
+                                .map(|m| format!("{}_{}", dep, m))
+                                .collect::<Vec<_>>(),
+                        }
                     } else {
                         vec![dep.clone()]
                     }
@@ -1119,7 +1151,13 @@ fn assign_input_slices(
             .unwrap_or(false);
         // Don't slice chunked/binary inputs — those have their own loading paths.
         let special = input_obj.contains_key("chunk_bytes") || input_obj.contains_key("binary");
-        if !is_shared || special || m >= total_nodes {
+        // `replicate: true` → every node loads the FULL file (no slice). Required
+        // for task-parallel workloads where each distributed worker needs the whole
+        // dataset (e.g. finra's stateful audit rules), as opposed to data-parallel
+        // slicing (word_count). Without it each node would see only its shard and
+        // stateful rules would be wrong.
+        let replicate = input_obj.get("replicate").and_then(|v| v.as_bool()).unwrap_or(false);
+        if !is_shared || special || replicate || m >= total_nodes {
             continue;
         }
         let lo = prefix[m] / total_w;

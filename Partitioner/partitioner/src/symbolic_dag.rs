@@ -50,6 +50,14 @@ pub struct SymbolicDag {
     /// result co-locates with the input.  `None` → use the compile-time default.
     #[serde(default)]
     pub converge_on_coordinator: Option<bool>,
+    /// Handshake protocol for the cross-node `RemoteSend`/`RemoteRecv` pairs this
+    /// DAG generates: `"sender_init"` (default — omitted, preserves existing
+    /// behaviour) or `"receiver_init"`. RI ("receiver announces first") avoids the
+    /// SI rendezvous stall when a node gathers many transfers from many peers
+    /// (e.g. finra's fan-in hub). `None` ⇒ emit no `protocol` field ⇒ executor
+    /// default (`SenderInit`), so non-finra DAGs are byte-for-byte unchanged.
+    #[serde(default)]
+    pub remote_protocol: Option<String>,
     pub nodes: Vec<SymbolicNode>,
 }
 

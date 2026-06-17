@@ -1,0 +1,13 @@
+size_mb,corpus,fanout,policy,working_nodes,makespan_ms,total_exec_ms,idle_excluded_ms,reps
+50,corpus_large,32,balanced,4,2040,6146,0,3
+50,corpus_large,32,pack,2,2956,4635,1032,3
+50,corpus_large,48,balanced,4,2377,7011,0,3
+50,corpus_large,48,pack,3,2730,6037,516,3
+500,corpus_xlarge,32,balanced,4,4976,13957,0,3
+500,corpus_xlarge,32,pack,2,7646,12459,1017,3
+500,corpus_xlarge,48,balanced,4,5281,15403,0,3
+500,corpus_xlarge,48,pack,3,6027,13874,510,3
+1001,corpus,32,balanced,4,7312,20478,0,3
+1001,corpus,32,pack,2,12438,19687,1022,3
+1001,corpus,48,balanced,4,7326,21092,0,3
+1001,corpus,48,pack,3,9025,19333,508,3

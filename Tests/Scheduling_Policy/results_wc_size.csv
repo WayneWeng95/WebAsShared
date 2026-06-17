@@ -1,0 +1,13 @@
+size_mb,corpus,fanout,policy,nodes_used,wall_ms_median,wall_ms_min,wall_ms_max,maxcompute_ms_median,throughput_mb_s,success,reps
+50,corpus_large.txt,32,pack,2,2956,2948,2972,2805,16.9,true,3
+50,corpus_large.txt,32,balanced,4,2040,1976,2092,1889,24.5,true,3
+50,corpus_large.txt,48,pack,3,2730,2694,2819,2579,18.3,true,3
+50,corpus_large.txt,48,balanced,4,2377,2321,2397,2226,21.0,true,3
+500,corpus_xlarge.txt,32,pack,2,7646,7608,7725,7356,65.4,true,3
+500,corpus_xlarge.txt,32,balanced,4,4976,4908,5056,4724,100.5,true,3
+500,corpus_xlarge.txt,48,pack,3,6027,5945,6047,5774,83.0,true,3
+500,corpus_xlarge.txt,48,balanced,4,5281,5188,5422,5029,94.7,true,3
+1001,corpus.txt,32,pack,2,12438,12365,12547,12136,80.5,true,3
+1001,corpus.txt,32,balanced,4,7312,7258,7357,7060,136.9,true,3
+1001,corpus.txt,48,pack,3,9025,8985,9234,8723,110.9,true,3
+1001,corpus.txt,48,balanced,4,7326,7310,7524,7074,136.6,true,3

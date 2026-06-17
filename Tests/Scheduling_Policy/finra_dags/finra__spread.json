@@ -1,0 +1,376 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [
+          "rs_aggregate_inputs_to_1"
+        ],
+        "id": "rr_rule_3_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 307,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rs_aggregate_inputs_to_2"
+        ],
+        "id": "rr_rule_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 306,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rs_aggregate_inputs_to_3"
+        ],
+        "id": "rr_rule_1_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 305,
+            "slot_kind": "Io"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_trades",
+        "kind": {
+          "Input": {
+            "path": "TestData/trades.csv",
+            "prefetch": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_trades"
+        ],
+        "id": "fetch_private",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_private"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "fetch_public",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6,
+            "func": "finra_fetch_public"
+          }
+        }
+      },
+      {
+        "deps": [
+          "fetch_private",
+          "fetch_public"
+        ],
+        "id": "aggregate_inputs",
+        "kind": {
+          "Aggregate": {
+            "downstream": 200,
+            "upstream": [
+              5,
+              6
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rule_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rule_0",
+          "rr_rule_1_from_3",
+          "rr_rule_2_from_2",
+          "rr_rule_3_from_1",
+          "rule_4",
+          "rule_5",
+          "rule_6",
+          "rule_7"
+        ],
+        "id": "aggregate_rules",
+        "kind": {
+          "Aggregate": {
+            "downstream": 300,
+            "upstream": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_rules"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 301,
+            "upstream": [
+              300
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "merge",
+        "kind": {
+          "WasmVoid": {
+            "arg": 301,
+            "func": "finra_merge_results"
+          }
+        }
+      },
+      {
+        "deps": [
+          "merge"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/finra_ap_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rs_aggregate_inputs_to_1",
+        "kind": {
+          "RemoteSend": {
+            "peer": 1,
+            "slot": 200,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rs_aggregate_inputs_to_2",
+        "kind": {
+          "RemoteSend": {
+            "peer": 2,
+            "slot": 200,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs"
+        ],
+        "id": "rs_aggregate_inputs_to_3",
+        "kind": {
+          "RemoteSend": {
+            "peer": 3,
+            "slot": 200,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "deps": [],
+        "id": "rr_aggregate_inputs_from_0",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 0,
+            "slot": 304,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rr_aggregate_inputs_from_0"
+        ],
+        "id": "rule_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rule_3"
+        ],
+        "id": "rs_rule_3_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 3,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "deps": [],
+        "id": "rr_aggregate_inputs_from_0",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 0,
+            "slot": 303,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rr_aggregate_inputs_from_0"
+        ],
+        "id": "rule_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rule_2"
+        ],
+        "id": "rs_rule_2_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 2,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "deps": [],
+        "id": "rr_aggregate_inputs_from_0",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 0,
+            "slot": 302,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rr_aggregate_inputs_from_0"
+        ],
+        "id": "rule_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 200,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rule_1"
+        ],
+        "id": "rs_rule_1_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 1,
+            "slot_kind": "Io"
+          }
+        }
+      }
+    ]
+  },
+  "shm_path_prefix": "/dev/shm/rdma_finra_ap",
+  "transfer": true
+}

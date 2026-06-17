@@ -1,0 +1,235 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_finra_ap",
+  "log_level": "info",
+  "total_nodes": 4,
+  "transfer": true,
+  "placement_policy": "spread",
+  "nodes": [
+    {
+      "id": "load_trades",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/trades.csv",
+          "prefetch": true
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "fetch_private",
+      "deps": [
+        "load_trades"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_fetch_private",
+          "arg": 0,
+          "arg2": 5
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "fetch_public",
+      "deps": [],
+      "kind": {
+        "Func": {
+          "func": "finra_fetch_public",
+          "arg": 6,
+          "wasm_arg": 0
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "aggregate_inputs",
+      "deps": [
+        "fetch_private",
+        "fetch_public"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            5,
+            6
+          ],
+          "downstream": 200
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_0",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "arg2": 0,
+          "wasm_arg": 0
+        }
+      }
+    },
+    {
+      "id": "rule_1",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "arg2": 1,
+          "wasm_arg": 1
+        }
+      }
+    },
+    {
+      "id": "rule_2",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "arg2": 2,
+          "wasm_arg": 2
+        }
+      }
+    },
+    {
+      "id": "rule_3",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "arg2": 3,
+          "wasm_arg": 3
+        }
+      }
+    },
+    {
+      "id": "rule_4",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "arg2": 4,
+          "wasm_arg": 4
+        }
+      }
+    },
+    {
+      "id": "rule_5",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "arg2": 5,
+          "wasm_arg": 5
+        }
+      }
+    },
+    {
+      "id": "rule_6",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "arg2": 6,
+          "wasm_arg": 6
+        }
+      }
+    },
+    {
+      "id": "rule_7",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "arg2": 7,
+          "wasm_arg": 7
+        }
+      }
+    },
+    {
+      "id": "aggregate_rules",
+      "deps": [
+        "rule_0",
+        "rule_1",
+        "rule_2",
+        "rule_3",
+        "rule_4",
+        "rule_5",
+        "rule_6",
+        "rule_7"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17
+          ],
+          "downstream": 300
+        }
+      }
+    },
+    {
+      "id": "aggregate_global",
+      "deps": [
+        "aggregate_rules"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "merge",
+      "deps": [
+        "aggregate_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_merge_results"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "deps": [
+        "merge"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/finra_ap_result.txt"
+        }
+      }
+    }
+  ],
+  "converge_on_coordinator": true
+}
