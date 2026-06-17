@@ -30,6 +30,13 @@ STYLE = {
 }
 ORDER = ["cloudburst", "rmmap", "faasm", "ours"]   # bar/legend order
 
+# Font sizes — matched to the per-workload plot.py scripts in this folder.
+TICK_SIZE = 16
+LABEL_SIZE = 16
+LEGEND_SIZE = 17
+YLABEL_SIZE = 16
+VALUE_SIZE = 11   # bar value labels (bars_fig convention)
+
 # Per-workload config: display name, size column, [(size, label)], tolerance,
 # and the latency column for each system (ms; converted to s).
 WORKLOADS = [
@@ -90,7 +97,7 @@ def fmt(y):
 
 def main():
     nrows, ncols = 3, len(WORKLOADS)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(18, 7))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(18, 6))
     letters = "abcdefghij"
 
     # preload rows per workload/system
@@ -113,24 +120,27 @@ def main():
             for b, y in zip(bars, ys):
                 if y:
                     ax.text(b.get_x() + b.get_width() / 2, y, fmt(y),
-                            ha="center", va="bottom", fontsize=9, fontweight="bold")
+                            ha="center", va="bottom", fontsize=VALUE_SIZE,
+                            fontweight="bold")
             ax.set_xticks([])
-            ax.margins(y=0.18)
-            ax.tick_params(axis="y", labelsize=11)
+            ax.margins(y=0.12)
+            ax.tick_params(axis="y", labelsize=TICK_SIZE)
             ax.grid(True, axis="y", alpha=.3)
-            ax.set_xlabel(slabel, fontsize=12)          # size label under every panel
+            ax.set_xlabel(slabel, fontsize=LABEL_SIZE)   # size label under every panel
             if c == 0:
-                ax.set_ylabel("Latency (s)", fontsize=13)
+                ax.set_ylabel("Latency (s)", fontsize=YLABEL_SIZE)
             # workload notation at the BOTTOM of each column
             if rrow == nrows - 1:
-                ax.text(0.5, -0.21, "%s. %s" % (letters[c], wl["name"]),
+                ax.text(0.5, -0.28, "%s. %s" % (letters[c], wl["name"]),
                         transform=ax.transAxes, ha="center", va="top",
-                        fontsize=16, fontweight="bold")
+                        fontsize=LABEL_SIZE, fontweight="bold")
 
-    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.tight_layout(rect=[0, 0, 1, 0.95], w_pad=0.3, h_pad=0.5)
+    fig.subplots_adjust(wspace=0.22, hspace=0.28)
+    fig.align_ylabels(axes[:, 0])   # align the three "Latency (s)" labels
     handles = [Patch(color=STYLE[k]["color"], label=STYLE[k]["label"]) for k in ORDER]
     fig.legend(handles, [STYLE[k]["label"] for k in ORDER], loc="upper center",
-               ncol=4, frameon=False, fontsize=16, bbox_to_anchor=(0.5, 1.0),
+               ncol=4, frameon=False, fontsize=LEGEND_SIZE, bbox_to_anchor=(0.5, 1.0),
                columnspacing=2.0, handletextpad=0.6)
     out = os.path.join(FIGS, "all_workloads_bars.pdf")
     fig.savefig(out, bbox_inches="tight")

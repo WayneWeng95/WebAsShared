@@ -17,21 +17,30 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, "figs")
 os.makedirs(FIGS, exist_ok=True)
 
-FRAMEWORKS = ["WasMem-AOT", "RMMap", "Faasm", "Cloudburst"]
+# Font sizes — matched to the per-workload plot.py scripts in this folder.
+TICK_SIZE = 16
+LABEL_SIZE = 16
+LEGEND_SIZE = 17
+YLABEL_SIZE = 16
+
+FRAMEWORKS = ["WasMem-AOT", "RMMap", "Faasm", "Cloudburst"]   # = CSV column names
 COLOR = {
     "WasMem-AOT":  "#2057c7",   # engine blue (ours, AOT only)
     "RMMap":       "#1d7a3e",   # green
     "Faasm":       "#2a9d8f",   # teal
     "Cloudburst":  "#edae49",   # amber
 }
+# Display labels for the figure (drop the -AOT suffix; it's just our system).
+DISPLAY = {"WasMem-AOT": "WasMem"}
 
-# (workload, label, filter dict) — largest load group per workload
+# (workload, label, filter dict) — largest load group per workload.
+# Size labels match the all-workloads grid figure (largest size per workload).
 LARGEST = [
-    ("WordCount",    "WordCount\n1001MB/16w", {"size_mb": 1001.0, "workers": 16.0}),
-    ("Finra",        "Finra\n1M trades",      {"size_trades": 1000000.0}),
-    ("Matrix",       "Matrix\n2048/16w",      {"size_n": 2048.0, "workers": 16.0}),
-    ("ML_training",  "ML_training\n19.5MB/16w", {"size_mb": 19.5, "workers": 16.0}),
-    ("ML_inference", "ML_inference\n19.5MB/16w", {"size_mb": 19.5, "workers": 16.0}),
+    ("WordCount",    "Wordcount\n1 GB",          {"size_mb": 1001.0, "workers": 16.0}),
+    ("Finra",        "Finra\n1M",                {"size_trades": 1000000.0}),
+    ("Matrix",       "Matrix\n2048 × 2048",      {"size_n": 2048.0, "workers": 16.0}),
+    ("ML_training",  "ML training\n600k",        {"size_mb": 19.5, "workers": 16.0}),
+    ("ML_inference", "ML inference\n600k",       {"size_mb": 19.5, "workers": 16.0}),
 ]
 
 df = pd.read_csv(os.path.join(HERE, "mem_footprint_raw.csv"))
@@ -50,29 +59,44 @@ x = np.arange(len(labels))
 nfw = len(FRAMEWORKS)
 w = 0.19
 
-fig, ax = plt.subplots(figsize=(13, 6.5))
-for i, fw in enumerate(FRAMEWORKS):
-    off = (i - (nfw - 1) / 2) * w
-    bars = ax.bar(x + off, vals[fw], w, label=fw, color=COLOR[fw],
-                  edgecolor="black", linewidth=0.4)
-    for b, v in zip(bars, vals[fw]):
-        if np.isnan(v):
-            continue
-        ax.annotate(f"{v:,.0f}", (b.get_x() + b.get_width() / 2, v),
-                    ha="center", va="bottom", fontsize=8, rotation=90,
-                    xytext=(0, 2), textcoords="offset points")
+# Memory saving of WasMem vs each baseline at the largest load:
+#   saving% = (1 - WasMem / baseline) * 100
+# Positive = WasMem uses less; negative = WasMem uses more. WasMem is the
+# reference, so only the three baselines get bars.
+BASE = "WasMem-AOT"
+BASELINES = ["Cloudburst", "RMMap", "Faasm"]   # bar order within each group
+saving = {fw: [] for fw in BASELINES}
+for j in range(len(labels)):
+    ours = vals[BASE][j]
+    for fw in BASELINES:
+        v = vals[fw][j]
+        saving[fw].append((1 - ours / v) * 100 if (v and not np.isnan(v)) else np.nan)
 
-ax.set_ylabel("Peak memory incl. KV storage (MB)", fontsize=14)
-ax.set_title("Peak memory at largest load — WasMem vs RMMap / Faasm / Cloudburst",
-             fontsize=14)
+nb = len(BASELINES)
+wb = 0.26
+fig, ax = plt.subplots(figsize=(9, 4.8))
+ax.axhline(0.0, color="#444", linewidth=1, zorder=0)
+for i, fw in enumerate(BASELINES):
+    off = (i - (nb - 1) / 2) * wb
+    bars = ax.bar(x + off, saving[fw], wb, label=DISPLAY.get(fw, fw),
+                  color=COLOR[fw], edgecolor="black", linewidth=0.4)
+    for b, s in zip(bars, saving[fw]):
+        if np.isnan(s):
+            continue
+        ax.annotate(f"{s:.0f}%", (b.get_x() + b.get_width() / 2, s),
+                    ha="center", va="bottom" if s >= 0 else "top", fontsize=8,
+                    xytext=(0, 2 if s >= 0 else -2), textcoords="offset points")
+
+ax.set_ylabel("Memory saved by WasMem (%)", fontsize=YLABEL_SIZE)
 ax.set_xticks(x)
-ax.set_xticklabels(labels, fontsize=11)
-ax.legend(ncol=4, fontsize=11, loc="upper center", bbox_to_anchor=(0.5, -0.08),
-          frameon=False)
+ax.set_xticklabels(labels, fontsize=TICK_SIZE)
+ax.tick_params(axis="y", labelsize=TICK_SIZE)
 ax.grid(axis="y", alpha=0.3)
-ax.set_ylim(0, max(max(v for v in vals[fw] if not np.isnan(v))
-                   for fw in FRAMEWORKS) * 1.12)
-fig.tight_layout()
+allv = [s for fw in BASELINES for s in saving[fw] if not np.isnan(s)]
+ax.set_ylim(min(allv) - 18, max(allv) + 14)
+fig.tight_layout(rect=[0, 0, 1, 0.93])
+ax.legend(ncol=3, fontsize=LEGEND_SIZE, loc="lower center", bbox_to_anchor=(0.5, 1.0),
+          frameon=False)
 
 fig.savefig(os.path.join(FIGS, "mem_largest_load.pdf"), bbox_inches="tight")
 print("wrote figs/mem_largest_load.pdf")
