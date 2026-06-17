@@ -289,24 +289,15 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
         .map(|i| (i, Vec::new()))
         .collect();
 
-    // Optional handshake-protocol override for every cross-edge this DAG emits.
-    // `None` (default) → omit the field entirely → executor default `SenderInit`,
-    // so DAGs that don't set it are byte-for-byte unchanged. `Some("receiver_init")`
-    // switches the pair to RI to avoid the multi-peer gather rendezvous stall.
-    let remote_proto: Option<&str> = dag
-        .remote_protocol
-        .as_deref()
-        .filter(|p| *p != "sender_init");
-
     // 5a. RemoteRecv nodes — one per cross-edge, placed on dest_machine.
     //     Empty deps so they can start receiving as early as possible.
     for ((src_id, _dest), edge) in &cross_edges {
         let recv_id = format!("rr_{}_from_{}", src_id, edge.src_machine);
-        let mut recv_kind = json!({ "RemoteRecv": { "slot": edge.recv_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.src_machine } });
-        if let Some(p) = remote_proto {
-            recv_kind["RemoteRecv"]["protocol"] = json!(p);
-        }
-        let recv_node = json!({ "id": recv_id, "deps": [], "kind": recv_kind });
+        let recv_node = json!({
+            "id": recv_id,
+            "deps": [],
+            "kind": { "RemoteRecv": { "slot": edge.recv_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.src_machine } }
+        });
         machine_nodes.get_mut(&edge.dest_machine).unwrap().push(recv_node);
     }
 
@@ -358,14 +349,13 @@ pub fn partition(dag: &SymbolicDag, hints: Option<&PlacementHints>) -> Result<Va
     }
 
     // 5c. RemoteSend nodes — one per cross-edge, placed on src_machine.
-    //     Protocol must MATCH the paired RemoteRecv (same `remote_proto`).
     for ((src_id, _dest), edge) in &cross_edges {
         let send_id = format!("rs_{}_to_{}", src_id, edge.dest_machine);
-        let mut send_kind = json!({ "RemoteSend": { "slot": edge.src_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.dest_machine } });
-        if let Some(p) = remote_proto {
-            send_kind["RemoteSend"]["protocol"] = json!(p);
-        }
-        let send_node = json!({ "id": send_id, "deps": [src_id], "kind": send_kind });
+        let send_node = json!({
+            "id": send_id,
+            "deps": [src_id],
+            "kind": { "RemoteSend": { "slot": edge.src_slot, "slot_kind": cross_edge_slot_kind(edge.src_slot), "peer": edge.dest_machine } }
+        });
         machine_nodes
             .get_mut(&edge.src_machine)
             .unwrap()

@@ -195,10 +195,6 @@ def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
             if isinstance(k, dict) and "Input" in k:
                 k["Input"]["replicate"] = True
         d["converge_on_coordinator"] = True
-        # Use the receiver-initiated handshake for the gather cross-edges: node 0
-        # receives many transfers from many peers, and the sender-initiated
-        # rendezvous stalls there. RI ("receiver announces first") avoids it.
-        d["remote_protocol"] = "receiver_init"
     return d
 
 
