@@ -42,6 +42,15 @@ const TRADE_STREAM_SLOT: u32 = 5;
 const REF_STREAM_SLOT: u32 = 6;
 const INPUT_AGG_SLOT: u32 = 200;
 const RULE_OUT_BASE: u32 = 10;
+// Sharded stateless rules write a UNIQUE slot per (rule, shard) so the aggregator
+// splices each partial exactly once (a repeated slot would double-count, and
+// distinct slots also avoid concurrent same-slot appends from parallel shards).
+// Slot = SHARD_OUT_BASE + rule_id*SHARD_STRIDE + shard_idx, kept well above all
+// other finra slots (5,6,10..17,200,300,301). Only used when n_shards > 1; the
+// unsharded path still writes RULE_OUT_BASE+rule_id (10..17), so existing DAGs
+// are unaffected.
+const SHARD_OUT_BASE: u32 = 1000;
+const SHARD_STRIDE: u32 = 16; // max shards per rule
 
 // ── Packed columnar layout ────────────────────────────────────────────────────
 //
@@ -163,6 +172,32 @@ fn for_each_trade(records: &[(u32, Vec<u8>)], mut f: impl FnMut(&[u8])) {
     }
 }
 
+/// Sharded variant: visit only the records belonging to shard `shard_idx` of
+/// `n_shards`, partitioning the global record stream round-robin (record g goes
+/// to shard g % n_shards). Disjoint and complete across shards, so per-shard
+/// counts of any PER-RECORD (stateless) rule SUM to the full-data count — which
+/// is why finra_merge_results (which sums all rule partials) stays exact under
+/// sharding. `n_shards <= 1` degrades to for_each_trade (the full stream). Only
+/// stateless rules may use this; stateful rules need the whole dataset.
+fn for_each_trade_shard(records: &[(u32, Vec<u8>)], shard_idx: u32, n_shards: u32,
+                        mut f: impl FnMut(&[u8])) {
+    if n_shards <= 1 {
+        return for_each_trade(records, f);
+    }
+    let mut g: u32 = 0;
+    for (_origin, rec) in records {
+        if rec.first() != Some(&TAG_TRADES) { continue; }
+        let body = &rec[1..];
+        let n = body.len() / REC;
+        for i in 0..n {
+            if g % n_shards == shard_idx {
+                f(&body[i * REC..i * REC + REC]);
+            }
+            g += 1;
+        }
+    }
+}
+
 // ── Exported functions ───────────────────────────────────────────────────────
 
 /// Parse trades CSV from I/O slot 0 ONCE, write packed columnar records to slot 5.
@@ -231,25 +266,46 @@ pub extern "C" fn finra_fetch_public(_unused: u32) {
     }
 }
 
-/// Run audit rule `rule_id` over the packed columns in slot 200 (the broadcast).
-/// Writes results to stream slot 10 + rule_id. No CSV re-parse; integer-keyed.
+/// Run audit rule over the packed columns in slot 200 (the broadcast), writing
+/// results to stream slot 10 + rule_id. No CSV re-parse; integer-keyed.
+///
+/// The single u32 arg is PACKED so the existing 1-param ABI can carry an optional
+/// data-shard spec (set by Scheduling_Policy/gen_variants.py's hybrid transform):
+///   bits  0..8   rule_id    (0..7)
+///   bits  8..16  shard_idx  (which slice this worker handles)
+///   bits 16..24  n_shards   (0 or 1 = no sharding, run full data)
+/// Backward-compatible: callers that pass a bare rule_id (0..7) get n_shards=0 →
+/// full data, identical to before. Only the 5 STATELESS per-record rules honour
+/// the shard; the 3 STATEFUL rules (wash/spoofing/concentration) always scan the
+/// whole dataset — their cross-record state can't be reconstructed from a slice.
 #[no_mangle]
-pub extern "C" fn finra_audit_rule(rule_id: u32) {
+pub extern "C" fn finra_audit_rule(packed: u32) {
+    let rule_id = packed & 0xFF;
+    let shard_idx = (packed >> 8) & 0xFF;
+    let n_shards = (packed >> 16) & 0xFF;
     let records = ShmApi::read_all_stream_records(INPUT_AGG_SLOT);
-    let out_slot = RULE_OUT_BASE + rule_id;
+    let out_slot = if n_shards > 1 {
+        SHARD_OUT_BASE + rule_id * SHARD_STRIDE + shard_idx
+    } else {
+        RULE_OUT_BASE + rule_id
+    };
     let mut violations: u32 = 0;
+    // Stateless rules iterate only their shard; stateful rules ignore the shard.
+    let shard = |records: &[(u32, Vec<u8>)], f: &mut dyn FnMut(&[u8])| {
+        for_each_trade_shard(records, shard_idx, n_shards, f);
+    };
 
     match rule_id {
         0 => {
             // Price outlier: trade price > 2× reference avg (static ref table)
-            for_each_trade(&records, |r| {
+            shard(&records, &mut |r| {
                 let avg = ref_cents(rd_u16(r, 0));
                 if rd_u32(r, 4) > 2 * avg { violations += 1; }
             });
         }
         1 => {
             // Large order: quantity > 5000
-            for_each_trade(&records, |r| {
+            shard(&records, &mut |r| {
                 if rd_u32(r, 8) > 5000 { violations += 1; }
             });
         }
@@ -287,20 +343,20 @@ pub extern "C" fn finra_audit_rule(rule_id: u32) {
         }
         5 => {
             // After-hours: outside 09:30-16:00
-            for_each_trade(&records, |r| {
+            shard(&records, &mut |r| {
                 let minutes = rd_u16(r, 12) as u32;
                 if minutes < 570 || minutes > 960 { violations += 1; }
             });
         }
         6 => {
             // Penny stock: price < $5.00 (500 cents)
-            for_each_trade(&records, |r| {
+            shard(&records, &mut |r| {
                 if rd_u32(r, 4) < 500 { violations += 1; }
             });
         }
         7 => {
             // Round lot: quantity is exact multiple of 1000
-            for_each_trade(&records, |r| {
+            shard(&records, &mut |r| {
                 let q = rd_u32(r, 8);
                 if q >= 1000 && q % 1000 == 0 { violations += 1; }
             });

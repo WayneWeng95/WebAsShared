@@ -1,0 +1,3 @@
+policy,nodes_used,makespan_ms_median,makespan_ms_min,makespan_ms_max,total_exec_ms_median,throughput_trades_s,violations,success,reps
+pack,1,937,908,1002,779,5336,1952,true,5
+balanced,4,1293,1254,1293,4539,3867,1952,true,5

@@ -62,6 +62,23 @@ AGGREGATOR = {
 
 POLICIES = ("pack", "balanced", "spread", "random")
 
+# ── finra hybrid sharding ────────────────────────────────────────────────────
+# finra has 8 FIXED, heterogeneous audit rules (rule_0..7), so its fan can't be a
+# homogeneous {32,48} like word_count's map workers. Instead we shard only the 5
+# STATELESS per-record rules (each shard scans a disjoint 1/S of the trades and
+# the merge SUMS the partials → exact total) while the 3 STATEFUL rules
+# (wash/spoofing/concentration) stay single full-data nodes (their cross-record
+# state can't be reconstructed from a slice). Effective fan = 3 + 5·S, so a
+# requested fanout F → S = round((F-3)/5): F=32 → S=6 (33 workers), F=48 → S=9.
+# The guest (Executor/guest/src/workloads/finra.rs) reads rule_id|shard_idx<<8|
+# n_shards<<16 from its single packed arg and writes a UNIQUE output slot per
+# (rule,shard) so the aggregator splices each partial once.
+FINRA_STATEFUL = (2, 3, 4)            # WASH_TRADE, SPOOFING, CONCENTRATION
+FINRA_STATELESS = (0, 1, 5, 6, 7)     # PRICE_OUTLIER, LARGE_ORDER, AFTER_HOURS, PENNY_STOCK, ROUND_LOT
+FINRA_RULE_OUT_BASE = 10              # stateful rule i → slot 10+i (matches guest)
+FINRA_SHARD_OUT_BASE = 1000          # stateless shard → 1000 + rule_id*16 + shard_idx (matches guest)
+FINRA_SHARD_STRIDE = 16
+
 
 def source_dag(workload: str) -> str:
     return os.path.join(ROOT, "DAGs", "symbolic_dag", f"{workload}_auto_placement.json")
@@ -119,6 +136,13 @@ def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
         if touched == 0:
             sys.exit(f"[gen] no Input node with a 'path' in {workload} to override")
 
+    # finra hybrid sharding takes over entirely when a fanout is requested: it
+    # shards the stateless rules and does its own per-policy placement, so the
+    # word_count-style fanout/pack-cap/fan blocks below don't apply.
+    if workload == "finra" and fanout is not None:
+        _build_finra_hybrid(d, policy, nodes, fanout, pack_cap)
+        return d
+
     # Optional fanout override: set the parallel stage's `fanout`. On a
     # placement:"all" node this is the TOTAL worker count split across the
     # cluster (e.g. fanout 64 on 4 nodes → 16 workers/node).
@@ -157,20 +181,22 @@ def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
             sys.exit(f"[gen] no '{fan}*' nodes found in {workload} — DAG layout changed?")
         fan_nodes.sort(key=lambda t: t[0])
 
-        # ── Option 2: pure-gather placement ──────────────────────────────────────
-        # Place each fan node EXPLICITLY per policy (node_id), and keep the
-        # input-prep stages replicated on every node so each worker reads its LOCAL
-        # input. Only the fan OUTPUTS cross the network, gathering to node 0 → a
-        # pure N→1 gather. No node both sends and receives across peers, so the
-        # bidirectional scatter-gather hub deadlock can't occur.
+        # ── Local-combine gather (mirrors word_count's working cross-node path) ──
+        # Place each fan node EXPLICITLY per policy, then insert a PER-MACHINE local
+        # aggregate so each worker sends exactly ONE combined transfer to node 0 —
+        # not one per rule. This is the crucial difference: word_count gathers 1
+        # transfer/peer (it combines locally first) and works; sending 2+ raw
+        # transfers/peer desyncs the per-peer control stream and deadlocks. The
+        # per-machine aggregate is an empty `{Aggregate:{}}` whose upstream the
+        # partitioner derives from its local-rule deps (same mechanism word_count's
+        # per-machine `aggregate` uses).
         node_ids = _fan_placement(len(fan_nodes), nodes, policy, pack_cap)
         for (_, n), nid in zip(fan_nodes, node_ids):
             n["node_id"] = nid
 
-        # Collapse the per-machine aggregator to a SINGLE fan-in node on node 0 with
-        # ID-based upstream (so cross-node fan outputs resolve to their RemoteRecv
-        # slots instead of being dropped). Each fan node gets the matching
-        # output_slot so the partitioner knows where the guest writes.
+        # Each rule's hardcoded guest output slot (RULE_OUT_BASE + i) — take it from
+        # the original aggregator's upstream list so the partitioner knows where the
+        # guest writes and can derive the local aggregate's inputs.
         agg_node = next((n for n in d.get("nodes", []) if n.get("id") == AGGREGATOR[workload]), None)
         if agg_node is None:
             sys.exit(f"[gen] aggregator '{AGGREGATOR[workload]}' not found in {workload}")
@@ -180,10 +206,27 @@ def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
             sys.exit(f"[gen] aggregator has {len(slots)} upstream slots < {len(fan_nodes)} fan nodes")
         for (_, n), slot in zip(fan_nodes, slots):
             n["output_slot"] = slot
-        agg_inner.pop("upstream", None)
-        agg_inner["upstream_nodes"] = [n["id"] for _, n in fan_nodes]
+
+        # Group rules by machine and build one local aggregate per machine.
+        by_machine = {}
+        for (_, n), nid in zip(fan_nodes, node_ids):
+            by_machine.setdefault(nid, []).append(n["id"])
+        local_aggs = []
+        for m in sorted(by_machine):
+            lid = f"{AGGREGATOR[workload]}_local_{m}"
+            local_aggs.append(lid)
+            d["nodes"].append({
+                "id": lid, "node_id": m, "deps": by_machine[m],
+                "kind": {"Aggregate": {}},
+            })
+
+        # The global aggregator (node 0) now gathers the per-machine LOCALS — one
+        # transfer per machine — instead of the raw rules.
         agg_node.pop("placement", None)
         agg_node["node_id"] = 0
+        agg_node["deps"] = local_aggs
+        agg_inner.pop("upstream", None)
+        agg_inner["upstream_nodes"] = local_aggs
 
         # Keep input-prep placement:"all" (each node computes its OWN inputs from a
         # local copy — a placed worker reads the same-machine copy via the
@@ -196,6 +239,79 @@ def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
                 k["Input"]["replicate"] = True
         d["converge_on_coordinator"] = True
     return d
+
+
+def _build_finra_hybrid(d: dict, policy: str, nodes: int, fanout: int,
+                        pack_cap: int | None) -> None:
+    """Mutate `d` in place into the hybrid-sharded finra variant.
+
+    Stateless rules (per-record) are split into S shards each; stateful rules
+    stay single full-data nodes. Effective fan = 3 + 5·S with S = round((F-3)/5).
+    All fan nodes are placed per `policy` (pack-cap first-fit) and gathered via
+    the same per-machine local-combine word_count uses (one transfer/peer). Each
+    fan node carries the exact `output_slot` the guest writes (stateful → 10+i;
+    shard → 1000 + i*16 + shard) so the partitioner derives DISTINCT per-machine
+    aggregate inputs (no slot collision, no double-count)."""
+    n_state, n_stateless = len(FINRA_STATEFUL), len(FINRA_STATELESS)
+    S = max(1, round((fanout - n_state) / n_stateless))
+
+    # Grab the original rule template (deps → aggregate_inputs) then drop the
+    # stock rule_0..7 nodes; we re-emit the fan below.
+    orig = {n["id"]: n for n in d["nodes"] if n.get("id", "").startswith("rule_")}
+    if "rule_0" not in orig:
+        sys.exit("[gen] finra DAG layout changed — no 'rule_*' nodes to shard")
+    rule_deps = orig["rule_0"].get("deps", ["aggregate_inputs"])
+    d["nodes"] = [n for n in d["nodes"] if not n.get("id", "").startswith("rule_")]
+
+    def rule_node(node_id, wasm_arg, output_slot):
+        return {"id": node_id, "deps": list(rule_deps), "output_slot": output_slot,
+                "kind": {"Func": {"func": "finra_audit_rule", "arg": 200, "wasm_arg": wasm_arg}}}
+
+    # Build the fan in placement order: stateful rules first (full data), then the
+    # stateless shards. Composition per machine doesn't affect correctness — only
+    # the per-node COUNT drives the pack/balanced placement we're measuring.
+    fan = [rule_node(f"rule_{i}", i, FINRA_RULE_OUT_BASE + i) for i in FINRA_STATEFUL]
+    for i in FINRA_STATELESS:
+        for k in range(S):
+            packed = i | (k << 8) | (S << 16)
+            fan.append(rule_node(f"rule_{i}_s{k}", packed,
+                                  FINRA_SHARD_OUT_BASE + i * FINRA_SHARD_STRIDE + k))
+
+    node_ids = _fan_placement(len(fan), nodes, policy, pack_cap)
+    for n, nid in zip(fan, node_ids):
+        n["node_id"] = nid
+    d["nodes"].extend(fan)
+
+    # Per-machine local-combine: one aggregate per machine over its fan nodes
+    # (empty Aggregate → partitioner derives upstream from the deps' distinct
+    # output_slots), then a single global aggregate gathers the per-machine locals.
+    by_machine = {}
+    for n, nid in zip(fan, node_ids):
+        by_machine.setdefault(nid, []).append(n["id"])
+    local_aggs = []
+    for m in sorted(by_machine):
+        lid = f"aggregate_rules_local_{m}"
+        local_aggs.append(lid)
+        d["nodes"].append({"id": lid, "node_id": m, "deps": by_machine[m],
+                           "kind": {"Aggregate": {}}})
+
+    agg_node = next((n for n in d["nodes"] if n.get("id") == "aggregate_rules"), None)
+    if agg_node is None:
+        sys.exit("[gen] finra DAG missing 'aggregate_rules'")
+    agg_inner = agg_node["kind"]["Aggregate"]
+    agg_node.pop("placement", None)
+    agg_node["node_id"] = 0
+    agg_node["deps"] = local_aggs
+    agg_inner.pop("upstream", None)
+    agg_inner["upstream_nodes"] = local_aggs
+
+    # Every node loads the FULL trades (replicate): stateful rules need the whole
+    # dataset, and stateless shards select their 1/S slice in-guest by record index.
+    for n in d["nodes"]:
+        k = n.get("kind", {})
+        if isinstance(k, dict) and "Input" in k:
+            k["Input"]["replicate"] = True
+    d["converge_on_coordinator"] = True
 
 
 def _fan_placement(n_fan: int, nodes: int, policy: str, pack_cap: int | None) -> list[int]:

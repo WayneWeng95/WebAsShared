@@ -7,17 +7,19 @@
   "nodes": [
     {
       "id": "load_trades",
+      "placement": "all",
       "deps": [],
       "kind": {
         "Input": {
           "path": "TestData/trades.csv",
-          "prefetch": true
+          "prefetch": true,
+          "replicate": true
         }
-      },
-      "node_id": 0
+      }
     },
     {
       "id": "fetch_private",
+      "placement": "all",
       "deps": [
         "load_trades"
       ],
@@ -27,11 +29,11 @@
           "arg": 0,
           "arg2": 5
         }
-      },
-      "node_id": 0
+      }
     },
     {
       "id": "fetch_public",
+      "placement": "all",
       "deps": [],
       "kind": {
         "Func": {
@@ -39,11 +41,11 @@
           "arg": 6,
           "wasm_arg": 0
         }
-      },
-      "node_id": 0
+      }
     },
     {
       "id": "aggregate_inputs",
+      "placement": "all",
       "deps": [
         "fetch_private",
         "fetch_public"
@@ -56,8 +58,7 @@
           ],
           "downstream": 200
         }
-      },
-      "node_id": 0
+      }
     },
     {
       "id": "rule_0",
@@ -71,7 +72,9 @@
           "arg2": 0,
           "wasm_arg": 0
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 10
     },
     {
       "id": "rule_1",
@@ -85,7 +88,9 @@
           "arg2": 1,
           "wasm_arg": 1
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 11
     },
     {
       "id": "rule_2",
@@ -99,7 +104,9 @@
           "arg2": 2,
           "wasm_arg": 2
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 12
     },
     {
       "id": "rule_3",
@@ -113,7 +120,9 @@
           "arg2": 3,
           "wasm_arg": 3
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 13
     },
     {
       "id": "rule_4",
@@ -127,7 +136,9 @@
           "arg2": 4,
           "wasm_arg": 4
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 14
     },
     {
       "id": "rule_5",
@@ -141,7 +152,9 @@
           "arg2": 5,
           "wasm_arg": 5
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 15
     },
     {
       "id": "rule_6",
@@ -155,7 +168,9 @@
           "arg2": 6,
           "wasm_arg": 6
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 16
     },
     {
       "id": "rule_7",
@@ -169,35 +184,24 @@
           "arg2": 7,
           "wasm_arg": 7
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 17
     },
     {
       "id": "aggregate_rules",
       "deps": [
-        "rule_0",
-        "rule_1",
-        "rule_2",
-        "rule_3",
-        "rule_4",
-        "rule_5",
-        "rule_6",
-        "rule_7"
+        "aggregate_rules_local_0"
       ],
       "kind": {
         "Aggregate": {
-          "upstream": [
-            10,
-            11,
-            12,
-            13,
-            14,
-            15,
-            16,
-            17
-          ],
-          "downstream": 300
+          "downstream": 300,
+          "upstream_nodes": [
+            "aggregate_rules_local_0"
+          ]
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "aggregate_global",
@@ -228,6 +232,23 @@
         "Output": {
           "path": "TestOutput/finra_ap_result.txt"
         }
+      }
+    },
+    {
+      "id": "aggregate_rules_local_0",
+      "node_id": 0,
+      "deps": [
+        "rule_0",
+        "rule_1",
+        "rule_2",
+        "rule_3",
+        "rule_4",
+        "rule_5",
+        "rule_6",
+        "rule_7"
+      ],
+      "kind": {
+        "Aggregate": {}
       }
     }
   ],
