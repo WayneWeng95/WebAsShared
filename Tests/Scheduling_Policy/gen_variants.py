@@ -70,14 +70,24 @@ POLICIES = ("pack", "balanced", "spread", "random")
 # (wash/spoofing/concentration) stay single full-data nodes (their cross-record
 # state can't be reconstructed from a slice). Effective fan = 3 + 5·S, so a
 # requested fanout F → S = round((F-3)/5): F=32 → S=6 (33 workers), F=48 → S=9.
-# The guest (Executor/guest/src/workloads/finra.rs) reads rule_id|shard_idx<<8|
-# n_shards<<16 from its single packed arg and writes a UNIQUE output slot per
-# (rule,shard) so the aggregator splices each partial once.
+# The guest (Executor/guest/src/workloads/finra.rs) reads rule_id (bits 0..3),
+# shard_idx (bits 3..7), n_shards (bits 7..11) from its single packed arg and
+# writes a UNIQUE output slot per (rule,shard) so the aggregator splices each
+# partial once. The bit layout is deliberately SMALL: the partitioner's
+# collect_slots treats every integer in a node's kind as a candidate slot, so a
+# large packed arg (or output slot) would overflow STREAM_SLOT_COUNT (2048).
 FINRA_STATEFUL = (2, 3, 4)            # WASH_TRADE, SPOOFING, CONCENTRATION
 FINRA_STATELESS = (0, 1, 5, 6, 7)     # PRICE_OUTLIER, LARGE_ORDER, AFTER_HOURS, PENNY_STOCK, ROUND_LOT
 FINRA_RULE_OUT_BASE = 10              # stateful rule i → slot 10+i (matches guest)
-FINRA_SHARD_OUT_BASE = 1000          # stateless shard → 1000 + rule_id*16 + shard_idx (matches guest)
+FINRA_SHARD_OUT_BASE = 400           # stateless shard → 400 + rule_id*16 + shard_idx (matches guest)
 FINRA_SHARD_STRIDE = 16
+
+
+def _finra_pack_arg(rule_id: int, shard_idx: int, n_shards: int) -> int:
+    """Pack (rule_id, shard_idx, n_shards) into one small u32 matching the guest's
+    bit layout (rule_id:0..3, shard_idx:3..7, n_shards:7..11). Kept < 2048 so the
+    partitioner's collect_slots doesn't mistake it for a high slot number."""
+    return (rule_id & 0x7) | ((shard_idx & 0xF) << 3) | ((n_shards & 0xF) << 7)
 
 
 def source_dag(workload: str) -> str:
@@ -273,8 +283,7 @@ def _build_finra_hybrid(d: dict, policy: str, nodes: int, fanout: int,
     fan = [rule_node(f"rule_{i}", i, FINRA_RULE_OUT_BASE + i) for i in FINRA_STATEFUL]
     for i in FINRA_STATELESS:
         for k in range(S):
-            packed = i | (k << 8) | (S << 16)
-            fan.append(rule_node(f"rule_{i}_s{k}", packed,
+            fan.append(rule_node(f"rule_{i}_s{k}", _finra_pack_arg(i, k, S),
                                   FINRA_SHARD_OUT_BASE + i * FINRA_SHARD_STRIDE + k))
 
     node_ids = _fan_placement(len(fan), nodes, policy, pack_cap)

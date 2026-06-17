@@ -45,11 +45,12 @@ const RULE_OUT_BASE: u32 = 10;
 // Sharded stateless rules write a UNIQUE slot per (rule, shard) so the aggregator
 // splices each partial exactly once (a repeated slot would double-count, and
 // distinct slots also avoid concurrent same-slot appends from parallel shards).
-// Slot = SHARD_OUT_BASE + rule_id*SHARD_STRIDE + shard_idx, kept well above all
-// other finra slots (5,6,10..17,200,300,301). Only used when n_shards > 1; the
-// unsharded path still writes RULE_OUT_BASE+rule_id (10..17), so existing DAGs
-// are unaffected.
-const SHARD_OUT_BASE: u32 = 1000;
+// Slot = SHARD_OUT_BASE + rule_id*SHARD_STRIDE + shard_idx, kept clear of all
+// other finra slots (5,6,10..17,200,300,301) AND small enough that the
+// partitioner's slot bookkeeping stays under STREAM_SLOT_COUNT (2048). Only used
+// when n_shards > 1; the unsharded path still writes RULE_OUT_BASE+rule_id
+// (10..17), so existing DAGs are unaffected.
+const SHARD_OUT_BASE: u32 = 400;
 const SHARD_STRIDE: u32 = 16; // max shards per rule
 
 // ── Packed columnar layout ────────────────────────────────────────────────────
@@ -270,19 +271,23 @@ pub extern "C" fn finra_fetch_public(_unused: u32) {
 /// results to stream slot 10 + rule_id. No CSV re-parse; integer-keyed.
 ///
 /// The single u32 arg is PACKED so the existing 1-param ABI can carry an optional
-/// data-shard spec (set by Scheduling_Policy/gen_variants.py's hybrid transform):
-///   bits  0..8   rule_id    (0..7)
-///   bits  8..16  shard_idx  (which slice this worker handles)
-///   bits 16..24  n_shards   (0 or 1 = no sharding, run full data)
-/// Backward-compatible: callers that pass a bare rule_id (0..7) get n_shards=0 →
-/// full data, identical to before. Only the 5 STATELESS per-record rules honour
-/// the shard; the 3 STATEFUL rules (wash/spoofing/concentration) always scan the
-/// whole dataset — their cross-record state can't be reconstructed from a slice.
+/// data-shard spec (set by Scheduling_Policy/gen_variants.py's hybrid transform).
+/// The fields use SMALL bit positions on purpose: the partitioner's collect_slots
+/// scans every integer in a node's kind JSON as a candidate slot, so a large arg
+/// would blow past STREAM_SLOT_COUNT (2048). Layout:
+///   bits 0..3   rule_id    (0..7)
+///   bits 3..7   shard_idx  (which slice this worker handles, 0..15)
+///   bits 7..11  n_shards   (0 or 1 = no sharding, run full data; up to 15)
+/// Backward-compatible: callers that pass a bare rule_id (0..7) decode to
+/// shard_idx=0, n_shards=0 → full data, identical to before. Only the 5 STATELESS
+/// per-record rules honour the shard; the 3 STATEFUL rules (wash/spoofing/
+/// concentration) always scan the whole dataset — their cross-record state can't
+/// be reconstructed from a slice.
 #[no_mangle]
 pub extern "C" fn finra_audit_rule(packed: u32) {
-    let rule_id = packed & 0xFF;
-    let shard_idx = (packed >> 8) & 0xFF;
-    let n_shards = (packed >> 16) & 0xFF;
+    let rule_id = packed & 0x7;
+    let shard_idx = (packed >> 3) & 0xF;
+    let n_shards = (packed >> 7) & 0xF;
     let records = ShmApi::read_all_stream_records(INPUT_AGG_SLOT);
     let out_slot = if n_shards > 1 {
         SHARD_OUT_BASE + rule_id * SHARD_STRIDE + shard_idx

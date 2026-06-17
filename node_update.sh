@@ -24,7 +24,14 @@ warn() { echo -e "${YELLOW}[node-update]${NC} $*"; }
 info "Pulling latest code…"
 git pull
 
-# ── 2.rebuild ──────────────────────────────────
+# ── 2. Stop any running agent, then rebuild ──────────────────────────────────
+# build.sh can't overwrite the node-agent/host binaries while the agent is
+# running ("Text file busy"), so stop it first.
+if pgrep -f "node-agent (start|--config)" >/dev/null 2>&1; then
+    warn "Stopping running node-agent before rebuild…"
+    pkill -f "node-agent (start|--config)" || true
+    sleep 2
+fi
 
 info "Building all projects (./build.sh)…"
 ./build.sh
