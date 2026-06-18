@@ -46,7 +46,14 @@ pub fn collect_slots(v: &Value, out: &mut BTreeSet<u32>) {
             }
         }
         Value::Object(map) => {
-            for val in map.values() {
+            for (k, val) in map {
+                // `wasm_arg` is a guest-side function parameter, NOT a slot — e.g.
+                // the SGD workloads pack (input_slot | output_slot<<16) into it,
+                // a huge integer. Scanning it would poison `next_slot` and push
+                // generated RemoteRecv slots out of range (deadlocking the gather).
+                if k == "wasm_arg" {
+                    continue;
+                }
                 collect_slots(val, out);
             }
         }

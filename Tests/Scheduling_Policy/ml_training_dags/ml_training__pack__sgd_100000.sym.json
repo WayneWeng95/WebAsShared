@@ -1,7 +1,7 @@
 {
   "shm_path_prefix": "/dev/shm/rdma_sgd_ap",
   "log_level": "info",
-  "total_nodes": 3,
+  "total_nodes": 4,
   "transfer": true,
   "placement_policy": "pack",
   "nodes": [
@@ -12,7 +12,8 @@
       "kind": {
         "Input": {
           "path": "TestData/ml/sgd_100000.csv",
-          "prefetch": true
+          "prefetch": true,
+          "replicate": true
         }
       }
     },
@@ -40,7 +41,7 @@
         "Func": {
           "func": "sgd_encode",
           "arg": 10,
-          "wasm_arg": 6553610
+          "wasm_arg": 2621450
         }
       }
     },
@@ -54,7 +55,7 @@
         "Func": {
           "func": "sgd_encode",
           "arg": 11,
-          "wasm_arg": 6619147
+          "wasm_arg": 2686987
         }
       }
     },
@@ -68,7 +69,7 @@
         "Func": {
           "func": "sgd_encode",
           "arg": 12,
-          "wasm_arg": 6684684
+          "wasm_arg": 2752524
         }
       }
     },
@@ -82,7 +83,7 @@
         "Func": {
           "func": "sgd_encode",
           "arg": 13,
-          "wasm_arg": 6750221
+          "wasm_arg": 2818061
         }
       }
     },
@@ -96,7 +97,7 @@
         "Func": {
           "func": "sgd_encode",
           "arg": 14,
-          "wasm_arg": 6815758
+          "wasm_arg": 2883598
         }
       }
     },
@@ -110,7 +111,7 @@
         "Func": {
           "func": "sgd_encode",
           "arg": 15,
-          "wasm_arg": 6881295
+          "wasm_arg": 2949135
         }
       }
     },
@@ -124,7 +125,7 @@
         "Func": {
           "func": "sgd_encode",
           "arg": 16,
-          "wasm_arg": 6946832
+          "wasm_arg": 3014672
         }
       }
     },
@@ -138,150 +139,144 @@
         "Func": {
           "func": "sgd_encode",
           "arg": 17,
-          "wasm_arg": 7012369
+          "wasm_arg": 3080209
         }
       }
     },
     {
       "id": "train_0",
-      "placement": "all",
       "deps": [
         "encode_0"
       ],
       "kind": {
         "Func": {
           "func": "sgd_grad",
-          "arg": 100,
-          "wasm_arg": 19660900
+          "arg": 40,
+          "wasm_arg": 4194344
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 64
     },
     {
       "id": "train_1",
-      "placement": "all",
       "deps": [
         "encode_1"
       ],
       "kind": {
         "Func": {
           "func": "sgd_grad",
-          "arg": 101,
-          "wasm_arg": 19726437
+          "arg": 41,
+          "wasm_arg": 4259881
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 65
     },
     {
       "id": "train_2",
-      "placement": "all",
       "deps": [
         "encode_2"
       ],
       "kind": {
         "Func": {
           "func": "sgd_grad",
-          "arg": 102,
-          "wasm_arg": 19791974
+          "arg": 42,
+          "wasm_arg": 4325418
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 66
     },
     {
       "id": "train_3",
-      "placement": "all",
       "deps": [
         "encode_3"
       ],
       "kind": {
         "Func": {
           "func": "sgd_grad",
-          "arg": 103,
-          "wasm_arg": 19857511
+          "arg": 43,
+          "wasm_arg": 4390955
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 67
     },
     {
       "id": "train_4",
-      "placement": "all",
       "deps": [
         "encode_4"
       ],
       "kind": {
         "Func": {
           "func": "sgd_grad",
-          "arg": 104,
-          "wasm_arg": 19923048
+          "arg": 44,
+          "wasm_arg": 4456492
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 68
     },
     {
       "id": "train_5",
-      "placement": "all",
       "deps": [
         "encode_5"
       ],
       "kind": {
         "Func": {
           "func": "sgd_grad",
-          "arg": 105,
-          "wasm_arg": 19988585
+          "arg": 45,
+          "wasm_arg": 4522029
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 69
     },
     {
       "id": "train_6",
-      "placement": "all",
       "deps": [
         "encode_6"
       ],
       "kind": {
         "Func": {
           "func": "sgd_grad",
-          "arg": 106,
-          "wasm_arg": 20054122
+          "arg": 46,
+          "wasm_arg": 4587566
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 70
     },
     {
       "id": "train_7",
-      "placement": "all",
       "deps": [
         "encode_7"
       ],
       "kind": {
         "Func": {
           "func": "sgd_grad",
-          "arg": 107,
-          "wasm_arg": 20119659
+          "arg": 47,
+          "wasm_arg": 4653103
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 71
     },
     {
       "id": "aggregate_train",
-      "placement": "all",
       "deps": [
-        "train_0",
-        "train_1",
-        "train_2",
-        "train_3",
-        "train_4",
-        "train_5",
-        "train_6",
-        "train_7"
+        "aggregate_train_local_0"
       ],
       "kind": {
         "Aggregate": {
-          "upstream": [
-            300,
-            301,
-            302,
-            303,
-            304,
-            305,
-            306,
-            307
-          ],
-          "downstream": 1200
+          "downstream": 1200,
+          "upstream_nodes": [
+            "aggregate_train_local_0"
+          ]
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "aggregate_global",
@@ -311,8 +306,8 @@
       "kind": {
         "Func": {
           "func": "sgd_validate",
-          "arg": 100,
-          "wasm_arg": 524388
+          "arg": 40,
+          "wasm_arg": 524328
         }
       }
     },
@@ -326,6 +321,24 @@
           "path": "TestOutput/ml_training_ap_result.txt"
         }
       }
+    },
+    {
+      "id": "aggregate_train_local_0",
+      "node_id": 0,
+      "deps": [
+        "train_0",
+        "train_1",
+        "train_2",
+        "train_3",
+        "train_4",
+        "train_5",
+        "train_6",
+        "train_7"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
     }
-  ]
+  ],
+  "converge_on_coordinator": true
 }

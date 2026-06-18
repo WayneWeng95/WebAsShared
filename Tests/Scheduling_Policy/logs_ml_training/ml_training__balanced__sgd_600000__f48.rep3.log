@@ -1,0 +1,14 @@
+[config] auto-detected node_id=0 (local IP = cluster.ips[0] = 10.10.1.2)
+Submitting job to coordinator at 10.10.1.2:9500...
+Job submitted: job_1781780054703
+Waiting for job completion...
+
+=== Job Result ===
+Job ID:  job_1781780054703
+Success: true
+Summary:
+node 0 (local): 3753ms
+node 3 (worker): 2405ms
+node 1 (worker): 2296ms
+node 2 (worker): 2389ms
+total wall time: 3905ms

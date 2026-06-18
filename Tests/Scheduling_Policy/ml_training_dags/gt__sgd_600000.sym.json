@@ -1,7 +1,7 @@
 {
   "shm_path_prefix": "/dev/shm/rdma_sgd_ap",
   "log_level": "info",
-  "total_nodes": 3,
+  "total_nodes": 1,
   "transfer": true,
   "placement_policy": "pack",
   "nodes": [
@@ -11,8 +11,9 @@
       "deps": [],
       "kind": {
         "Input": {
-          "path": "TestData/ml/sgd_100000.csv",
-          "prefetch": true
+          "path": "TestData/ml/sgd_600000.csv",
+          "prefetch": true,
+          "replicate": true
         }
       }
     },
@@ -32,7 +33,6 @@
     },
     {
       "id": "encode_0",
-      "placement": "all",
       "deps": [
         "partition"
       ],
@@ -42,11 +42,11 @@
           "arg": 10,
           "wasm_arg": 6553610
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "encode_1",
-      "placement": "all",
       "deps": [
         "partition"
       ],
@@ -56,11 +56,11 @@
           "arg": 11,
           "wasm_arg": 6619147
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "encode_2",
-      "placement": "all",
       "deps": [
         "partition"
       ],
@@ -70,11 +70,11 @@
           "arg": 12,
           "wasm_arg": 6684684
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "encode_3",
-      "placement": "all",
       "deps": [
         "partition"
       ],
@@ -84,11 +84,11 @@
           "arg": 13,
           "wasm_arg": 6750221
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "encode_4",
-      "placement": "all",
       "deps": [
         "partition"
       ],
@@ -98,11 +98,11 @@
           "arg": 14,
           "wasm_arg": 6815758
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "encode_5",
-      "placement": "all",
       "deps": [
         "partition"
       ],
@@ -112,11 +112,11 @@
           "arg": 15,
           "wasm_arg": 6881295
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "encode_6",
-      "placement": "all",
       "deps": [
         "partition"
       ],
@@ -126,11 +126,11 @@
           "arg": 16,
           "wasm_arg": 6946832
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "encode_7",
-      "placement": "all",
       "deps": [
         "partition"
       ],
@@ -140,11 +140,11 @@
           "arg": 17,
           "wasm_arg": 7012369
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "train_0",
-      "placement": "all",
       "deps": [
         "encode_0"
       ],
@@ -154,11 +154,12 @@
           "arg": 100,
           "wasm_arg": 19660900
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 300
     },
     {
       "id": "train_1",
-      "placement": "all",
       "deps": [
         "encode_1"
       ],
@@ -168,11 +169,12 @@
           "arg": 101,
           "wasm_arg": 19726437
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 301
     },
     {
       "id": "train_2",
-      "placement": "all",
       "deps": [
         "encode_2"
       ],
@@ -182,11 +184,12 @@
           "arg": 102,
           "wasm_arg": 19791974
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 302
     },
     {
       "id": "train_3",
-      "placement": "all",
       "deps": [
         "encode_3"
       ],
@@ -196,11 +199,12 @@
           "arg": 103,
           "wasm_arg": 19857511
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 303
     },
     {
       "id": "train_4",
-      "placement": "all",
       "deps": [
         "encode_4"
       ],
@@ -210,11 +214,12 @@
           "arg": 104,
           "wasm_arg": 19923048
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 304
     },
     {
       "id": "train_5",
-      "placement": "all",
       "deps": [
         "encode_5"
       ],
@@ -224,11 +229,12 @@
           "arg": 105,
           "wasm_arg": 19988585
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 305
     },
     {
       "id": "train_6",
-      "placement": "all",
       "deps": [
         "encode_6"
       ],
@@ -238,11 +244,12 @@
           "arg": 106,
           "wasm_arg": 20054122
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 306
     },
     {
       "id": "train_7",
-      "placement": "all",
       "deps": [
         "encode_7"
       ],
@@ -252,36 +259,24 @@
           "arg": 107,
           "wasm_arg": 20119659
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 307
     },
     {
       "id": "aggregate_train",
-      "placement": "all",
       "deps": [
-        "train_0",
-        "train_1",
-        "train_2",
-        "train_3",
-        "train_4",
-        "train_5",
-        "train_6",
-        "train_7"
+        "aggregate_train_local_0"
       ],
       "kind": {
         "Aggregate": {
-          "upstream": [
-            300,
-            301,
-            302,
-            303,
-            304,
-            305,
-            306,
-            307
-          ],
-          "downstream": 1200
+          "downstream": 1200,
+          "upstream_nodes": [
+            "aggregate_train_local_0"
+          ]
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "aggregate_global",
@@ -326,6 +321,24 @@
           "path": "TestOutput/ml_training_ap_result.txt"
         }
       }
+    },
+    {
+      "id": "aggregate_train_local_0",
+      "node_id": 0,
+      "deps": [
+        "train_0",
+        "train_1",
+        "train_2",
+        "train_3",
+        "train_4",
+        "train_5",
+        "train_6",
+        "train_7"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
     }
-  ]
+  ],
+  "converge_on_coordinator": true
 }

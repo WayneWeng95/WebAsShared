@@ -1,0 +1,323 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "load_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/sgd_300000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_0"
+        ],
+        "id": "partition_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6553610,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6619147,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6684684,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6750221,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6815758,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6881295,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6946832,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7012369,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_0"
+        ],
+        "id": "train_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19660900,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_1"
+        ],
+        "id": "train_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19726437,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_2"
+        ],
+        "id": "train_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19791974,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_3"
+        ],
+        "id": "train_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19857511,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_4"
+        ],
+        "id": "train_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19923048,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_5"
+        ],
+        "id": "train_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19988585,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_6"
+        ],
+        "id": "train_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20054122,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_7"
+        ],
+        "id": "train_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20119659,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_0"
+        ],
+        "id": "aggregate_train",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1200,
+            "upstream": [
+              2
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1201,
+            "upstream": [
+              1200
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "update",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1201,
+            "func": "sgd_update"
+          }
+        }
+      },
+      {
+        "deps": [
+          "update"
+        ],
+        "id": "validate",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524388,
+            "func": "sgd_validate"
+          }
+        }
+      },
+      {
+        "deps": [
+          "validate"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/ml_training_ap_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_0",
+          "train_1",
+          "train_2",
+          "train_3",
+          "train_4",
+          "train_5",
+          "train_6",
+          "train_7"
+        ],
+        "id": "aggregate_train_local_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 2,
+            "upstream": [
+              300,
+              301,
+              302,
+              303,
+              304,
+              305,
+              306,
+              307
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/ml/sgd_300000.csv",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_sgd_ap",
+  "transfer": true
+}

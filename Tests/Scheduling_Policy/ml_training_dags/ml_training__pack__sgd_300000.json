@@ -1,0 +1,689 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "load_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/sgd_300000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_0"
+        ],
+        "id": "partition_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_0_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2621450,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_1_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2686987,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_2_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2752524,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_3_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2818061,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_4_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2883598,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_5_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2949135,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_6_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3014672,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_7_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3080209,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_0_0"
+        ],
+        "id": "train_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 4194344,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_1_0"
+        ],
+        "id": "train_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 4259881,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_2_0"
+        ],
+        "id": "train_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 4325418,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_3_0"
+        ],
+        "id": "train_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 4390955,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_4_0"
+        ],
+        "id": "train_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 4456492,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_5_0"
+        ],
+        "id": "train_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 4522029,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_6_0"
+        ],
+        "id": "train_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 4587566,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_7_0"
+        ],
+        "id": "train_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 4653103,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_0"
+        ],
+        "id": "aggregate_train",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1200,
+            "upstream": [
+              2
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1201,
+            "upstream": [
+              1200
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "update",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1201,
+            "func": "sgd_update"
+          }
+        }
+      },
+      {
+        "deps": [
+          "update"
+        ],
+        "id": "validate",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524328,
+            "func": "sgd_validate"
+          }
+        }
+      },
+      {
+        "deps": [
+          "validate"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/ml_training_ap_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_0",
+          "train_1",
+          "train_2",
+          "train_3",
+          "train_4",
+          "train_5",
+          "train_6",
+          "train_7"
+        ],
+        "id": "aggregate_train_local_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 2,
+            "upstream": [
+              64,
+              65,
+              66,
+              67,
+              68,
+              69,
+              70,
+              71
+            ]
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "deps": [],
+        "id": "load_1",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/sgd_300000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_1"
+        ],
+        "id": "partition_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_0_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2621450,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_1_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2686987,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_2_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2752524,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_3_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2818061,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_4_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2883598,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_5_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2949135,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_6_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3014672,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_7_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3080209,
+            "func": "sgd_encode"
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "deps": [],
+        "id": "load_2",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/sgd_300000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_2"
+        ],
+        "id": "partition_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_0_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2621450,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_1_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2686987,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_2_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2752524,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_3_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2818061,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_4_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2883598,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_5_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2949135,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_6_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3014672,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_7_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3080209,
+            "func": "sgd_encode"
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "deps": [],
+        "id": "load_3",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/sgd_300000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_3"
+        ],
+        "id": "partition_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_0_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2621450,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_1_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2686987,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_2_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2752524,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_3_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2818061,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_4_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2883598,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_5_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2949135,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_6_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3014672,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_7_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3080209,
+            "func": "sgd_encode"
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/ml/sgd_300000.csv",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_sgd_ap",
+  "transfer": true
+}

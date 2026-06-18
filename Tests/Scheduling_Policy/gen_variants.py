@@ -157,10 +157,27 @@ def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
         _build_finra_hybrid(d, policy, nodes, fanout, pack_cap)
         return d
 
+    # ml_training: the SGD fan is HOMOGENEOUS (W identical sgd_grad workers, each on
+    # a disjoint shard), so a fanout request regenerates the whole auto-placement DAG
+    # at width W = fanout (W encode + W train nodes) via gen_sgd_ap_dag, then the
+    # generic fan-placement below assigns the train_* fan per policy with pack_cap —
+    # the SGD analogue of finra's fanout sweep, minus the heterogeneous-rule hybrid.
+    if workload == "ml_training" and fanout is not None:
+        import gen_sgd_ap_dag
+        d = gen_sgd_ap_dag.build_dag(fanout)
+        d["total_nodes"] = nodes
+        d["placement_policy"] = policy
+        if input_path is not None:
+            for n in d.get("nodes", []):
+                k = n.get("kind", {})
+                if isinstance(k, dict) and "Input" in k and "path" in k["Input"]:
+                    k["Input"]["path"] = input_path
+
     # Optional fanout override: set the parallel stage's `fanout`. On a
     # placement:"all" node this is the TOTAL worker count split across the
-    # cluster (e.g. fanout 64 on 4 nodes → 16 workers/node).
-    if fanout is not None:
+    # cluster (e.g. fanout 64 on 4 nodes → 16 workers/node). ml_training already
+    # regenerated its fan above (no `fanout` field), so it skips this.
+    if fanout is not None and workload != "ml_training":
         touched = 0
         for n in d.get("nodes", []):
             if "fanout" in n:
@@ -173,7 +190,10 @@ def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
     # `weighted` policy that fills nodes one-at-a-time up to `pack_cap` workers
     # (= physical cores/node), so pack uses ceil(fanout/cap) nodes instead of
     # spreading thin. `balanced` and the others keep their named behaviour.
-    if pack_cap and policy == "pack":
+    # (ml_training uses explicit per-node placement via _fan_placement below, so it
+    # does NOT take the weighted-policy route — that would also distribute the
+    # auto-placed reducer/validate nodes off node 0.)
+    if pack_cap and policy == "pack" and workload != "ml_training":
         if fanout is None:
             sys.exit("[gen] --pack-cap requires --fanout (needs the worker count)")
         weights = first_fit_weights(fanout, nodes, pack_cap)
@@ -207,6 +227,24 @@ def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
         node_ids = _fan_placement(len(fan_nodes), nodes, policy, pack_cap)
         for (_, n), nid in zip(fan_nodes, node_ids):
             n["node_id"] = nid
+
+        # Co-locate each fan worker's per-shard PRODUCER (an `encode_*` node) on the
+        # SAME machine as the worker, instead of leaving it placement:"all". Without
+        # this every node parses ALL W shards — a fixed W-wide cost that swamps the
+        # placement signal (e.g. at W=32 it makes balanced and pack converge on the
+        # encode cost rather than the gather). With co-location a node only parses the
+        # shards it trains on; the cheap split (`partition`) stays placement:"all", so
+        # the same-machine text shard is present for the placed encoder to read. This
+        # mirrors the other workloads, which never replicate input-prep W times.
+        # (Only the SGD ml_training fan has such producers; finra rules read a shared
+        # input, so this loop is a no-op there.)
+        id_to_obj = {n["id"]: n for n in d.get("nodes", [])}
+        for (_, fn), nid in zip(fan_nodes, node_ids):
+            for dep in fn.get("deps", []):
+                if dep.startswith("encode_") and dep in id_to_obj:
+                    prod = id_to_obj[dep]
+                    prod.pop("placement", None)
+                    prod["node_id"] = nid
 
         # Each rule's hardcoded guest output slot (RULE_OUT_BASE + i) — take it from
         # the original aggregator's upstream list so the partitioner knows where the
