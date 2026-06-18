@@ -15,7 +15,7 @@ import os
 import struct
 import subprocess
 import sys
-import tempfile
+import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -38,24 +38,48 @@ def grid(workers):
     return r, workers // r
 
 
+def _read_smaps(pid):
+    """(private_kb, shared_kb) of `pid` from /proc/<pid>/smaps_rollup.
+    Private = Private_Clean+Private_Dirty; Shared = Shared_* (common runtime/lib
+    pages, shared across the co-resident Faaslets)."""
+    priv = shared = 0
+    try:
+        with open('/proc/%d/smaps_rollup' % pid) as f:
+            for ln in f:
+                key = ln.split(':', 1)[0]
+                if key in ('Private_Clean', 'Private_Dirty'):
+                    priv += int(ln.split()[1])
+                elif key in ('Shared_Clean', 'Shared_Dirty'):
+                    shared += int(ln.split()[1])
+    except OSError:
+        pass
+    return priv, shared
+
+
 def run_faaslet(frame):
     """One fresh WASM instance (Faaslet): feed `frame` on stdin, return
-    (stdout_bytes, peak_rss_kb)."""
-    tf = tempfile.NamedTemporaryFile(delete=False)
-    tf.close()
-    p = subprocess.run(['/usr/bin/time', '-v', '-o', tf.name,
-                        WASMTIME, 'run', '--allow-precompiled', WASM],
-                       input=frame, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    rss_kb = 0
-    try:
-        with open(tf.name) as f:
-            for ln in f:
-                if 'Maximum resident set size' in ln:
-                    rss_kb = int(ln.rsplit(':', 1)[1])
-                    break
-    finally:
-        os.unlink(tf.name)
-    return p.stdout, rss_kb
+    (stdout_bytes, peak_private_kb, peak_shared_kb). The peak RSS is split into
+    private vs shared by sampling the child's smaps_rollup at ~2 ms while it runs,
+    so the concurrent footprint = Σ private + shared-once (matches the WasMem
+    metric), not Σ full RSS (which would count the shared wasmtime runtime N×)."""
+    p = subprocess.Popen([WASMTIME, 'run', '--allow-precompiled', WASM],
+                         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                         stderr=subprocess.DEVNULL)
+    box = {}
+
+    def _io():
+        box['out'] = p.communicate(input=frame)[0]
+
+    t = threading.Thread(target=_io)
+    t.start()
+    peak_priv = peak_shared = 0
+    while t.is_alive():
+        pr, sh = _read_smaps(p.pid)
+        if pr + sh > peak_priv + peak_shared:
+            peak_priv, peak_shared = pr, sh
+        time.sleep(0.002)
+    t.join()
+    return box.get('out', b''), peak_priv, peak_shared
 
 
 def main():
@@ -98,15 +122,20 @@ def main():
         i, j = ij
         a_buf = r.get('%s_a_%d' % (uid, i))
         b_buf = r.get('%s_b_%d' % (uid, j))
-        out, rss = run_faaslet(hdr + a_buf + b_buf)
+        out, priv, shared = run_faaslet(hdr + a_buf + b_buf)
         r.set('%s_c_%d_%d' % (uid, i, j), out)
-        return (i, j), len(a_buf) + len(b_buf) + len(out), rss
+        return (i, j), len(a_buf) + len(b_buf) + len(out), priv, shared
 
     cells = [(i, j) for i in range(R) for j in range(C)]
     with ThreadPoolExecutor(max_workers=W) as ex:
         results = list(ex.map(worker, cells))
-    state_bytes += sum(sb for _, sb, _ in results)
-    peak_rss_kb = max((rss for _, _, rss in results), default=0)
+    state_bytes += sum(sb for _, sb, _, _ in results)
+    # The r·c block workers run CONCURRENTLY (a Faaslet per block), so the
+    # footprint is Σ private RSS + shared runtime once (max), not the max of one
+    # (which DECREASED with fan-out as blocks shrank), nor Σ full RSS (which would
+    # count the shared wasmtime runtime once per block).
+    peak_rss_kb = (sum(pr for _, _, pr, _ in results)
+                   + max((sh for _, _, _, sh in results), default=0))
 
     # ── assemble: read C blocks, fold checksum (Σ of all entries) ─────────────
     checksum = 0

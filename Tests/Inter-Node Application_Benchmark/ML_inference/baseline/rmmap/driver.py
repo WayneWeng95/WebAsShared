@@ -34,17 +34,37 @@ HEADER = ('size_mb,workers,topo,compute_ms,samples_per_s,peak_mem_mb,'
 _P = pickle.HIGHEST_PROTOCOL
 
 
+def _smaps_kb():
+    """(private_kb, shared_kb) of THIS process from /proc/self/smaps_rollup.
+    Private = Private_Clean+Private_Dirty (per-process); Shared = Shared_* (common
+    library/runtime pages). Point-in-time; call at the memory high-water."""
+    priv = shared = 0
+    try:
+        with open('/proc/self/smaps_rollup') as f:
+            for ln in f:
+                key = ln.split(':', 1)[0]
+                if key in ('Private_Clean', 'Private_Dirty'):
+                    priv += int(ln.split()[1])
+                elif key in ('Shared_Clean', 'Shared_Dirty'):
+                    shared += int(ln.split()[1])
+    except OSError:
+        pass
+    return priv, shared
+
+
 def _worker(task):
     """One ES pod: re-fetch this shard + the model from Redis, predict, write
-    partial (correct,total,predsum) back. Returns serialized-byte count."""
+    partial (correct,total,predsum) back. Returns (serialized-byte count,
+    private_kb, shared_kb) — the last two for the concurrent-footprint sum."""
     uid, i = task
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
     sx = r.get('%s_x_%d' % (uid, i)); sy = r.get('%s_y_%d' % (uid, i)); mw = r.get('%s_model' % uid)
     X = pickle.loads(sx); y = pickle.loads(sy); W = pickle.loads(mw)
     corr, tot, psum = core.evaluate(X, y, W)
     out = pickle.dumps((corr, tot, psum), protocol=_P)
+    priv_kb, shared_kb = _smaps_kb()   # high-water: shard X/y + model resident
     r.set('%s_r_%d' % (uid, i), out)
-    return len(sx) + len(sy) + len(mw) + len(out)
+    return len(sx) + len(sy) + len(mw) + len(out), priv_kb, shared_kb
 
 
 def main():
@@ -71,7 +91,13 @@ def main():
         r.set('%s_x_%d' % (uid, i), bx); r.set('%s_y_%d' % (uid, i), by)
         ser += len(bx) + len(by)
     pool = Pool(processes=W)                          # worker-pod startup (counted)
-    ser += sum(pool.map(_worker, [(uid, i) for i in range(W)]))
+    results = pool.map(_worker, [(uid, i) for i in range(W)])
+    ser += sum(b for b, _, _ in results)
+    # Concurrent footprint: W separate pods each hold a PRIVATE shard+model, so
+    # sum their private RSS + the shared runtime once (max). (Was parent
+    # RUSAGE_SELF only — the worker pods were uncounted.)
+    peak_kb = (sum(p for _, p, _ in results)
+               + max((s for _, _, s in results), default=0))
     correct = total = predsum = 0
     for i in range(W):
         rb = r.get('%s_r_%d' % (uid, i)); ser += len(rb)
@@ -80,7 +106,7 @@ def main():
     pool.close(); pool.join()
 
     acc = 100.0 * correct / total if total else 0.0
-    peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+    peak_mb = peak_kb / 1024.0
     sps = n_samples / (compute_ms / 1000.0) if compute_ms else 0
     if want_header:
         print(HEADER)

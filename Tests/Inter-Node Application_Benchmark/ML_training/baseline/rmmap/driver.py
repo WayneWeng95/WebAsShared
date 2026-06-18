@@ -43,9 +43,28 @@ HEADER = ('size_mb,workers,topo,compute_ms,samples_per_s,peak_mem_mb,'
 _P = pickle.HIGHEST_PROTOCOL
 
 
+def _smaps_kb():
+    """(private_kb, shared_kb) of THIS process from /proc/self/smaps_rollup.
+    Private = Private_Clean+Private_Dirty (per-process); Shared = Shared_* (common
+    library/runtime pages). Point-in-time; call at the memory high-water."""
+    priv = shared = 0
+    try:
+        with open('/proc/self/smaps_rollup') as f:
+            for ln in f:
+                key = ln.split(':', 1)[0]
+                if key in ('Private_Clean', 'Private_Dirty'):
+                    priv += int(ln.split()[1])
+                elif key in ('Shared_Clean', 'Shared_Dirty'):
+                    shared += int(ln.split()[1])
+    except OSError:
+        pass
+    return priv, shared
+
+
 def _worker(task):
     """One ES pod: re-fetch this shard + the current model from Redis, compute
-    the integer gradient sum, write it back. Returns serialized-byte count."""
+    the integer gradient sum, write it back. Returns (serialized-byte count,
+    private_kb, shared_kb) — the last two for the concurrent-footprint sum."""
     uid, i = task
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT)
     sx = r.get('%s_x_%d' % (uid, i))
@@ -54,8 +73,9 @@ def _worker(task):
     X = pickle.loads(sx); y = pickle.loads(sy); W = pickle.loads(mw)
     g = core.grad_sum(X, y, W)
     gbuf = pickle.dumps(g, protocol=_P)
+    priv_kb, shared_kb = _smaps_kb()   # high-water: shard X/y, model, gradient
     r.set('%s_g_%d' % (uid, i), gbuf)
-    return len(sx) + len(sy) + len(mw) + len(gbuf)
+    return len(sx) + len(sy) + len(mw) + len(gbuf), priv_kb, shared_kb
 
 
 def main():
@@ -85,12 +105,19 @@ def main():
         r.set('%s_x_%d' % (uid, i), bx); r.set('%s_y_%d' % (uid, i), by)
         ser_bytes += len(bx) + len(by)
     pool = Pool(processes=W)                          # worker-pod startup (counted)
+    peak_kb = 0   # peak concurrent worker footprint over epochs
     for _e in range(epochs):
         mbuf = pickle.dumps(Wt, protocol=_P)
         r.set('%s_model' % uid, mbuf)
         # parallel pods re-fetch shard+model, emit gradient
-        worker_bytes = pool.map(_worker, [(uid, i) for i in range(W)])
-        ser_bytes += sum(worker_bytes)
+        results = pool.map(_worker, [(uid, i) for i in range(W)])
+        ser_bytes += sum(b for b, _, _ in results)
+        # Concurrent footprint: W separate pods each hold a PRIVATE shard+model,
+        # so sum their private RSS + the shared runtime once (max). Track the
+        # per-epoch peak. (Was parent RUSAGE_SELF only — the pods were uncounted.)
+        ep_kb = (sum(p for _, p, _ in results)
+                 + max((s for _, _, s in results), default=0))
+        peak_kb = max(peak_kb, ep_kb)
         # aggregator: get the W gradients, sum, one central step
         gsum = np.zeros((core.N_CLASSES, F), dtype=np.int64)
         for i in range(W):
@@ -104,7 +131,7 @@ def main():
     correct, total = core.accuracy(Wt, X, y)
     acc = 100.0 * correct / total if total else 0.0
     ck = core.checksum(Wt)
-    peak_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024.0
+    peak_mb = peak_kb / 1024.0
     sps = n_samples * epochs / (compute_ms / 1000.0) if compute_ms else 0
     ser_mb = ser_bytes / (1024 * 1024)
 

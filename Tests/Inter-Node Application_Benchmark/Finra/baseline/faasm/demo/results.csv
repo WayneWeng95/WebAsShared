@@ -1,4 +1,4 @@
 size_trades,topo,e2e_ms,throughput_trades_s,peak_mem_mb,state_kv_mb,total_violations
-10000,wasm-redis,78.1,128110,48.9,3.29,6183
-100000,wasm-redis,521.1,191907,146.5,33.74,49763
-1000000,wasm-redis,5154.9,193992,465.0,346.01,456574
+10000,wasm-redis,67.5,148257,62.3,3.29,6183
+100000,wasm-redis,422.6,236626,145.0,33.74,49763
+1000000,wasm-redis,5164.1,193644,678.3,346.01,456574

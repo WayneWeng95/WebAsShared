@@ -2,8 +2,8 @@
 """plot_mem_largest.py — grouped bar chart of peak memory (incl. KV) at each
 workload's LARGEST load group, across all five frameworks.
 
-Reads mem_footprint_raw.csv (Faasm = raw single-instance RSS, NOT the concurrent
-N x estimate). Largest load per workload = max input size x max fan-out.
+Reads mem_footprint.csv (Faasm = concurrent footprint measured by the driver).
+Largest load per workload = max input size x max fan-out.
 Saves figs/mem_largest_load.pdf.
 """
 import os
@@ -25,10 +25,10 @@ YLABEL_SIZE = 16
 
 FRAMEWORKS = ["WasMem-AOT", "RMMap", "Faasm", "Cloudburst"]   # = CSV column names
 COLOR = {
-    "WasMem-AOT":  "#2057c7",   # engine blue (ours, AOT only)
-    "RMMap":       "#1d7a3e",   # green
-    "Faasm":       "#2a9d8f",   # teal
-    "Cloudburst":  "#edae49",   # amber
+    "WasMem-AOT":  "#5a82c2",   # muted engine blue (ours, AOT only)
+    "RMMap":       "#5fa06f",   # muted green
+    "Faasm":       "#5aa9a0",   # muted teal
+    "Cloudburst":  "#e2c16b",   # softer amber
 }
 # Display labels for the figure (drop the -AOT suffix; it's just our system).
 DISPLAY = {"WasMem-AOT": "WasMem"}
@@ -43,7 +43,7 @@ LARGEST = [
     ("ML_inference", "ML inference\n600k",       {"size_mb": 19.5, "workers": 16.0}),
 ]
 
-df = pd.read_csv(os.path.join(HERE, "mem_footprint_raw.csv"))
+df = pd.read_csv(os.path.join(HERE, "mem_footprint.csv"))
 
 labels, vals = [], {fw: [] for fw in FRAMEWORKS}
 for wl, lab, filt in LARGEST:
@@ -74,7 +74,7 @@ for j in range(len(labels)):
 
 nb = len(BASELINES)
 wb = 0.26
-fig, ax = plt.subplots(figsize=(9, 4.8))
+fig, ax = plt.subplots(figsize=(9, 4.5))
 ax.axhline(0.0, color="#444", linewidth=1, zorder=0)
 for i, fw in enumerate(BASELINES):
     off = (i - (nb - 1) / 2) * wb
@@ -84,7 +84,8 @@ for i, fw in enumerate(BASELINES):
         if np.isnan(s):
             continue
         ax.annotate(f"{s:.0f}%", (b.get_x() + b.get_width() / 2, s),
-                    ha="center", va="bottom" if s >= 0 else "top", fontsize=8,
+                    ha="center", va="bottom" if s >= 0 else "top", fontsize=10,
+                    fontweight="bold",
                     xytext=(0, 2 if s >= 0 else -2), textcoords="offset points")
 
 ax.set_ylabel("Memory saved by WasMem (%)", fontsize=YLABEL_SIZE)
@@ -93,8 +94,8 @@ ax.set_xticklabels(labels, fontsize=TICK_SIZE)
 ax.tick_params(axis="y", labelsize=TICK_SIZE)
 ax.grid(axis="y", alpha=0.3)
 allv = [s for fw in BASELINES for s in saving[fw] if not np.isnan(s)]
-ax.set_ylim(min(allv) - 18, max(allv) + 14)
-fig.tight_layout(rect=[0, 0, 1, 0.93])
+ax.set_ylim(0, max(allv) + 8)
+fig.tight_layout(rect=[0, 0, 1, 0.96], pad=0.4)
 ax.legend(ncol=3, fontsize=LEGEND_SIZE, loc="lower center", bbox_to_anchor=(0.5, 1.0),
           frameon=False)
 

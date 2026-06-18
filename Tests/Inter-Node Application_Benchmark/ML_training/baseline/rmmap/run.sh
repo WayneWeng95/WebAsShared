@@ -12,7 +12,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WAS_ROOT="$(cd "$HERE/../../../../.." && pwd)"
-GENDATA="$WAS_ROOT/Tests/Application_Benchmark/ML_training/gen_data.py"
+GENDATA="$WAS_ROOT/Tests/Inter-Node Application_Benchmark/ML_training/gen_data.py"
 DATADIR="$WAS_ROOT/TestData/ml"
 SEED="${ML_SEED:-1234}"
 

@@ -31,6 +31,24 @@ REDIS_HOST = os.environ.get('REDIS_HOST', '127.0.0.1')
 REDIS_PORT = int(os.environ.get('REDIS_PORT', '6379'))
 
 
+def _smaps_kb():
+    """(private_kb, shared_kb) of THIS process from /proc/self/smaps_rollup.
+    Private = Private_Clean+Private_Dirty (per-process), Shared = Shared_* (common
+    library/runtime pages). Point-in-time; call at the memory high-water."""
+    priv = shared = 0
+    try:
+        with open('/proc/self/smaps_rollup') as f:
+            for ln in f:
+                key = ln.split(':', 1)[0]
+                if key in ('Private_Clean', 'Private_Dirty'):
+                    priv += int(ln.split()[1])
+                elif key in ('Shared_Clean', 'Shared_Dirty'):
+                    shared += int(ln.split()[1])
+    except OSError:
+        pass
+    return priv, shared
+
+
 def _grid(w):
     r = 1
     k = 1
@@ -55,10 +73,10 @@ def _worker(task):
     # kernel so the comparison isolates the data substrate, not kernel speed.
     c = np.einsum('ik,kj->ij', a, b, optimize=False)   # BR × BC
     c_raw = pickle.dumps(c, protocol=pickle.HIGHEST_PROTOCOL)
+    priv_kb, shared_kb = _smaps_kb()   # high-water: a, b, c, c_raw all resident
     r.set('%s_c_%d_%d' % (uid, i, j), c_raw)
     ser_bytes = len(a_raw) + len(b_raw) + len(c_raw)  # ES gets + put
-    rss_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return int(c.sum()), ser_bytes, rss_kb
+    return int(c.sum()), ser_bytes, priv_kb, shared_kb
 
 
 def main():
@@ -94,9 +112,15 @@ def main():
     tasks = [(uid, i, j) for i in range(R) for j in range(C)]
     with Pool(processes=W) as pool:
         results = pool.map(_worker, tasks)
-    checksum = sum(s for s, _, _ in results)
-    ser_bytes += sum(sb for _, sb, _ in results)
-    peak_rss_kb = max((rss for _, _, rss in results), default=0)
+    checksum = sum(s for s, _, _, _ in results)
+    ser_bytes += sum(sb for _, sb, _, _ in results)
+    # Concurrent footprint: the W block workers are SEPARATE processes (Pool),
+    # each holding PRIVATE pickled panels, so sum their private RSS; the shared
+    # runtime/library pages are common across them, counted once (max). Matches
+    # the private-RSS-+-shared-once metric used for WasMem. (Was max-of-one,
+    # which is flat/decreasing in fan-out — undercounting the concurrent procs.)
+    peak_rss_kb = (sum(p for _, _, p, _ in results)
+                   + max((sh for _, _, _, sh in results), default=0))
     e2e_s = time.time() - t0
 
     r.delete(*['%s_a_%d' % (uid, i) for i in range(R)],

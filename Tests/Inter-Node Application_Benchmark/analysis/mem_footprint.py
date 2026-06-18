@@ -65,24 +65,19 @@ def kv_storage(row):
     return 0.0
 
 
-def footprint(framework, row, faasm_concurrent=True):
+def footprint(framework, row):
     """Return total peak memory incl. KV (MB), or None for CRASH/missing.
 
-    Faasm correction (faasm_concurrent=True): the driver records the MAX single-
-    Faaslet RSS, but at fan-out N the map phase keeps N wasmtime instances
-    resident at once. Since per-Faaslet RSS is ~constant across the N mappers,
-    the true concurrent footprint is N x peak_mem_mb. Applied only where a
-    `workers` column exists (WordCount/Matrix/ML_*); Finra has no fan-out column
-    so it is left as-is. With faasm_concurrent=False the raw recorded RSS is used.
+    Faasm's driver now records the CONCURRENT footprint directly (Σ RSS of the
+    co-resident Faaslets during the map phase — see baseline/faasm/demo/driver.py),
+    so no post-hoc fan-out correction is applied here; it is treated like any
+    other baseline (`peak_mem_mb + KV storage`).
     """
     peak = fnum(row.get("peak_mem_mb"))
     if peak is None:
         return None
     if framework.startswith("WasMem"):
         return peak            # SHM already in peak; no external KV
-    if framework == "Faasm" and faasm_concurrent:
-        n = fnum(row.get("workers")) or 1.0
-        return n * peak + kv_storage(row)
     return peak + kv_storage(row)
 
 
@@ -96,7 +91,7 @@ def fmt(v):
     return f"{v:,.1f}"
 
 
-def build(faasm_concurrent=True):
+def build():
     md = []
     combined = []  # tidy rows for csv
     for wl, keycols, _ in WORKLOADS:
@@ -123,7 +118,7 @@ def build(faasm_concurrent=True):
             rec = {kc: kv for kc, kv in zip(keycols, k)}
             for fw in FRAMEWORKS:
                 row = data[fw].get(k)
-                val = footprint(fw, row, faasm_concurrent) if row else None
+                val = footprint(fw, row) if row else None
                 cells.append(fmt(val))
                 rec[fw] = "" if val is None else round(val, 1)
             md.append("| " + " | ".join(cells) + " |")
@@ -137,28 +132,19 @@ COMMON_NOTES = (
     "external KV (shared-memory substrate). Baseline KV storage = resident\n"
     "bytes written (`kvs_ser_mb`/`kvs_put_mb`/`state_kv_mb`); read traffic\n"
     "(`kvs_get_mb`) is excluded. CRASH = OOM in our sweep.\n"
-)
-
-FAASM_CONCURRENT_NOTE = (
-    "\n**Faasm = concurrent estimate**: `workers x per-Faaslet RSS + KV`. The\n"
-    "driver records the max single-Faaslet RSS, but N Faaslets are resident\n"
-    "together during the map phase, so the concurrent footprint is N x that\n"
-    "RSS. Finra has no fan-out column and is left at the recorded RSS.\n"
-)
-
-FAASM_RAW_NOTE = (
-    "\n**Faasm = raw recorded RSS** (as emitted by the driver): the max single-\n"
-    "Faaslet RSS + KV, NOT multiplied by fan-out. This undercounts the true\n"
-    "concurrent footprint at high N (N Faaslets coexist during the map phase);\n"
-    "see `mem_footprint.md` for the N x concurrent estimate.\n"
+    "\n**Faasm** `peak_mem_mb`: **WordCount** is the high-water Σ RSS of the whole\n"
+    "driver process tree (driver + co-resident Faaslets), the same whole-tree\n"
+    "accounting WasMem applies to its host tree — measured the same way on both\n"
+    "sides. The remaining workloads still report the older per-Faaslet concurrent\n"
+    "footprint (Σ private RSS + shared-once) pending the same migration.\n"
 )
 
 
-def write_variant(faasm_concurrent, md_name, csv_name, faasm_note):
-    md, combined = build(faasm_concurrent)
+def write_tables(md_name, csv_name):
+    md, combined = build()
     title = (
         "# Peak Memory Footprint (incl. external KV storage) — per workload & load\n\n"
-        + COMMON_NOTES + faasm_note
+        + COMMON_NOTES
     )
     out = title + md + "\n"
     with open(os.path.join(HERE, md_name), "w") as f:
@@ -174,14 +160,9 @@ def write_variant(faasm_concurrent, md_name, csv_name, faasm_note):
 
 
 def main():
-    # corrected (Faasm N x concurrent) + raw (Faasm single-instance, the old view)
-    out = write_variant(True, "mem_footprint.md", "mem_footprint.csv",
-                         FAASM_CONCURRENT_NOTE)
-    write_variant(False, "mem_footprint_raw.md", "mem_footprint_raw.csv",
-                  FAASM_RAW_NOTE)
+    out = write_tables("mem_footprint.md", "mem_footprint.csv")
     print(out)
-    print("\n[wrote] mem_footprint.md / .csv (Faasm concurrent estimate)")
-    print("[wrote] mem_footprint_raw.md / .csv (Faasm raw single-instance RSS)")
+    print("\n[wrote] mem_footprint.md / .csv")
 
 
 if __name__ == "__main__":

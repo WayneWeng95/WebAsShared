@@ -9,11 +9,14 @@
 # - compute_ms      : "[DAG][timing] TOTAL compute" (staging EXCLUDED, per TEST_PLAN).
 # - throughput_mb_s : size_mb / (compute_ms/1000).
 # - words_per_s     : total_occurrences / (compute_ms/1000).
-# - peak_mem_mb     : peak (Σ RSS of the host process tree + SHM file size),
-#                     sampled out-of-band at 50 ms (the node-agent metrics log is
-#                     only 2 s cadence — too coarse for sub-second runs), so this
-#                     is the true billable-memory high-water (private RSS + SHM,
-#                     SHM counted once) the way metrics.rs defines it.
+# - peak_mem_mb     : peak (Σ PRIVATE RSS of the host process tree + SHM bump
+#                     offset), sampled out-of-band at 50 ms (the node-agent metrics
+#                     log is only 2 s cadence — too coarse for sub-second runs), so
+#                     this is the true billable-memory high-water (private RSS + SHM,
+#                     SHM counted once) the way metrics.rs defines it. Private RSS =
+#                     VmRSS − RssShmem per process, so the shared SHM (which lands in
+#                     every worker's VmRSS as RssShmem) is subtracted from each and
+#                     added back exactly once via the bump offset.
 # - reps            : repeats per cell; compute_ms/throughput are the MEDIAN.
 #
 # Counts are fan-out-invariant (the corpus is partitioned, never duplicated), so
@@ -50,19 +53,25 @@ die() { printf '\033[1;31m[wc] %s\033[0m\n' "$*" >&2; exit 1; }
 
 median() { printf '%s\n' "$@" | sort -n | awk '{a[NR]=$1} END{print (NR%2)?a[(NR+1)/2]:(a[NR/2]+a[NR/2+1])/2}'; }
 
-# Background peak-memory sampler: max(Σ RSS of host tree + SHM file size) in KB.
-# Matches the executor host process(es) by binary path so it never picks up an
-# unrelated `host` (e.g. the DNS util). Writes the running peak (KB) to $1.
+# Background peak-memory sampler: max(Σ PRIVATE RSS of host tree + SHM bump
+# offset) in KB. Matches the executor host process(es) by binary path so it never
+# picks up an unrelated `host` (e.g. the DNS util). Writes the running peak (KB)
+# to $1. Mirrors metrics.rs: private RSS = VmRSS − RssShmem per process (the shared
+# SHM is subtracted from every process), and the SHM is added back exactly once
+# from the superblock bump offset (LE u32 at byte 4) — NOT VmRSS + file size, which
+# double-counts the shared segment (once per worker that has it resident, plus the
+# explicit file add).
 sample_peak() {
   local outfile="$1"; local peak=0
   echo 0 > "$outfile"
   while :; do
     local rss_kb shm_kb tot
     rss_kb=$(for p in $(pgrep -f "target/release/host" 2>/dev/null); do
-               awk '/^VmRSS:/{print $2}' "/proc/$p/status" 2>/dev/null; done \
+               awk '/^VmRSS:/{r=$2} /^RssShmem:/{s=$2} END{if(r!="")print r-s}' \
+                 "/proc/$p/status" 2>/dev/null; done \
              | awk '{s+=$1} END{print s+0}')
     shm_kb=0
-    [ -f "$SHM" ] && shm_kb=$(( $(stat -c%s "$SHM" 2>/dev/null || echo 0) / 1024 ))
+    [ -f "$SHM" ] && shm_kb=$(( $(od -An -tu4 -j4 -N4 "$SHM" 2>/dev/null || echo 0) / 1024 ))
     tot=$(( rss_kb + shm_kb ))
     [ "$tot" -gt "$peak" ] && { peak=$tot; echo "$peak" > "$outfile"; }
     sleep 0.05

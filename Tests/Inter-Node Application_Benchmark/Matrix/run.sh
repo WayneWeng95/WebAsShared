@@ -8,9 +8,12 @@
 #
 # - compute_ms : "[DAG][timing] TOTAL compute" (staging EXCLUDED, per TEST_PLAN).
 # - gflops     : 2*N^3 / (compute_ms/1000) / 1e9   (one mul + one add per inner step).
-# - peak_mem_mb: peak (Σ RSS of the host process tree + SHM file size), sampled
-#                out-of-band at 50 ms (true billable-memory high-water, the way
-#                metrics.rs defines it: private RSS + SHM, SHM counted once).
+# - peak_mem_mb: peak (Σ PRIVATE RSS of the host process tree + SHM bump offset),
+#                sampled out-of-band at 50 ms (true billable-memory high-water, the
+#                way metrics.rs defines it: private RSS + SHM, SHM counted once).
+#                Private RSS = VmRSS − RssShmem per process, so the shared SHM
+#                (which lands in every worker's VmRSS as RssShmem) is subtracted
+#                from each and added back exactly once via the bump offset.
 # - reps       : repeats per cell; compute_ms/gflops are the MEDIAN.
 #
 # Correctness gate: A,B have integer entries, so checksum (Σ of all C entries) is
@@ -49,17 +52,23 @@ mkdir -p "$DATADIR"
 
 median() { printf '%s\n' "$@" | sort -n | awk '{a[NR]=$1} END{print (NR%2)?a[(NR+1)/2]:(a[NR/2]+a[NR/2+1])/2}'; }
 
-# Background peak-memory sampler: max(Σ RSS of host tree + SHM file size) in KB.
+# Background peak-memory sampler: max(Σ PRIVATE RSS of host tree + SHM bump offset)
+# in KB. Mirrors metrics.rs: private RSS = VmRSS − RssShmem per process (the shared
+# SHM is subtracted from every process), and the SHM is added back exactly once from
+# the superblock bump offset (LE u32 at byte 4) — NOT VmRSS + file size, which
+# double-counts the shared segment (once per worker that has it resident, plus the
+# explicit file add).
 sample_peak() {
   local outfile="$1"; local peak=0
   echo 0 > "$outfile"
   while :; do
     local rss_kb shm_kb tot
     rss_kb=$(for p in $(pgrep -f "target/release/host" 2>/dev/null); do
-               awk '/^VmRSS:/{print $2}' "/proc/$p/status" 2>/dev/null; done \
+               awk '/^VmRSS:/{r=$2} /^RssShmem:/{s=$2} END{if(r!="")print r-s}' \
+                 "/proc/$p/status" 2>/dev/null; done \
              | awk '{s+=$1} END{print s+0}')
     shm_kb=0
-    [ -f "$SHM" ] && shm_kb=$(( $(stat -c%s "$SHM" 2>/dev/null || echo 0) / 1024 ))
+    [ -f "$SHM" ] && shm_kb=$(( $(od -An -tu4 -j4 -N4 "$SHM" 2>/dev/null || echo 0) / 1024 ))
     tot=$(( rss_kb + shm_kb ))
     [ "$tot" -gt "$peak" ] && { peak=$tot; echo "$peak" > "$outfile"; }
     sleep 0.05

@@ -31,17 +31,37 @@ def _redis():
                        password=os.environ.get('REDIS_PASSWORD'))
 
 
+def _smaps_kb():
+    """(private_kb, shared_kb) of THIS process from /proc/self/smaps_rollup.
+    Private = Private_Clean+Private_Dirty (per-process); Shared = Shared_* (common
+    library/runtime pages). Point-in-time; call at the memory high-water."""
+    priv = shared = 0
+    try:
+        with open('/proc/self/smaps_rollup') as f:
+            for ln in f:
+                key = ln.split(':', 1)[0]
+                if key in ('Private_Clean', 'Private_Dirty'):
+                    priv += int(ln.split()[1])
+                elif key in ('Shared_Clean', 'Shared_Dirty'):
+                    shared += int(ln.split()[1])
+    except OSError:
+        pass
+    return priv, shared
+
+
 def _rule_worker(args):
-    """A separate process (≈ a pod): read the whole trades blob from Redis,
-    run one audit rule, write the count back. Returns (bytes_read, bytes_written)."""
+    """A separate process (≈ a pod): read the whole trades blob from Redis, run
+    one audit rule, write the count back. Returns (bytes_read, bytes_written,
+    private_kb, shared_kb) — the last two for the concurrent-footprint sum."""
     rid, key, out_key = args
     r = _redis()
     blob = r.get(key)                      # ES read — the broadcast
     trades = pickle.loads(blob)
     v = fr.audit_rule(trades, rid)
     out = pickle.dumps(v)
+    priv_kb, shared_kb = _smaps_kb()       # high-water: whole trades blob resident
     r.set(out_key, out)
-    return len(blob), len(out)
+    return len(blob), len(out), priv_kb, shared_kb
 
 
 def main():
@@ -68,8 +88,14 @@ def main():
     payloads = [(i, trades_key, f'finra_{uid}_rule_{i}') for i in range(8)]
     with get_context('spawn').Pool(8) as pool:
         io = pool.map(_rule_worker, payloads)
-    get_bytes = sum(rd for rd, _ in io)
-    put_bytes += sum(wr for _, wr in io)
+    get_bytes = sum(rd for rd, _, _, _ in io)
+    put_bytes += sum(wr for _, wr, _, _ in io)
+    # Concurrent footprint: the 8 rule pods run as separate processes that each
+    # hold a PRIVATE copy of the whole trades blob (the broadcast), so sum their
+    # private RSS + the shared runtime once (max). (Was parent + largest single
+    # child — counted only 1 of the 8 concurrent pods.)
+    peak_kb = (sum(p for _, _, p, _ in io)
+               + max((s for _, _, _, s in io), default=0))
 
     # merge: read the 8 counts, sum
     total = 0
@@ -79,8 +105,7 @@ def main():
         total += pickle.loads(c)
     e2e_ms = (time.time() - t0) * 1000.0
 
-    peak_mb = (resource.getrusage(resource.RUSAGE_SELF).ru_maxrss +
-               resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss) / 1024.0
+    peak_mb = peak_kb / 1024.0
     tps = size_trades / (e2e_ms / 1000.0) if e2e_ms else 0
     if want_header:
         print(HEADER)

@@ -84,13 +84,62 @@ cross-node-specific to test). Only deferred work + the benchmark track remain:
 [ ] Benchmark baselines — SEPARATE TRACK, ongoing. Bring comparable frameworks onto the
     table; Tests/Fan_out_remote/ is the measurement starting point.
 
-[ ] [PERF] Memory cost on WordCount + Matrix — investigate why our peak memory (incl. KV)
-    is uncompetitive on these two workloads while we lead on Finra/ML_training/ML_inference.
-    At the largest load (WordCount 1001MB/16w, Matrix 2048/16w) WasMem-AOT is NOT the lowest:
-    WordCount AOT 4005 MB vs Faasm 2022; Matrix AOT 1088 MB vs RMMap 430 / Faasm 404. Our
-    footprint also grows with worker count (per-worker SHM/RSS) where baselines stay flat.
-    Data + chart: Tests/Inter-Node Application_Benchmark/analysis/ (mem_footprint*.md/csv,
-    figs/mem_largest_load.pdf).
+[x] [PERF] Memory cost on WordCount + Matrix — was a MEASUREMENT BUG in the sweep sampler,
+    NOT a real framework cost (2026-06-17). The out-of-band peak sampler in WordCount/run.sh
+    and Matrix/run.sh summed raw `VmRSS` across the host process tree AND added the SHM file
+    size (`stat -c%s`) on top. But VmRSS includes RssShmem, so the shared SHM segment was
+    counted once per worker that had it resident PLUS once more as the file add — heavy
+    double-counting, concentrated exactly where SHM is large and fan-out is wide (WordCount,
+    Matrix). It also explained the "grows with worker count where baselines stay flat" symptom.
+    Our own ground truth (NodeAgent/agent/src/metrics.rs) already defines footprint correctly:
+    private RSS = `VmRSS − RssShmem` per process, plus the SHM bump offset (superblock LE u32
+    at byte 4) counted ONCE. Fix: made both samplers match metrics.rs (subtract RssShmem; read
+    the bump offset via `od -An -tu4 -j4 -N4` instead of file size). Re-ran all four sweeps
+    (checksums/occurrences fan-out-invariant — correctness unaffected); old CSVs kept as
+    *_old_20260617.csv. Results now competitive: WordCount AOT 1001MB/16w 4005→2476 MB
+    (Faasm 2313), 500MB/16w 2358→1316 (Faasm 1312, ~tied); Matrix AOT 2048/16w 1088→669
+    (RMMap 430 / Faasm 404 — closer, no longer an outlier), 512/16w now lowest of all systems.
+    Regenerated mem_footprint*.md/csv + all figs (WordCount/Matrix plot.py, analysis/
+    plot_bars_grid.py + plot_mem_largest.py). Baseline CSVs untouched (bug was ours only).
+
+[x] [BASELINE] Faasm peak memory was FLAT in fan-out — measurement bug in the demo drivers
+    (2026-06-17). WordCount/Matrix/Finra faasm/demo/driver.py recorded `max` of the per-Faaslet
+    RSS (each `wasmtime run` timed by /usr/bin/time -v), but the map workers run CONCURRENTLY
+    (ThreadPoolExecutor), so N Faaslets are co-resident — the footprint is their SUM, not the
+    max of one. Symptom: WordCount faasm peak ~19 MB flat across every fan-out AND size; Matrix
+    even DECREASED with fan-out (bigger grid → smaller blocks → smaller single Faaslet). Fix:
+    sum the co-resident Faaslet RSS for the concurrent phase (reduce stays a separate max).
+    Removed the now-redundant post-hoc `N×` Faasm multiplier in analysis/mem_footprint.py (the
+    driver measures concurrency directly now); collapsed the two output variants into one
+    (mem_footprint.{md,csv}); repointed plot_mem_largest.py to it; deleted mem_footprint_raw.*.
+    Re-ran the 3 faasm sweeps (redis needs --proto-max-bulk-len ≥3gb for the WordCount 1001MB/1w
+    single SET; old CSVs kept as *_old_20260617.csv). New faasm grows with fan-out as expected
+    and lands near the old N×max estimate (per-Faaslet RSS ~uniform), so our AOT lead holds/
+    improves: WordCount 500/16w faasm 1450 vs AOT 1316 (we now win); Matrix 2048/16w faasm 1183
+    vs AOT 669. Regenerated footprint tables + figs (WordCount/Matrix/Finra plot.py + analysis).
+
+[x] [BASELINE] RMMap peak memory was FLAT in fan-out — same class of bug, plus the metric was
+    unified across per-process baselines (2026-06-17). All RMMap drivers run workers as separate
+    processes (multiprocessing.Pool, ES/Redis pickle path — no shared mapping), yet measured:
+    Matrix `max` of one worker; ML_training/ML_inference parent RUSAGE_SELF only (workers
+    UNCOUNTED); Finra parent + RUSAGE_CHILDREN.ru_maxrss (largest SINGLE child of 8). All
+    undercounted the concurrent procs. Fix: each worker reports private (Private_Clean+Dirty)
+    and shared (Shared_*) RSS from /proc/self/smaps_rollup at its high-water; footprint =
+    Σ private + shared-once (max). DECISION (user): use this private-RSS-+-shared-once metric —
+    the same one WasMem uses — and apply it to Faasm too (re-measured the 3 faasm drivers the
+    same way: sample the wasmtime child's smaps_rollup via Popen+poll instead of /usr/bin/time
+    full RSS; supersedes the "sum full RSS" of the entry above). WordCount RMMap LEFT AS-IS
+    (mappers run sequentially by default → flat is correct). Also fixed a stale run.sh path in
+    ML_training/ML_inference rmmap (Tests/Application_Benchmark → Tests/Inter-Node
+    Application_Benchmark) so missing ML test data regenerates; ran Finra rmmap NATIVELY (its
+    run.sh wraps the driver in a dmerge-redis docker container not set up here — the ES driver
+    is pure python+redis). Old CSVs kept as *_old_20260617.csv. RMMap now grows with fan-out:
+    Matrix 512 62→218 / 2048 390→1140; Finra 244/624/4158 (8-pod broadcast); ML_inference
+    73→187 (3.2MB). Regenerated mem_footprint.{md,csv} + every fig. Caveat: summing full
+    per-process RSS would double-count each pod's shared runtime; private+shared-once avoids
+    that. NOTE residual inconsistency — our own WasMem sampler sums VmRSS−RssShmem (counts
+    shared libs per worker), so baselines now get slightly MORE generous shared-dedup than we
+    give ourselves; acceptable (conservative toward competitors).
 
 [x] [FRAMEWORK] SHM dynamic-growth past INITIAL_SHM_SIZE (64 MiB) FIXED (2026-06-16). Root
     cause was NOT the grow/remap handshake but a STALE MAPPING in the main DAG-runner process:

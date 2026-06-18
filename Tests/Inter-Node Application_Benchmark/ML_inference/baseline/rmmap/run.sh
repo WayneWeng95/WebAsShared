@@ -7,8 +7,8 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WAS_ROOT="$(cd "$HERE/../../../../.." && pwd)"
-GENDATA="$WAS_ROOT/Tests/Application_Benchmark/ML_training/gen_data.py"
-GENMODEL="$WAS_ROOT/Tests/Application_Benchmark/ML_inference/gen_model.py"
+GENDATA="$WAS_ROOT/Tests/Inter-Node Application_Benchmark/ML_training/gen_data.py"
+GENMODEL="$WAS_ROOT/Tests/Inter-Node Application_Benchmark/ML_inference/gen_model.py"
 DATADIR="$WAS_ROOT/TestData/ml"; SEED="${MLI_SEED:-9999}"
 SIZES="${1:-100000 300000 600000}"; W_LIST="${2:-1 2 4 8 16}"; CSV="$HERE/results.csv"
 redis-cli ping >/dev/null 2>&1 || { echo "redis not reachable on :6379" >&2; exit 1; }

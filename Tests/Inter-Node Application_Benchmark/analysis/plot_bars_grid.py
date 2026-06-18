@@ -23,10 +23,10 @@ FIGS = os.path.join(HERE, "figs")
 os.makedirs(FIGS, exist_ok=True)
 
 STYLE = {
-    "ours":       dict(color="#2057c7", label="WasMem"),
-    "faasm":      dict(color="#2a9d8f", label="Faasm"),
-    "rmmap":      dict(color="#1d7a3e", label="RMMap"),
-    "cloudburst": dict(color="#edae49", label="Cloudburst"),
+    "ours":       dict(color="#5a82c2", label="WasMem"),      # muted engine blue
+    "faasm":      dict(color="#5aa9a0", label="Faasm"),       # muted teal
+    "rmmap":      dict(color="#5fa06f", label="RMMap"),       # muted green
+    "cloudburst": dict(color="#e2c16b", label="Cloudburst"),  # softer amber
 }
 ORDER = ["cloudburst", "rmmap", "faasm", "ours"]   # bar/legend order
 
