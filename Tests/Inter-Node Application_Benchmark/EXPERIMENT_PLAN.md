@@ -38,6 +38,7 @@ is identical to the intra-node one, lifted one level up the memory hierarchy:
 | 4 | Matrix       | distributed compute      | Faasm (D&C)         | RMMap, Cloudburst (SUMMA) |
 | 5 | ML training  | distributed SGD          | RMMap `ml-pipeline` | Faasm (HOGWILD!), Cloudburst |
 | 6 | ML inference | MNIST inference          | RMMap (native MNIST)| Cloudburst, Faasm |
+| 7 | **TeraSort** *(new)* | data-parallel **all-to-all shuffle** | — (port all 3) | RMMap-ES, Faasm-like, Cloudburst | distributed sort; the one workload with a real shuffle. **PageRank is the backup** (graph/iterative). |
 
 ---
 
@@ -322,6 +323,17 @@ Re-generate every figure + the headline table from the 9-node CSVs.
 - **Matrix & ML-inference have no cross-node auto-placement DAG** — the real new
   framework-side work (ours). Author additively; expect the same many-to-many gather
   pitfalls finra/ml_training already hit.
+- **TeraSort (#7) is the all-to-all shuffle** — its inter-node variant hammers the
+  cross-node **many-to-many gather** path that historically deadlocked under
+  distributing policies (Scheduling-Policy `NEXT_STEPS`). Intra-node (SHM) is safe;
+  budget gather-stability work for the cluster variant. Folder/plan stubbed at
+  `../Intra-Node Application_Benchmark/TeraSort/`.
+- **PageRank is the parked backup** for a graph/iterative workload — *not* being
+  built now. Higher effort (sparse-graph kernel, convergence, irregular/skewed
+  comms), overlaps ML-training's iterative dimension, and not native in any baseline.
+  Revisit only if the graph + placement-sensitivity story is wanted; the
+  iteration-unroll pattern (ml_training) + `Shuffle`/`dispatch` primitives would be
+  the starting point.
 - **Distributing-policy deadlock (finra/ml_training):** historically the executor's
   cross-node many-to-many RDMA gather deadlocked under *distributing* policies;
   `gen_variants.py`'s per-machine **local-combine** gather (one transfer/peer) is
@@ -363,6 +375,7 @@ Tick as work lands; keep one line per item.
 - [ ] **ML training** — ours; baselines on frameworks; SGD checksum gate; figs.
 - [ ] **Matrix** — author `matrix_auto_placement.json`; ours; baselines; checksum gate; figs.
 - [ ] **ML inference** — author `ml_inference_auto_placement.json`; ours; baselines; accuracy/checksum gate; figs.
+- [ ] **TeraSort (#7, new)** — write `terasort.rs` + `terasort_auto_placement.json`; WordCount-shaped baseline ports; sorted+multiset checksum gate; figs. *(PageRank = parked backup.)*
 
 ### Analysis
 - [ ] Cross-workload bars grid + headline inter-node table (RDMA vs network-KV, gap-vs-size).
@@ -406,6 +419,7 @@ or framework code.
 | **ML training** | ✓ `ml_training_auto_placement.json` + `gen_sgd_ap_dag.py` | ✓ (`train_*`) | ✓ packs shard | New `run.sh` = adapt `ml_training_sweep.sh` | **LOW** |
 | **Matrix** | ✗ **author `matrix_auto_placement.json`** | ✗ **add support** | ✓ (`mat_block` arg already packs i,j,r,c,N) | (1) author symbolic 2-D SUMMA grid DAG (`block_i_j` fan, `placement:"all"` `tile` producer + `replicate` A/B inputs); (2) add Matrix to `gen_variants` (grid placement + per-machine local-combine gather over `C_BASE+i*C+j` slots); (3) new `run.sh` | **HIGH** |
 | **ML inference** | ✗ **author `ml_inference_auto_placement.json`** | ✗ **add support** | ✓ (`infer_predict` arg packs slots) | (1) author symbolic DAG — homogeneous `predict_*` fan, **like ml_training** (broadcast model via `placement:"all"` `setup_model`, shard via `partition`); (2) add `FAN_PREFIX["ml_inference"]="predict_"` + `AGGREGATOR["ml_inference"]="aggregate"` + producer co-loc on `partition`; (3) new `run.sh` | **MED** |
+| **TeraSort** *(new #7)* | ✗ **author `terasort_auto_placement.json`** | ✗ **add support** | n/a — **new guest** `terasort.rs` (`ts_sample`/`ts_partition`/`ts_merge`) over the existing `Shuffle` primitive | (1) write the sort guest (additive); (2) author symbolic DAG using `Shuffle` (all-to-all) + `placement:"all"`/`fanout:N`; (3) add `gen_variants` support; (4) new `run.sh`. Folder + plan already stubbed at `../Intra-Node Application_Benchmark/TeraSort/`. | **HIGH** (new guest + the shuffle gather path) |
 
 Common WasMem change: a folder `run.sh` shape that **drops the policy sweep axis**
 (that's the Scheduling-Policy experiment) and instead fixes one placement, emitting
@@ -433,4 +447,7 @@ tree already reads it); keep the correctness gates; run one system at a time.
    inter-node pipeline incl. the riskiest infra (Knative/k8s/Faasm-agent standup).
 2. **FINRA + ML-training WasMem** (LOW) — reuse the standing baselines.
 3. **ML-inference** (MED) then **Matrix** (HIGH) — the two new-DAG workloads.
-4. Everything above at **N=4** first; then Phase 5 re-runs at **N=9**.
+4. **TeraSort** (HIGH, new #7) — new sort guest + the all-to-all shuffle path; its
+   baselines are WordCount-shaped clones (none native). Best inter-node
+   differentiator (whole dataset shuffled once); do after the pipeline is proven.
+5. Everything above at **N=4** first; then Phase 5 re-runs at **N=9**.

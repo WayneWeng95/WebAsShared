@@ -139,3 +139,4 @@ curves overlay.
 | Matrix       | native (`matrix.rs`, SUMMA) | **ES port** ✓ | **ported** ✓ (-like) | **ported** ✓ (summa) | **done; all 4 reproduce gate** |
 | ML training  | native (`ml_training.rs`, SGD) | **ES port** ✓ | **ported** ✓ (-like) | **ported** ✓ | **done; all 4 reproduce gate** |
 | ML inference | native (`ml_inference.rs`, MNIST) | **ES port** ✓ | **ported** ✓ (-like) | **ported** ✓ | **done; all 4 reproduce gate (WasMem leads on cold/one-shot once pod startup counted; warm-serving caveat noted)** |
+| TeraSort     | **planned** (`terasort.rs` over existing `Shuffle`) | port (clone WC tree) | port (clone WC demo) | port (clone WC tree) | **PLANNED #7** — adds all-to-all shuffle; see [`TeraSort/`](./TeraSort/). PageRank is the backup. |
