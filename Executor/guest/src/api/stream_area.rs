@@ -436,6 +436,17 @@ impl ShmApi {
         chain_read_all(head)
     }
 
+    /// Stream every record from stream `id` in order, invoking
+    /// `f(origin, &payload)` per record with a single reused buffer.  Unlike
+    /// `read_all_stream_records`, the live heap footprint is bounded by the
+    /// largest record, so it scales to multi-GB streams that would OOM `read_all`
+    /// (the data stays in the SHM page chain; only one record is materialised at
+    /// a time).
+    pub fn for_each_stream_record<F: FnMut(u32, &[u8])>(id: u32, f: F) {
+        let head = Self::superblock().writer_heads[id as usize].load(Ordering::Acquire) as ShmOffset;
+        chain_for_each(head, f);
+    }
+
     /// Return the next unconsumed record from stream slot `id`, advancing a
     /// per-slot cursor stored as a named SHM atomic (`"stream_cursor_{id}"`).
     ///

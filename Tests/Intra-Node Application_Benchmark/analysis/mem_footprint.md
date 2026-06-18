@@ -31,6 +31,31 @@ footprint (Σ private RSS + shared-once) pending the same migration.
 | 1001 | 8 | 2,703.7 | 2,410.8 | 7,344.2 | 5,273.9 | 8,071.2 |
 | 1001 | 16 | 3,030.8 | 2,475.8 | 7,344.4 | 5,507.4 | 8,067.6 |
 
+### TeraSort
+
+| size_mb | workers | WasMem-JIT (MB) | WasMem-AOT (MB) | RMMap (MB) | Faasm (MB) | Cloudburst (MB) |
+|---|---|---|---|---|---|---|
+| 50 | 1 | — | 152.1 | 586.8 | 540.5 | 866.0 |
+| 50 | 2 | — | 162.3 | 499.2 | 612.4 | 766.1 |
+| 50 | 4 | — | 163.6 | 408.0 | 573.6 | 717.1 |
+| 50 | 8 | — | 141.7 | 366.1 | 726.8 | 695.7 |
+| 50 | 16 | — | 134.5 | 366.0 | 531.5 | 688.0 |
+| 250 | 1 | — | 636.3 | 2,641.5 | 2,529.5 | 4,208.6 |
+| 250 | 2 | — | 644.4 | 2,048.1 | 2,647.7 | 3,563.5 |
+| 250 | 4 | — | 661.0 | 1,743.0 | 2,316.8 | 3,375.6 |
+| 250 | 8 | — | 677.0 | 1,688.2 | 2,765.1 | 3,336.3 |
+| 250 | 16 | — | 636.6 | 1,688.2 | 2,719.3 | 3,294.1 |
+| 500 | 1 | — | 1,237.9 | 5,214.2 | 5,204.5 | 8,321.4 |
+| 500 | 2 | — | 1,245.9 | 4,044.5 | 5,271.8 | 7,076.8 |
+| 500 | 4 | — | 1,262.6 | 3,478.8 | 4,735.2 | 6,705.1 |
+| 500 | 8 | — | 1,283.3 | 3,340.8 | 4,462.3 | 6,537.2 |
+| 500 | 16 | — | 1,345.1 | 3,340.8 | 4,953.5 | 6,578.2 |
+
+TeraSort moves the *entire* dataset across the shuffle, so the baseline KV
+storage dominates (≈4–6× input resident in Redis); WasMem's shared-memory
+page-chain holds ≈1× input, so it uses 60–80% less memory than every baseline
+at the 500 MB load (no JIT line — the TeraSort sweep was AOT-only).
+
 ### Finra
 
 | size_trades | WasMem-JIT (MB) | WasMem-AOT (MB) | RMMap (MB) | Faasm (MB) | Cloudburst (MB) |

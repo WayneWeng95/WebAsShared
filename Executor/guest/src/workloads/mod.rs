@@ -23,5 +23,6 @@ mod ml_inference;
 mod ml_training;
 mod routing_tests;
 mod stream_pipeline;
+mod terasort;
 mod tfidf;
 mod word_count;

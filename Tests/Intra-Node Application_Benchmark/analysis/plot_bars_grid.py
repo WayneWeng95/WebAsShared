@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""plot_bars_grid.py — merge the five per-workload *_bars.pdf into ONE 3x5 grid.
+"""plot_bars_grid.py — merge the six per-workload *_bars.pdf into ONE 3x6 grid.
 
 Each per-workload bars figure shows, per input size, the four systems' best
 end-to-end latency (s). This reproduces them from the same data/logic into a
-single figure: COLUMNS = workloads (a..e), ROWS = the 3 input sizes
+single figure: COLUMNS = workloads (a..f), ROWS = the 3 input sizes
 (small/mid/large). The workload notation (a. WordCount, ...) sits at the bottom
 of each column.
 
@@ -34,7 +34,7 @@ ORDER = ["cloudburst", "rmmap", "faasm", "ours"]   # bar/legend order
 TICK_SIZE = 16
 LABEL_SIZE = 16
 LEGEND_SIZE = 17
-YLABEL_SIZE = 19
+YLABEL_SIZE = 22
 VALUE_SIZE = 11   # bar value labels (bars_fig convention)
 
 # Per-workload config: display name, size column, [(size, label)], tolerance,
@@ -44,6 +44,10 @@ WORKLOADS = [
          sizes=[(50, "50 MB"), (500, "500 MB"), (1000, "1 GB")], tol=1.5,
          lat={"ours": "compute_ms", "faasm": "e2e_ms",
               "rmmap": "e2e_ms", "cloudburst": "e2e_ms_median"}),
+    dict(name="TeraSort", dir="TeraSort", scol="size_mb",
+         sizes=[(50, "50 MB"), (250, "250 MB"), (500, "500 MB")], tol=1.5,
+         lat={"ours": "compute_ms", "faasm": "e2e_ms",
+              "rmmap": "e2e_ms", "cloudburst": "e2e_ms"}),
     dict(name="Finra", dir="Finra", scol="size_trades",
          sizes=[(10000, "10k"), (100000, "100k"), (1000000, "1M")], tol=0.5,
          lat={"ours": "compute_ms", "faasm": "e2e_ms",
@@ -97,7 +101,7 @@ def fmt(y):
 
 def main():
     nrows, ncols = 3, len(WORKLOADS)
-    fig, axes = plt.subplots(nrows, ncols, figsize=(18, 6))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.6 * ncols, 6))
     letters = "abcdefghij"
 
     # preload rows per workload/system
@@ -129,7 +133,7 @@ def main():
             ax.set_xlabel(slabel, fontsize=LABEL_SIZE)   # size label under every panel
             # workload notation at the BOTTOM of each column
             if rrow == nrows - 1:
-                ax.text(0.5, -0.28, "%s. %s" % (letters[c], wl["name"]),
+                ax.text(0.5, -0.23, "%s. %s" % (letters[c], wl["name"]),
                         transform=ax.transAxes, ha="center", va="top",
                         fontsize=LABEL_SIZE, fontweight="bold")
 
