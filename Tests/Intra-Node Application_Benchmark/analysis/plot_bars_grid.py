@@ -34,7 +34,7 @@ ORDER = ["cloudburst", "rmmap", "faasm", "ours"]   # bar/legend order
 TICK_SIZE = 16
 LABEL_SIZE = 16
 LEGEND_SIZE = 17
-YLABEL_SIZE = 16
+YLABEL_SIZE = 19
 VALUE_SIZE = 11   # bar value labels (bars_fig convention)
 
 # Per-workload config: display name, size column, [(size, label)], tolerance,
@@ -127,17 +127,17 @@ def main():
             ax.tick_params(axis="y", labelsize=TICK_SIZE)
             ax.grid(True, axis="y", alpha=.3)
             ax.set_xlabel(slabel, fontsize=LABEL_SIZE)   # size label under every panel
-            if c == 0:
-                ax.set_ylabel("Latency (s)", fontsize=YLABEL_SIZE)
             # workload notation at the BOTTOM of each column
             if rrow == nrows - 1:
                 ax.text(0.5, -0.28, "%s. %s" % (letters[c], wl["name"]),
                         transform=ax.transAxes, ha="center", va="top",
                         fontsize=LABEL_SIZE, fontweight="bold")
 
-    fig.tight_layout(rect=[0, 0, 1, 0.95], w_pad=0.3, h_pad=0.5)
+    # reserve a small left margin so the single shared y-label clears the tick numbers
+    fig.tight_layout(rect=[0.012, 0, 1, 0.95], w_pad=0.3, h_pad=0.5)
     fig.subplots_adjust(wspace=0.22, hspace=0.28)
-    fig.align_ylabels(axes[:, 0])   # align the three "Latency (s)" labels
+    # single shared y-axis label (avoids the three stacked labels overlapping)
+    fig.supylabel("Execution time (s)", fontsize=YLABEL_SIZE, x=0.004)
     handles = [Patch(facecolor=STYLE[k]["color"], edgecolor="black", linewidth=0.3,
                      label=STYLE[k]["label"]) for k in ORDER]
     fig.legend(handles, [STYLE[k]["label"] for k in ORDER], loc="upper center",
