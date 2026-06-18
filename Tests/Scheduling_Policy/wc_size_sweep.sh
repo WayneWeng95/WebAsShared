@@ -45,7 +45,7 @@ NODE_AGENT="$ROOT/node-agent"
 PART="$ROOT/Partitioner/target/release/partition"
 CDIR="$HERE/cluster_dags"
 LOGDIR="$HERE/logs_wc_size"
-CSV="$HERE/results_wc_size.csv"
+CSV="$HERE/analysis/results_wc_size.csv"
 
 log() { printf '\033[1;36m[wc-size]\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m[wc-size] %s\033[0m\n' "$*" >&2; exit 1; }

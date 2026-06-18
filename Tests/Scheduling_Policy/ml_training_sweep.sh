@@ -45,7 +45,7 @@
 #   SIZES=sgd_100000 POLICIES="pack balanced spread random" ./ml_training_sweep.sh 3
 #
 # Then re-derive makespan-vs-cost (the 2nd CSV, like analyze_finra.py):
-#   python3 analyze_ml_training.py                  # → results_ml_training_exec.csv  (TODO)
+#   python3 analysis/analyze_ml_training.py         # → analysis/results_ml_training_exec.csv
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,7 +73,7 @@ NODE_AGENT="$ROOT/node-agent"
 PART="$ROOT/Partitioner/target/release/partition"
 CDIR="$HERE/ml_training_dags"
 LOGDIR="$HERE/logs_ml_training"
-CSV="$HERE/results_ml_training.csv"
+CSV="$HERE/analysis/results_ml_training.csv"
 # Where the `save` Output node flushes the trained-model summary. Read after each run
 # to extract weight_checksum (gate) + accuracy.
 RESULT_FILE="$ROOT/TestOutput/ml_training_ap_result.txt"

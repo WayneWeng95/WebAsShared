@@ -50,13 +50,34 @@ policy authoritative and the cluster_dag is passed through unchanged.)
 
 ## Files
 
-| file                 | role                                                           |
-|----------------------|----------------------------------------------------------------|
-| `wc_size_sweep.sh`   | the experiment: (size × policy) → pre-partition, submit, time → `results_wc_size.csv` |
-| `gen_variants.py`    | emit a policy variant of a workload; `--input PATH` overrides corpus size |
-| `placement_stats.py` | static placement metrics (imbalance, cross-node edges) of a ClusterDag |
+The folder is split into the **experiment harness** (top level) and the
+**read-side** (`analysis/`):
 
-Generated (gitignored): `cluster_dags/`, `logs_wc_size/`.
+**Top level — run the sweeps / generate DAGs:**
+
+| file                   | role                                                           |
+|------------------------|----------------------------------------------------------------|
+| `wc_size_sweep.sh`     | word_count experiment: (size × policy × fan-out) → pre-partition, submit, time → `analysis/results_wc_size.csv` |
+| `finra_sweep.sh`       | finra experiment → `analysis/results_finra.csv` |
+| `ml_training_sweep.sh` | ml_training experiment → `analysis/results_ml_training.csv` |
+| `gen_variants.py`      | emit a policy variant of a workload; `--input PATH` overrides corpus size |
+| `gen_sgd_ap_dag.py`    | build the ml_training (SGD) all-pairs DAG |
+
+**`analysis/` — derive metrics & plot:**
+
+| file                       | role                                                           |
+|----------------------------|----------------------------------------------------------------|
+| `analyze_exec.py`          | word_count logs → makespan-vs-cost split → `results_exec.csv` |
+| `analyze_finra.py`         | finra logs → `results_finra_exec.csv` |
+| `analyze_ml_training.py`   | ml_training logs → `results_ml_training_exec.csv` |
+| `placement_stats.py`       | static placement metrics (imbalance, cross-node edges) of a ClusterDag |
+| `plot_policy_grid.py`      | makespan + total-exec-time across policies/fan-out for all 3 workloads → `figs/policy_grid.pdf` |
+| `results_*.csv`, `figs/`   | sweep + derived results, and the figures |
+
+Run the analysis scripts from the experiment dir, e.g. `python3 analysis/analyze_finra.py`
+(they read `../logs_*/` and `../*_dags/` and write into `analysis/`).
+
+Generated (gitignored): `cluster_dags/`, `logs_wc_size/`, `logs_finra/`.
 `gen_variants.py` still carries finra/ml_training support for the deferred work.
 
 ---

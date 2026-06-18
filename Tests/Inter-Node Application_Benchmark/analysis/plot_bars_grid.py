@@ -138,7 +138,8 @@ def main():
     fig.tight_layout(rect=[0, 0, 1, 0.95], w_pad=0.3, h_pad=0.5)
     fig.subplots_adjust(wspace=0.22, hspace=0.28)
     fig.align_ylabels(axes[:, 0])   # align the three "Latency (s)" labels
-    handles = [Patch(color=STYLE[k]["color"], label=STYLE[k]["label"]) for k in ORDER]
+    handles = [Patch(facecolor=STYLE[k]["color"], edgecolor="black", linewidth=0.3,
+                     label=STYLE[k]["label"]) for k in ORDER]
     fig.legend(handles, [STYLE[k]["label"] for k in ORDER], loc="upper center",
                ncol=4, frameon=False, fontsize=LEGEND_SIZE, bbox_to_anchor=(0.5, 1.0),
                columnspacing=2.0, handletextpad=0.6)

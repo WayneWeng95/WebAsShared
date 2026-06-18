@@ -28,9 +28,10 @@ import statistics
 import collections
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-LOGDIR = os.path.join(HERE, "logs_wc_size")
-CDIR = os.path.join(HERE, "cluster_dags")
-ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+EXP = os.path.dirname(HERE)  # the Scheduling_Policy experiment dir (logs/dags live here)
+LOGDIR = os.path.join(EXP, "logs_wc_size")
+CDIR = os.path.join(EXP, "cluster_dags")
+ROOT = os.path.abspath(os.path.join(EXP, "..", ".."))
 
 NODE_RE = re.compile(r"node\s+(\d+)\s+\([^)]*\):\s+(\d+)ms", re.I)
 WALL_RE = re.compile(r"total wall time:\s+(\d+)ms", re.I)

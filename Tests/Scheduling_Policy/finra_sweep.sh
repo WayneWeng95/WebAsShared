@@ -42,7 +42,7 @@
 #   SIZES=trades_100000 POLICIES=pack ./finra_sweep.sh 3
 #
 # Then re-derive makespan-vs-cost (the 2nd CSV, like analyze_exec.py for wc):
-#   python3 analyze_finra.py               # → results_finra_exec.csv
+#   python3 analysis/analyze_finra.py      # → analysis/results_finra_exec.csv
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -69,7 +69,7 @@ NODE_AGENT="$ROOT/node-agent"
 PART="$ROOT/Partitioner/target/release/partition"
 CDIR="$HERE/finra_dags"
 LOGDIR="$HERE/logs_finra"
-CSV="$HERE/results_finra.csv"
+CSV="$HERE/analysis/results_finra.csv"
 # Where finra_merge_results flushes its summary (the `save` Output node). Read
 # after each run to extract total_violations for the correctness gate.
 RESULT_FILE="$ROOT/TestOutput/finra_ap_result.txt"

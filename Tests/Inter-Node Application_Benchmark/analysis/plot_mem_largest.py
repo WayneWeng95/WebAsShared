@@ -96,8 +96,8 @@ ax.grid(axis="y", alpha=0.3)
 allv = [s for fw in BASELINES for s in saving[fw] if not np.isnan(s)]
 ax.set_ylim(0, max(allv) + 8)
 fig.tight_layout(rect=[0, 0, 1, 0.96], pad=0.4)
-ax.legend(ncol=3, fontsize=LEGEND_SIZE, loc="lower center", bbox_to_anchor=(0.5, 1.0),
-          frameon=False)
+ax.legend(ncol=3, fontsize=LEGEND_SIZE, loc="lower center", bbox_to_anchor=(0.5, 0.99),
+          frameon=False, borderaxespad=0.0)
 
 fig.savefig(os.path.join(FIGS, "mem_largest_load.pdf"), bbox_inches="tight")
 print("wrote figs/mem_largest_load.pdf")
