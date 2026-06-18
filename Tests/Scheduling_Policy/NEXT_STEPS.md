@@ -39,7 +39,7 @@ _Snapshot of where the placement-policy experiment stands and what to do next._
    - End commit messages with the Co-Authored-By trailer.
 
 3. **Multi-node Faasm baseline** for word_count (reuse
-   `Tests/Inter-Node Application_Benchmark/WordCount/baseline/faasm/demo/`):
+   `Tests/Intra-Node Application_Benchmark/WordCount/baseline/faasm/demo/`):
    shared Redis on node-0 + distribute mapper Faaslets across nodes. See the
    "Baseline" section in `README.md`. Same CSV columns so rows line up.
 

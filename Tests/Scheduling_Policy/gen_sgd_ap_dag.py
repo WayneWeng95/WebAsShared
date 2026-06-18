@@ -44,7 +44,7 @@
 #                         has them: encode is placement:all) + the model → checksum
 #   save                  Output → TestOutput/ml_training_ap_result.txt
 #
-# Slots match Tests/Inter-Node Application_Benchmark/ML_training/gen_dag.py (E=1):
+# Slots match Tests/Intra-Node Application_Benchmark/ML_training/gen_dag.py (E=1):
 #   DATA_BASE=10  BIN_BASE=40  GRAD_BASE=64  GSUM_BASE=1200  (model slot 1900 is
 #   hardcoded in the guest). Input-prep flows through machine-LOCAL slots (every
 #   placement:"all" copy reads/writes the same local SHM slot numbers), so the only

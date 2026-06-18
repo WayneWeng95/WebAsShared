@@ -1,5 +1,11 @@
 # Application Benchmark — WebAsShared vs RMMap / Faasm / Cloudburst
 
+> **This is the INTRA-node suite** (single box; WasMem driven by `node-agent run`,
+> state through the shared-memory page-chain, `topo=intra-shm`). Renamed from the
+> former "Inter-Node Application_Benchmark" on 2026-06-18 once it was clear these
+> runs are intra-node. The genuine cross-node version lives in the sibling
+> `../Inter-Node Application_Benchmark/` (see its `EXPERIMENT_PLAN.md`).
+
 Cross-system **application-level** evaluation of **WebAsShared** (our WASM DAG dataflow engine with
 a zero-copy shared-memory page-chain substrate and serialization-free RDMA state transfer) against
 the three systems it is closest to: **RMMap**, **Faasm**, and **Cloudburst**.

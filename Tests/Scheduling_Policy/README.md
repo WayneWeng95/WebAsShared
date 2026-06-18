@@ -118,7 +118,7 @@ data-movement model. **Reuse the existing Faasm-like WordCount baseline** — do
 write a new one — at:
 
 ```
-Tests/Inter-Node Application_Benchmark/WordCount/baseline/faasm/demo/
+Tests/Intra-Node Application_Benchmark/WordCount/baseline/faasm/demo/
   wc.rs / wc.cwasm   the Faaslet WASM module (map + reduce), AOT-compiled
   driver.py          orchestrates Faaslets, moves state through Redis KV
   run.sh             sweeps size × fan-out N → results.csv
