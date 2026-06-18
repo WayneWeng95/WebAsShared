@@ -44,7 +44,7 @@ WORKLOADS = [
          sizes=[(50, "50 MB"), (500, "500 MB"), (1000, "1 GB")], tol=1.5,
          lat={"ours": "compute_ms", "faasm": "e2e_ms",
               "rmmap": "e2e_ms", "cloudburst": "e2e_ms_median"}),
-    dict(name="TeraSort", dir="TeraSort", scol="size_mb",
+    dict(name="Terasort", dir="TeraSort", scol="size_mb",
          sizes=[(50, "50 MB"), (250, "250 MB"), (500, "500 MB")], tol=1.5,
          lat={"ours": "compute_ms", "faasm": "e2e_ms",
               "rmmap": "e2e_ms", "cloudburst": "e2e_ms"}),

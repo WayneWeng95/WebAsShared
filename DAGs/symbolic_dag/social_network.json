@@ -1,0 +1,152 @@
+{
+  "shm_path": "/dev/shm/rdma_social_network",
+  "wasm_path": "Executor/target/wasm32-unknown-unknown/release/guest.wasm",
+  "log_level": "warn",
+  "total_nodes": 1,
+  "nodes": [
+    {
+      "id": "load",
+      "node_id": 0,
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/stream_app/social_network_events.csv",
+          "slot": 0,
+          "prefetch": true
+        }
+      }
+    },
+    {
+      "id": "seed",
+      "node_id": 0,
+      "deps": [],
+      "kind": {
+        "Func": {
+          "func": "sn_seed",
+          "arg": 0,
+          "wasm_arg": 10000
+        }
+      }
+    },
+    {
+      "id": "parse",
+      "node_id": 0,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sn_parse",
+          "arg": 4,
+          "arg2": 10
+        }
+      }
+    },
+    {
+      "id": "apply_0",
+      "node_id": 0,
+      "deps": [
+        "parse",
+        "seed"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sn_apply",
+          "arg": 10,
+          "arg2": 110
+        }
+      }
+    },
+    {
+      "id": "apply_1",
+      "node_id": 0,
+      "deps": [
+        "parse",
+        "seed"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sn_apply",
+          "arg": 11,
+          "arg2": 111
+        }
+      }
+    },
+    {
+      "id": "apply_2",
+      "node_id": 0,
+      "deps": [
+        "parse",
+        "seed"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sn_apply",
+          "arg": 12,
+          "arg2": 112
+        }
+      }
+    },
+    {
+      "id": "apply_3",
+      "node_id": 0,
+      "deps": [
+        "parse",
+        "seed"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sn_apply",
+          "arg": 13,
+          "arg2": 113
+        }
+      }
+    },
+    {
+      "id": "aggregate",
+      "node_id": 0,
+      "deps": [
+        "apply_0",
+        "apply_1",
+        "apply_2",
+        "apply_3"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            110,
+            111,
+            112,
+            113
+          ],
+          "downstream": 300
+        }
+      }
+    },
+    {
+      "id": "summary",
+      "node_id": 0,
+      "deps": [
+        "aggregate"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sn_summary",
+          "arg": 300
+        }
+      }
+    },
+    {
+      "id": "save",
+      "node_id": 0,
+      "deps": [
+        "summary"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/social_network_result.txt"
+        }
+      }
+    }
+  ]
+}

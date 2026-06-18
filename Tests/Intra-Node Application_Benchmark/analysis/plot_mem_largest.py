@@ -37,7 +37,7 @@ DISPLAY = {"WasMem-AOT": "WasMem"}
 # Size labels match the all-workloads grid figure (largest size per workload).
 LARGEST = [
     ("WordCount",    "Wordcount\n1 GB",          {"size_mb": 1001.0, "workers": 16.0}),
-    ("TeraSort",     "TeraSort\n500 MB",         {"size_mb": 500.0, "workers": 16.0}),
+    ("TeraSort",     "Terasort\n500 MB",         {"size_mb": 500.0, "workers": 16.0}),
     ("Finra",        "Finra\n1M",                {"size_trades": 1000000.0}),
     ("Matrix",       "Matrix\n2048 × 2048",      {"size_n": 2048.0, "workers": 16.0}),
     ("ML_training",  "ML training\n600k",        {"size_mb": 19.5, "workers": 16.0}),

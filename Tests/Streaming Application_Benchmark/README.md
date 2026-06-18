@@ -33,6 +33,38 @@ is closest to:
 Original RTSFaaS configs are preserved as the spec under
 `../../Benchmarks/RTSFaaS/{MediaReview,SocialNetwork}/` (`driver.sh`/`worker.sh`,
 `Env/*.env`); the application logic is Java in the RTSFaaS repo (not reproduced).
+The two RTSFaaS workloads are also vendored here, unmodified, as the frozen
+baseline spec under [`baseline/RTSFaaS/`](baseline/RTSFaaS/) (Java sources +
+env + driver/worker), mirroring the Finra suite's `baseline/` convention.
+
+## Implemented adaptation (runs on our framework)
+
+```bash
+./run.sh mediareview                 # sweep events; writes results_mediareview.csv
+./run.sh socialnetwork "100000 1000000" 3
+```
+
+Both re-implementations run end-to-end on the intra-node SHM page-chain:
+
+| artifact | file |
+|----------|------|
+| guest functions | `Executor/guest/src/workloads/{media_review,social_network}.rs` (`*_seed`/`*_parse`/`*_apply`/`*_summary`) |
+| DAGs | `DAGs/symbolic_dag/{media_review,social_network}.json` (Input → parse [partition by key] → apply×N → Aggregate → summary → Output) |
+| event generator | `gen_events.py` (deterministic; skew + multi-partition knobs) |
+| DAG generator / sweep | `gen_dag.py`, `run.sh` |
+
+**Correctness gate** (deterministic — `gen_events.py` fixed seed): the run
+summary's tallies equal the generated event counts. Verified at 20 k events:
+MediaReview `total_events=20000, login_ok=4007 (=#login)`; SocialNetwork
+`login_ok=5096, profile_reads=5075, timeline_reads=9758 (=2×#timeline),
+tweet_writes=9900 (=2×#post)`.
+
+The three/four state tables are held as **keyed SHM state** (`insert_shared_data`
+/ `read_shared_chain`); `*_parse` partitions events by key into N slots and each
+`*_apply` worker owns one partition. Our `Shuffle` node routes whole upstream
+*slots* (keyed on `upstream_id`), not per-record, so the per-key routing is
+folded into the parse stage — the dedicated cross-node RDMA routing variant
+(key-owning node per range) is still the TODO below.
 
 ## How we run them (re-implement the app, not the stack)
 
@@ -78,9 +110,10 @@ sweeps mirror RTSFaaS's own knobs so curves are shape-comparable.
 ## Status
 
 - [ ] Pin the Sagas/Flint paper + mechanism (and RTSFaaS run recipe / how baselines are driven).
-- [ ] Extract the SocialNetwork spec (event mix + state tables) from the RTSFaaS source.
-- [ ] `media_review.rs` guest + event generator; MediaReview DAGs.
-- [ ] SocialNetwork guest + DAGs.
+- [x] Extract the SocialNetwork spec (event mix + state tables) from the RTSFaaS source — see `baseline/RTSFaaS/`.
+- [x] `media_review.rs` guest + event generator; MediaReview DAG (`DAGs/symbolic_dag/media_review.json`).
+- [x] SocialNetwork guest + DAG (`DAGs/symbolic_dag/social_network.json`).
+- [ ] Cross-node RDMA routing variant (key-owning node per range) under `DAGs/rdma_workload_dag/`.
 - [ ] Sweeps (multi-partition ratio × skew) + figures; throughput/latency/RDMA-bytes vs both baselines.
 
 ## References
