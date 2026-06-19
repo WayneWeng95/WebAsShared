@@ -1,0 +1,309 @@
+{
+  "_comment": "ClusterDag: mediareview streaming across 2 nodes (data-parallel + RDMA partial-tally merge on node 1).",
+  "shm_path_prefix": "/dev/shm/rdma_stream",
+  "log_level": "info",
+  "transfer": true,
+  "shared_inputs": [
+    {
+      "path": "TestData/stream_app/cluster/events_node0.csv",
+      "source_node": 0
+    },
+    {
+      "path": "TestData/stream_app/cluster/events_node1.csv",
+      "source_node": 0
+    }
+  ],
+  "node_dags": {
+    "0": [
+      {
+        "id": "load",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node0.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "mr_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "parse",
+        "deps": [
+          "load"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_parse",
+            "arg": 4,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0",
+        "deps": [
+          "parse",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_1",
+        "deps": [
+          "parse",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_2",
+        "deps": [
+          "parse",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_3",
+        "deps": [
+          "parse",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "apply_0",
+          "apply_1",
+          "apply_2",
+          "apply_3"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "send",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "RemoteSend": {
+            "slot": 200,
+            "slot_kind": "Stream",
+            "peer": 1
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "id": "load",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node1.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "mr_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "parse",
+        "deps": [
+          "load"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_parse",
+            "arg": 4,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0",
+        "deps": [
+          "parse",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_1",
+        "deps": [
+          "parse",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_2",
+        "deps": [
+          "parse",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_3",
+        "deps": [
+          "parse",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "apply_0",
+          "apply_1",
+          "apply_2",
+          "apply_3"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "recv_0",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "RemoteRecv": {
+            "slot": 201,
+            "slot_kind": "Stream",
+            "peer": 0
+          }
+        }
+      },
+      {
+        "id": "aggregate_global",
+        "deps": [
+          "aggregate_local",
+          "recv_0"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              200,
+              201
+            ],
+            "downstream": 300
+          }
+        }
+      },
+      {
+        "id": "summary",
+        "deps": [
+          "aggregate_global"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_summary",
+            "arg": 300
+          }
+        }
+      },
+      {
+        "id": "save",
+        "deps": [
+          "summary"
+        ],
+        "kind": {
+          "Output": {
+            "path": "TestOutput/rdma_stream_mediareview.txt"
+          }
+        }
+      }
+    ]
+  }
+}
