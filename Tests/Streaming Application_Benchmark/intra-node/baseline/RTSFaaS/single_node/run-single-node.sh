@@ -1,5 +1,10 @@
+#!/usr/bin/env bash
+# run-single-node.sh — all 4 RTSFaaS roles on THIS node over RoCE loopback
+# (database+driver+worker+client), in-memory store. Self-contained: uses the
+# Env/ + DockerFiles/ committed alongside this script. Needs rtfaas:1.0 built here.
 set -uo pipefail
-WD=/tmp/rtsfaas_single; cd "$WD"
+WD="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; cd "$WD"
+sudo modprobe rdma_ucm 2>/dev/null || true
 M() { echo "-v $WD/DockerFiles/$1:/rtfaas/$1 -v $WD/DockerFiles/entrypoint.sh:/rtfaas/entrypoint.sh"; }
 DEV="--privileged --device=/dev/infiniband/"
 run_app() {

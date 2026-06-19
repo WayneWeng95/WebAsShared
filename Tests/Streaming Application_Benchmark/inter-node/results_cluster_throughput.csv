@@ -1,0 +1,8 @@
+# WasMem streaming, cluster (RDMA, data-parallel + merge), MediaReview, end-to-end wall throughput.
+scaling,nodes,total_events,median_wall_ms,throughput_ev_s
+strong,1,200000,1882,106270
+strong,2,200000,3089,64746
+strong,4,200000,1980,101010
+weak,1,200000,1864,107296
+weak,2,400000,3788,105611
+weak,4,800000,3839,208388

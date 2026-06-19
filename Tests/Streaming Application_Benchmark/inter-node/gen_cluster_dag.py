@@ -36,7 +36,7 @@ args = ap.parse_args()
 
 p = PREFIX[args.workload]
 n = max(1, args.parts)
-N = max(2, args.nodes)
+N = max(1, args.nodes)   # N=1 → single-node pipeline (no RemoteSend/Recv), for the 1-node baseline
 BASE, OUT, LOCAL_AGG, GLOBAL_AGG = 10, 110, 200, 300
 merger = N - 1
 
