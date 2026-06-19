@@ -1,0 +1,5 @@
+FROM ververica/flink-statefun:2.2.0
+
+RUN mkdir -p /opt/statefun/modules/streaming-example
+
+COPY module.yaml /opt/statefun/modules/streaming-example/

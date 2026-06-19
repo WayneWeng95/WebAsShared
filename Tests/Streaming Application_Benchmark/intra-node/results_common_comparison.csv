@@ -1,0 +1,7 @@
+system,workload,events,throughput_req_s
+statefun,mediareview,100000,2390
+statefun,socialnetwork,100000,1498
+webasshared,mediareview,100000,83663
+webasshared,socialnetwork,100000,51798
+rtsfaas,mediareview,16000,5397
+rtsfaas,socialnetwork,16000,6155

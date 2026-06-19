@@ -1,0 +1,11 @@
+system,workload,parts,events,compute_ms,throughput_events_s
+was,mediareview,1,100000,1452.08,68867
+was,mediareview,2,100000,1112.13,89918
+was,mediareview,4,100000,1060.88,94261
+was,mediareview,8,100000,1264.67,79072
+was,mediareview,16,100000,1550.71,64487
+was,socialnetwork,1,100000,3607.04,27724
+was,socialnetwork,2,100000,2388.42,41869
+was,socialnetwork,4,100000,1719.88,58144
+was,socialnetwork,8,100000,1731.93,57739
+was,socialnetwork,16,100000,1949.80,51287

@@ -1,0 +1,54 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# This file is the base for the Apache Flink configuration
+
+statefun.flink-job-name: Statefun Application
+
+#==============================================================================
+# Configurations strictly required by Stateful Functions. Do not change.
+#==============================================================================
+
+classloader.parent-first-patterns.additional: org.apache.flink.statefun;org.apache.kafka;com.google.protobuf
+
+#==============================================================================
+# Fault tolerance, checkpointing and recovery.
+# For more related configuration options, please see: https://ci.apache.org/projects/flink/flink-docs-master/ops/config.html#fault-tolerance
+#==============================================================================
+
+# Uncomment the below to enable checkpointing for your application
+#execution.checkpointing.mode: EXACTLY_ONCE
+#execution.checkpointing.interval: 5sec
+
+restart-strategy: fixed-delay
+restart-strategy.fixed-delay.attempts: 2147483647
+restart-strategy.fixed-delay.delay: 1sec
+
+# FT off + in-memory (heap) state backend for the fair 3-way comparison:
+# checkpointing stays disabled (no execution.checkpointing.interval) and working
+# state lives on the TaskManager heap (FsStateBackend), matching WebAsShared
+# (SHM, no FT) and RTSFaaS (in-memory). Was rocksdb (on-disk).
+state.backend: filesystem
+state.checkpoints.dir: file:///checkpoint-dir
+
+#==============================================================================
+# Recommended memory configurations. Users may change according to their needs.
+#==============================================================================
+
+jobmanager.memory.process.size: 1g
+taskmanager.memory.process.size: 4g
+
+# --- scaling overrides (single-machine multi-slot test) ---
+parallelism.default: 4
+taskmanager.numberOfTaskSlots: 4

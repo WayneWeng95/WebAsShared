@@ -1,0 +1,75 @@
+# Single-machine bring-up of the Flink StateFun streaming-application baseline.
+# No k8s/Strimzi needed: zookeeper + kafka + StateFun master/worker + the two
+# remote function containers, all on one Docker network. Mirrors the vendored
+# statefun-python-ycsb-example/original/docker-compose.yml, adapted to our two
+# workloads and topics. The deployment/k8s/* manifests are the cluster path.
+#
+#   sudo docker compose build && sudo docker compose up -d
+#   ./run-local.sh mediareview        # seeds, replays, checks the gate
+version: "2.1"
+services:
+    zookeeper:
+        image: wurstmeister/zookeeper
+        ports:
+            - "2181:2181"
+
+    kafka-broker:
+        image: wurstmeister/kafka:2.12-2.0.1
+        ports:
+            - "9092:9092"
+        environment:
+            HOSTNAME_COMMAND: "route -n | awk '/UG[ \t]/{print $$2}'"
+            KAFKA_CREATE_TOPICS: "mr_seed:4:1,mr_login:4:1,mr_rate:4:1,mr_review:4:1,sn_seed:4:1,sn_login:4:1,sn_profile:4:1,sn_timeline:4:1,sn_post:4:1,responses:4:1"
+            KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+            KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+        depends_on:
+            - zookeeper
+
+    master:
+        build:
+            dockerfile: docker/Dockerfile.statefun
+            context: .
+        image: streaming-example-statefun
+        expose:
+            - "6123"
+        ports:
+            - "8081:8081"
+        links:
+            - "kafka-broker:kafka-cluster-kafka-bootstrap"
+        environment:
+            - ROLE=master
+            - MASTER_HOST=master
+
+    worker:
+        build:
+            dockerfile: docker/Dockerfile.statefun
+            context: .
+        image: streaming-example-statefun
+        expose:
+            - "6121"
+            - "6122"
+        depends_on:
+            - master
+            - kafka-broker
+        links:
+            - "master:master"
+            - "kafka-broker:kafka-cluster-kafka-bootstrap"
+        environment:
+            - ROLE=worker
+            - MASTER_HOST=master
+
+    mediareview-function:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile.mediareview
+        image: streaming-example-mediareview
+        expose:
+            - "80"
+
+    socialnetwork-function:
+        build:
+            context: .
+            dockerfile: docker/Dockerfile.socialnetwork
+        image: streaming-example-socialnetwork
+        expose:
+            - "80"

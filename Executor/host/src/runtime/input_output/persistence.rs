@@ -103,6 +103,16 @@ impl PersistenceWriter {
         let _ = self.tx.send(PersistMsg::Write(s));
     }
 
+    /// Restricted/synchronous variant of [`snapshot`]: takes the heap snapshot
+    /// AND writes (and fsyncs) all files **inline on the calling thread**,
+    /// returning only once the checkpoint is durably on disk.  Used so a DAG
+    /// `Persist` barrier completes before the next stage starts — at the cost of
+    /// blocking the pipeline for the duration of the write.
+    pub fn snapshot_blocking(&self, splice_addr: usize, opts: &PersistenceOptions) {
+        let s = take_snapshot(splice_addr, opts);
+        write_snapshot(s);
+    }
+
     /// Copy only the records of a single stream `slot_id` and write them to
     /// `output` (an exact file path) in the background.
     pub fn watch_stream(&self, splice_addr: usize, slot_id: usize, output: impl Into<PathBuf>) {
@@ -436,6 +446,7 @@ fn write_snapshot(s: Snapshot) {
         match fs::File::create(&path) {
             Ok(mut f) => {
                 for a in &s.atomics { let _ = writeln!(f, "{}={}", a.name, a.value); }
+                let _ = f.sync_all(); // durable before return (matters for sync mode)
                 println!("[PersistenceWriter] atomics ({} entries) → {}",
                     s.atomics.len(), path.display());
             }
@@ -451,6 +462,7 @@ fn write_snapshot(s: Snapshot) {
                 for (i, (origin, rec)) in st.records.iter().enumerate() {
                     let _ = writeln!(f, "[{:4}][src={}] {}", i, origin, String::from_utf8_lossy(rec));
                 }
+                let _ = f.sync_all(); // durable before return (matters for sync mode)
                 println!("[PersistenceWriter] stream {} ({} records) → {}",
                     st.slot_id, st.records.len(), path.display());
             }

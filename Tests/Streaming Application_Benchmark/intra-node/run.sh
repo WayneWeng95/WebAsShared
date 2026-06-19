@@ -18,7 +18,7 @@
 #   WC_WASM=<guest.cwasm> ./run.sh ...       # AOT line (gen_dag.py honors it)
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../.." && pwd)"
+ROOT="$(cd "$HERE/../../.." && pwd)"   # repo root (…/Streaming Application_Benchmark/intra-node → 3 up)
 
 WORKLOAD="${1:-mediareview}"
 SIZES="${2:-100000 1000000}"

@@ -410,6 +410,12 @@ pub struct PersistParams {
     /// Save all Manager-committed shared-state entries from the registry.
     #[serde(default)]
     pub shared_state: bool,
+    /// Restricted/synchronous mode: snapshot AND write the files inline (with
+    /// fsync) before this node returns, so the checkpoint is durable on disk
+    /// before any downstream stage starts. Default `false` = async background
+    /// write (joined only at end of run).
+    #[serde(default)]
+    pub sync: bool,
 }
 
 /// Slicing policy selector for `FileDispatch` nodes.

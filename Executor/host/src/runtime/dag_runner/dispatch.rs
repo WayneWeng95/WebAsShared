@@ -146,7 +146,7 @@ pub(super) fn execute_node(
             }
         }
 
-        // ── Background persistence snapshot ───────────────────────────────────
+        // ── Persistence snapshot (async background, or sync barrier) ──────────
         NodeKind::Persist(p) => {
             let opts = PersistenceOptions {
                 output_dir:   p.output_dir.clone(),
@@ -156,14 +156,23 @@ pub(super) fn execute_node(
             };
             match persist_writer {
                 Some(w) => {
-                    w.snapshot(splice_addr, &opts);
+                    // sync=true: write + fsync inline before returning, so the
+                    // checkpoint is durable on disk before the next stage starts.
+                    // sync=false: queue to the background writer (joined at end).
+                    let mode = if p.sync {
+                        w.snapshot_blocking(splice_addr, &opts);
+                        "blocking"
+                    } else {
+                        w.snapshot(splice_addr, &opts);
+                        "background"
+                    };
                     println!(
-                        "  Persist(atomics={}, streams={:?}, shared={}) → \"{}\" [background]",
-                        p.atomics, p.stream_slots, p.shared_state, p.output_dir
+                        "  Persist(atomics={}, streams={:?}, shared={}, sync={}) → \"{}\" [{}]",
+                        p.atomics, p.stream_slots, p.shared_state, p.sync, p.output_dir, mode
                     );
                     log(&format!(
-                        "persist atomics={} streams={:?} shared={} → \"{}\"",
-                        p.atomics, p.stream_slots, p.shared_state, p.output_dir
+                        "persist atomics={} streams={:?} shared={} sync={} → \"{}\" [{}]",
+                        p.atomics, p.stream_slots, p.shared_state, p.sync, p.output_dir, mode
                     ));
                 }
                 None => {

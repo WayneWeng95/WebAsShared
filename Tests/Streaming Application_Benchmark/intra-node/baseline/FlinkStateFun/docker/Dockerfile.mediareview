@@ -1,0 +1,15 @@
+FROM python:3.8-slim
+
+RUN mkdir -p /app
+WORKDIR /app
+
+COPY functions/requirements.txt /app
+RUN python -m pip install --upgrade setuptools pip wheel
+RUN pip install -r requirements.txt
+
+COPY functions/mediareview_function.py /app
+COPY protobuf/messages_pb2.py /app
+
+# aiohttp app must be served with the aiohttp gunicorn worker class (the default
+# sync WSGI worker fails with "__call__() takes 1 positional argument but 3").
+CMD ["gunicorn", "-b", "0.0.0.0:80", "-w", "1", "-k", "aiohttp.GunicornWebWorker", "mediareview_function:app"]

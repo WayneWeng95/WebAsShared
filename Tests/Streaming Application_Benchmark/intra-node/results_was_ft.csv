@@ -1,0 +1,5 @@
+system,workload,events,ft,throughput_req_s,persist_MB
+webasshared,mediareview,100000,off,82380,0
+webasshared,mediareview,100000,on,81488,4
+webasshared,socialnetwork,100000,off,56026,0
+webasshared,socialnetwork,100000,on,54360,3

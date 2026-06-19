@@ -1,0 +1,5 @@
+system,config,workload,target_ev_s,achieved_ev_s
+statefun,scaled_p4,mediareview,6400,2493
+statefun,scaled_p4,mediareview,12800,2551
+statefun,scaled_p4,socialnetwork,6400,2531
+statefun,scaled_p4,socialnetwork,12800,0

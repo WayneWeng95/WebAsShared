@@ -1,0 +1,90 @@
+version: "1.0"
+module:
+  meta:
+    type: remote
+  spec:
+    functions:
+        # MediaReview: single-key login/rate/review over one per-key state.
+        - function:
+            meta:
+                kind: http
+                type: streaming-example/mediareview_function
+            spec:
+                endpoint: http://mediareview-function:80/statefun
+                states:
+                - state
+                maxNumBatchRequests: 500
+                timeout: 2min
+        # SocialNetwork: login/profile + 2-key timeline/post (fans out to key+1).
+        - function:
+            meta:
+                kind: http
+                type: streaming-example/socialnetwork_function
+            spec:
+                endpoint: http://socialnetwork-function:80/statefun
+                states:
+                - state
+                maxNumBatchRequests: 500
+                timeout: 2min
+
+    ingresses:
+        # The routable-protobuf-ingress routes each Kafka record to the target
+        # function using the record KEY as the function id (the row key). Topics
+        # are workload-prefixed so the two apps share one deployment without
+        # colliding on the common op names (login, ...).
+        - ingress:
+            meta:
+                type: statefun.kafka.io/routable-protobuf-ingress
+                id: streaming-example/kafka-ingress
+            spec:
+                address: kafka-cluster-kafka-bootstrap:9092
+                consumerGroupId: statefun
+                topics:
+                    - topic: mr_seed
+                      typeUrl: com.googleapis/streaming.messages.Wrapper
+                      targets:
+                        - streaming-example/mediareview_function
+                    - topic: mr_login
+                      typeUrl: com.googleapis/streaming.messages.Wrapper
+                      targets:
+                        - streaming-example/mediareview_function
+                    - topic: mr_rate
+                      typeUrl: com.googleapis/streaming.messages.Wrapper
+                      targets:
+                        - streaming-example/mediareview_function
+                    - topic: mr_review
+                      typeUrl: com.googleapis/streaming.messages.Wrapper
+                      targets:
+                        - streaming-example/mediareview_function
+                    - topic: sn_seed
+                      typeUrl: com.googleapis/streaming.messages.Wrapper
+                      targets:
+                        - streaming-example/socialnetwork_function
+                    - topic: sn_login
+                      typeUrl: com.googleapis/streaming.messages.Wrapper
+                      targets:
+                        - streaming-example/socialnetwork_function
+                    - topic: sn_profile
+                      typeUrl: com.googleapis/streaming.messages.Wrapper
+                      targets:
+                        - streaming-example/socialnetwork_function
+                    - topic: sn_timeline
+                      typeUrl: com.googleapis/streaming.messages.Wrapper
+                      targets:
+                        - streaming-example/socialnetwork_function
+                    - topic: sn_post
+                      typeUrl: com.googleapis/streaming.messages.Wrapper
+                      targets:
+                        - streaming-example/socialnetwork_function
+
+    egresses:
+        - egress:
+            meta:
+                type: statefun.kafka.io/generic-egress
+                id: streaming-example/kafka-egress
+            spec:
+                address: kafka-cluster-kafka-bootstrap:9092
+                deliverySemantic:
+                  type: exactly-once
+                  transactionTimeoutMillis: 100000
+                transactionTimeoutMillis: 100000

@@ -1,0 +1,24 @@
+# Scaling override for the single-machine StateFun stack: raises Flink
+# parallelism + task slots (the base image defaults to parallelism=1, slots=1 —
+# the real cap behind the ~1.8k ops/s ceiling) and runs the remote functions
+# with 4 gunicorn worker processes so 4 parallel subtasks have function capacity.
+#
+#   sudo docker compose -p flinkstream \
+#     -f docker-compose.yml -f docker-compose.scale.yml up -d
+# Also pins the work-doing containers (taskmanager + remote functions) to cores
+# 0-7 (cpuset) so the StateFun side has the SAME 8-core budget as WebAsShared
+# (taskset 0-7) and RTSFaaS (cpuset 0-7) in the fair 3-way comparison.
+services:
+  master:
+    volumes:
+      - ./deployment/local/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+  worker:
+    cpuset: "0-7"
+    volumes:
+      - ./deployment/local/flink-conf.yaml:/opt/flink/conf/flink-conf.yaml
+  mediareview-function:
+    cpuset: "0-7"
+    command: ["gunicorn", "-b", "0.0.0.0:80", "-w", "4", "-k", "aiohttp.GunicornWebWorker", "mediareview_function:app"]
+  socialnetwork-function:
+    cpuset: "0-7"
+    command: ["gunicorn", "-b", "0.0.0.0:80", "-w", "4", "-k", "aiohttp.GunicornWebWorker", "socialnetwork_function:app"]

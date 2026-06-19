@@ -1,0 +1,7 @@
+system,workload,events,ft_mode,throughput_req_s
+webasshared,mediareview,100000,off,88460
+webasshared,mediareview,100000,async,83606
+webasshared,mediareview,100000,sync_barrier,45932
+webasshared,socialnetwork,100000,off,53999
+webasshared,socialnetwork,100000,async,53571
+webasshared,socialnetwork,100000,sync_barrier,35208
