@@ -71,15 +71,39 @@ def split_aligned(corpus, n):
     return out
 
 
-def occurrences(merged):
-    occ = 0
+def parse_counts(merged):
+    """merged `word\\x1fcount\\n…` blob → sorted [(word, count)], total occurrences."""
+    counts, occ = [], 0
     for line in (merged or b"").split(b"\n"):
         sep = line.rfind(b"\x1f")
-        if sep != -1:
-            try:
-                occ += int(line[sep + 1:])
-            except ValueError:
-                pass
+        if sep == -1:
+            continue
+        try:
+            c = int(line[sep + 1:])
+        except ValueError:
+            continue
+        counts.append((line[:sep].decode(errors="replace"), c))
+        occ += c
+    counts.sort(key=lambda wc: (-wc[1], wc[0]))
+    return counts, occ
+
+
+def occurrences(merged):
+    return parse_counts(merged)[1]
+
+
+def write_result(path, merged, size_mb, mappers, nodes_used):
+    """Save the merged result back on node 0 in the TestOutput word_count format
+    (mirrors the auto-placement `save` Output node, so the file write is part of the
+    timed end-to-end window)."""
+    counts, occ = parse_counts(merged)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write("=== word_count ===\n")
+        f.write(f"size_mb={size_mb}\nmappers={mappers}\nnodes_used={nodes_used}\n")
+        f.write(f"unique_words={len(counts)}\ntotal_occurrences={occ}\n")
+        for w, c in counts:
+            f.write(f"{w}: {c}\n")
     return occ
 
 
@@ -97,6 +121,8 @@ def main():
     ap.add_argument("--reps", type=int, default=1)
     ap.add_argument("--expect", type=int, default=None, help="gate occurrences against this count")
     ap.add_argument("--csv", default=os.path.join(HERE, "results.csv"))
+    ap.add_argument("--out", default=os.path.join(ROOT, "TestOutput", "wc_faasm_result.txt"),
+                    help="where node 0 saves the merged result (in the timed window)")
     args = ap.parse_args()
 
     env, nodes = load_env()
@@ -123,16 +149,19 @@ def main():
     new = not os.path.exists(args.csv)
     fcsv = open(args.csv, "a")
     if new:
-        fcsv.write("size_mb,mappers,nodes_used,makespan_ms_median,occurrences,expect,success,reps\n")
+        fcsv.write("size_mb,mappers,nodes_used,makespan_ms_median,total_job_ms_median,"
+                   "occurrences,expect,success,reps\n")
 
     print(f"[wc] corpus={size_mb}MB mappers={N} nodes={[*range(len(nodes))]} reps={args.reps}")
-    ms_list, occ_seen, ok_all = [], None, True
+    ms_list, job_list, occ_seen, ok_all = [], [], None, True
     for rep in range(1, args.reps + 1):
         uid = uuid.uuid4().hex
-        for i, ch in enumerate(split_aligned(corpus, N)):   # splitter → KV (setup, untimed)
+        r.flushdb()                                         # cold Redis — no warm state across reps (untimed)
+        t0 = time.time()                                    # end-to-end clock: split/upload → dispatch → compute
+        for i, ch in enumerate(split_aligned(corpus, N)):   # splitter → KV (now inside the timed window)
             r.set(f"{uid}_chunk_{i}", ch)
 
-        launched, t0 = [], time.time()
+        launched = []
         for i in range(N):                                  # map Faaslets across nodes
             n = nodes[i % len(nodes)]
             h = call(n, port, "/launch", {"cmd": ["python3", WRAPPER, "map", uid, str(i)],
@@ -142,7 +171,7 @@ def main():
                                              "env": fenv, "tag": "reduce"})["handle"]
         launched.append((nodes[0], h))
 
-        done, ok = set(), True
+        done, ok, job_ms = set(), True, 0
         while len(done) < len(launched):
             time.sleep(0.1)
             for n, h in launched:
@@ -151,27 +180,32 @@ def main():
                 st = call(n, port, f"/status/{h}")
                 if not st["running"]:
                     done.add(h)
+                    job_ms += st["ms"]   # this Faaslet's own runtime; summed = total work across all jobs
                     if st["exit_code"] not in (0, None):
                         ok = False
                         print(f"[wc] FAILED {n}/{h} exit={st['exit_code']}: {st['stderr_tail'][:300]}")
-        makespan = int((time.time() - t0) * 1000)
-        occ = occurrences(r.get(f"{uid}_result"))
+        merged = r.get(f"{uid}_result")                              # result sent back to node 0
+        occ = write_result(args.out, merged, size_mb, N, len(nodes)) # …and saved to TestOutput
+        makespan = int((time.time() - t0) * 1000)                    # clock stops after delivery+save
         gate = args.expect if args.expect is not None else (occ_seen if occ_seen is not None else occ)
         occ_seen = occ
         success = ok and occ == gate
         ok_all = ok_all and success
         ms_list.append(makespan)
-        print(f"[wc] rep {rep}: makespan={makespan}ms occurrences={occ} gate={gate} ok={success}")
-
-        r.delete(*([f"{uid}_chunk_{i}" for i in range(N)] +
-                   [f"{uid}_partial_{i}" for i in range(N)] + [f"{uid}_result"]))
+        job_list.append(job_ms)
+        print(f"[wc] rep {rep}: makespan={makespan}ms total_job={job_ms}ms "
+              f"occurrences={occ} gate={gate} ok={success}")
+        # Redis is flushed at the top of each rep, so no per-rep key cleanup is needed.
 
     med = int(median(ms_list))
+    job_med = int(median(job_list))
     gate = args.expect if args.expect is not None else occ_seen
     nodes_used = min(N, len(nodes))
-    fcsv.write(f"{size_mb},{N},{nodes_used},{med},{occ_seen},{gate},{ok_all},{args.reps}\n")
+    fcsv.write(f"{size_mb},{N},{nodes_used},{med},{job_med},{occ_seen},{gate},{ok_all},{args.reps}\n")
     fcsv.close()
-    print(f"[wc] median makespan={med}ms occurrences={occ_seen} success={ok_all} → {args.csv}")
+    print(f"[wc] median makespan={med}ms total_job={job_med}ms occurrences={occ_seen} "
+          f"success={ok_all} → {args.csv}")
+    print(f"[wc] result saved → {args.out}")
     print(f"RESULT occ={occ_seen} makespan_ms={med} success={ok_all}")
     sys.exit(0 if ok_all else 1)
 

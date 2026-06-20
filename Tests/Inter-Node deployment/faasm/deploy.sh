@@ -55,6 +55,11 @@ case "$MODE" in
       h="$(health "$ip")"; [ -n "$h" ] && echo "  ✓ $ip  $h" || echo "  ✗ $ip  (agent down)"
     done
     ;;
+  reset)   # clear finished-Faaslet bookkeeping on every agent (cosmetic; between runs)
+    for ip in "$COORD_IP" $WORKER_IPS; do
+      printf "  %s  " "$ip"; curl -s --max-time 4 -X POST "http://$ip:$AGENT_PORT/reset" 2>/dev/null || echo "(down)"; echo
+    done
+    ;;
   stop)
     stop_local
     am_coord && for ip in $WORKER_IPS; do ssh_ok "$ip" && ssh -o BatchMode=yes "$ip" "cd '$HERE' && ./deploy.sh stop" || true; done
@@ -63,5 +68,9 @@ case "$MODE" in
     shift; [ -n "${1:-}" ] || die "usage: ./deploy.sh run <job-spec.json> [--reps N]"
     exec python3 "$HERE/coordinator.py" "$@"
     ;;
-  *) die "usage: ./deploy.sh {start|status|stop|run <spec>}" ;;
+  distribute)   # push a LARGE local file to every node (git can't carry big inputs)
+    shift; [ -n "${1:-}" ] || die "usage: ./deploy.sh distribute <local_file> [dst] [--workers-only]"
+    exec python3 "$HERE/distribute.py" "$@"
+    ;;
+  *) die "usage: ./deploy.sh {start|status|stop|reset|run <spec>|distribute <file>}" ;;
 esac

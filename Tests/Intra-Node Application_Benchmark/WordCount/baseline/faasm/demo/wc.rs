@@ -1,10 +1,11 @@
 // wc.rs — the WASM (Faaslet) word-count function for the Faasm-like demo.
 //
-// One module, two modes (chosen by argv[1]), mirroring the Faasm port's
-// `wc_mapper` / `wc_reducer` (../wordcount.cpp): same tokenization (split on
-// non-alpha, lowercase) and same wire format ("word\x1fcount\n") so the
-// serialized state is byte-comparable. Compiled to wasm32-wasip1 and run as a
-// fresh wasmtime instance per call — the Faaslet isolation we're abstracting.
+// One module, two modes (chosen by argv[1]). Tokenization is aligned to the
+// WasMem guest's wc_map (whitespace-delimited tokens, non-alpha stripped within a
+// token) so BOTH frameworks run the same word-count logic and are output-equivalent
+// on any corpus — not just the clean synthetic one. Wire format stays
+// "word\x1fcount\n" (internal to map→reduce). Compiled to wasm32-wasip1 and run as
+// a fresh wasmtime instance per call — the Faaslet isolation we're abstracting.
 //
 //   wc map     : stdin = a corpus chunk        -> stdout = serialized partial counts
 //   wc reduce  : stdin = concatenated partials -> stdout = merged counts
@@ -19,15 +20,25 @@ use std::io::{self, Read, Write};
 
 const SEP: u8 = 0x1f; // unit separator between word and count
 
-// Count alpha-runs (lowercased) across a byte block; `word` carries the
-// in-progress token between blocks.
+// Tokenize identically to the WasMem guest's `wc_map`
+// (Executor/guest/src/workloads/word_count.rs): tokens are WHITESPACE-delimited,
+// and within a token only alphabetic chars are kept (lowercased) while other
+// bytes (digits/punctuation) are STRIPPED rather than treated as delimiters. So
+// "don't" → "dont" and "a1b2" → "ab" (one word each), matching
+// `line.split_whitespace().filter(is_alphabetic)`. `word` carries the in-progress
+// token between 64 KB blocks; the driver splits chunks on newlines (whitespace),
+// so no token ever spans a chunk. (ASCII corpus: byte-level ascii predicates ==
+// the guest's char-level ones.)
 fn count_block(data: &[u8], word: &mut String, counts: &mut BTreeMap<String, u64>) {
     for &b in data {
-        if b.is_ascii_alphabetic() {
+        if b.is_ascii_whitespace() {
+            if !word.is_empty() {
+                *counts.entry(std::mem::take(word)).or_insert(0) += 1;
+            }
+        } else if b.is_ascii_alphabetic() {
             word.push((b as char).to_ascii_lowercase());
-        } else if !word.is_empty() {
-            *counts.entry(std::mem::take(word)).or_insert(0) += 1;
         }
+        // else: digit/punctuation inside a token — stripped, not a delimiter
     }
 }
 

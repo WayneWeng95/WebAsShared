@@ -76,10 +76,39 @@ class Handler(BaseHTTPRequestHandler):
         n = int(self.headers.get("Content-Length", 0))
         return json.loads(self.rfile.read(n) or b"{}")
 
+    def _upload(self):
+        """Stream the raw request body to disk in 1 MiB chunks. Destination from
+        the `X-Dest-Path` header (absolute, or relative to STAGE_DIR)."""
+        dest = self.headers.get("X-Dest-Path")
+        if not dest:
+            return self._send(400, {"error": "X-Dest-Path header required"})
+        path = dest if os.path.isabs(dest) else os.path.join(STAGE_DIR, dest)
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        remaining = int(self.headers.get("Content-Length", 0))
+        written = 0
+        tmp = path + ".part"
+        try:
+            with open(tmp, "wb") as f:
+                while remaining > 0:
+                    chunk = self.rfile.read(min(1 << 20, remaining))
+                    if not chunk:
+                        break
+                    f.write(chunk)
+                    remaining -= len(chunk)
+                    written += len(chunk)
+            os.replace(tmp, path)   # atomic: no half-written file at `path`
+        except Exception as ex:
+            return self._send(500, {"error": f"upload failed: {ex}"})
+        return self._send(200, {"path": path, "bytes": written})
+
     # ── GET ──────────────────────────────────────────────────────────────────
     def do_GET(self):
         if self.path == "/health":
-            return self._send(200, {"ok": True, "node": NODE, "faaslets": len(_FAASLETS)})
+            # `running` = live Faaslets; `tracked` = all launched (incl. finished,
+            # kept so /status can still be read). POST /reset clears finished ones.
+            running = sum(1 for e in _FAASLETS.values() if e["proc"].poll() is None)
+            return self._send(200, {"ok": True, "node": NODE,
+                                    "running": running, "tracked": len(_FAASLETS)})
         if self.path.startswith("/status/"):
             h = self.path[len("/status/"):]
             with _LOCK:
@@ -108,6 +137,12 @@ class Handler(BaseHTTPRequestHandler):
 
     # ── POST ─────────────────────────────────────────────────────────────────
     def do_POST(self):
+        # /upload streams the RAW request body to disk in chunks — large-file
+        # distribution (corpora, .bin, records) that git can't carry. Handled
+        # BEFORE the JSON body parse so multi-GB files never load into memory.
+        if self.path == "/upload":
+            return self._upload()
+
         try:
             b = self._body()
         except Exception as ex:
@@ -141,6 +176,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(404, {"error": "no such handle"})
             e["proc"].kill()
             return self._send(200, {"stopped": h})
+
+        if self.path == "/reset":
+            # Drop finished Faaslet entries (frees the dict between runs). Live ones
+            # are kept. Returns how many were cleared.
+            with _LOCK:
+                fin = [h for h, e in _FAASLETS.items() if e["proc"].poll() is not None]
+                for h in fin:
+                    del _FAASLETS[h]
+            return self._send(200, {"cleared": len(fin), "tracked": len(_FAASLETS)})
 
         if self.path == "/stage":
             path = b.get("path"); data = b.get("b64")

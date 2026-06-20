@@ -52,9 +52,15 @@ python3 run_wordcount.py --mappers 8 --nodes 4 --reps 5
 `results.csv` columns: `size_mb,mappers,nodes_used,makespan_ms_median,occurrences,expect,success,reps`.
 
 ## Notes
-- **Measurement boundary** = data-path only (Faaslet compute + Redis state I/O);
-  splitter KV-load and agent/launch overhead are outside the timed window, matching
-  the intra-node boundary (EXPERIMENT_PLAN §5.9).
+- **Measurement boundary** = end-to-end job latency. `t0` is captured *before* the
+  input is staged into Redis, so the timed window is `input upload (split/broadcast →
+  Redis KV) + agent dispatch + Faaslet compute + Redis state I/O`, ending at last
+  Faaslet completion. Only the local disk read of the corpus/trades fixture and the
+  final result `get` are outside the window.
+- **Cold Redis per rep**: each rep starts with `FLUSHDB` (untimed) so no warm KV state
+  is carried across reps — every rep does a genuine upload + read. Use a **dedicated
+  Redis box** for headline runs (fairness §8); `FLUSHDB` clears the current DB only,
+  so don't point these drivers at a Redis shared with other live state.
 - For headline runs use the **dedicated Redis box** off the compute path (fairness §8);
   node 0 is fine for bring-up.
 - Next workloads (FINRA, ML-*, Matrix, TeraSort) follow the same shape: a per-node

@@ -171,3 +171,5 @@ cross-node-specific to test). Only deferred work + the benchmark track remain:
 
 
 One more thing: In the partitioner, we can adding an auto snapshot-resume point part which can automatically trigger our key point snapshot-resume feature to asynchronize offload state checkpoints. 
+
+Also, take a look at potential branch node inside the DAG operation, evaluation a bit on that.
