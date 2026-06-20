@@ -1,0 +1,3 @@
+# Secrets + large artifacts — never commit
+.cluster-join
+images/*.tar

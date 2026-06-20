@@ -1,0 +1,33 @@
+{
+  "_comment": [
+    "EXAMPLE job spec showing the shape coordinator.py expects — a WordCount-style",
+    "Faaslet placement across the 4-node cluster. Stages the AOT Faaslet module to",
+    "every node, runs one map Faaslet per worker, then a reduce on the coordinator.",
+    "State (partials) flows through the shared Redis (Faasm KV). The `cmd`/args are",
+    "ILLUSTRATIVE: wire them to the real per-workload Faaslet protocol when porting",
+    "../../Intra-Node Application_Benchmark/WordCount/baseline/faasm/ to multi-node.",
+    "Replace `src` with the real module path and REDIS_HOST with your dedicated box."
+  ],
+  "workload": "word_count",
+  "stage": [
+    { "src": "/opt/myapp/WebAsShared/Tests/Intra-Node Application_Benchmark/WordCount/baseline/faasm/demo/wc.cwasm",
+      "dst": "wc.cwasm", "nodes": "all" }
+  ],
+  "faaslets": [
+    { "node": "10.10.1.1", "tag": "map_0",
+      "cmd": ["wasmtime", "/tmp/faasm_stage/wc.cwasm", "map", "0", "4"],
+      "env": { "REDIS_HOST": "10.10.1.5", "REDIS_PORT": "6379" } },
+    { "node": "10.10.1.3", "tag": "map_1",
+      "cmd": ["wasmtime", "/tmp/faasm_stage/wc.cwasm", "map", "1", "4"],
+      "env": { "REDIS_HOST": "10.10.1.5", "REDIS_PORT": "6379" } },
+    { "node": "10.10.1.4", "tag": "map_2",
+      "cmd": ["wasmtime", "/tmp/faasm_stage/wc.cwasm", "map", "2", "4"],
+      "env": { "REDIS_HOST": "10.10.1.5", "REDIS_PORT": "6379" } },
+    { "node": "10.10.1.2", "tag": "map_3",
+      "cmd": ["wasmtime", "/tmp/faasm_stage/wc.cwasm", "map", "3", "4"],
+      "env": { "REDIS_HOST": "10.10.1.5", "REDIS_PORT": "6379" } },
+    { "node": "10.10.1.2", "tag": "reduce",
+      "cmd": ["wasmtime", "/tmp/faasm_stage/wc.cwasm", "reduce", "4"],
+      "env": { "REDIS_HOST": "10.10.1.5", "REDIS_PORT": "6379" } }
+  ]
+}
