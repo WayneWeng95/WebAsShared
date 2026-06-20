@@ -1,0 +1,465 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "rr_aggregate_1_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 157,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_3_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 159,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 158,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/corpus_xlarge.txt",
+            "prefetch": true,
+            "slice": [
+              0.0,
+              0.25
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_0"
+        ],
+        "id": "distribute_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 131122,
+            "func": "wc_distribute"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 50,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 51,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_0_0",
+          "map_n_0_1"
+        ],
+        "id": "aggregate_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 152,
+            "upstream": [
+              150,
+              151
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_0",
+          "rr_aggregate_1_from_1",
+          "rr_aggregate_2_from_2",
+          "rr_aggregate_3_from_3"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 156,
+            "upstream": [
+              152,
+              157,
+              158,
+              159
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "reduce",
+        "kind": {
+          "WasmVoid": {
+            "arg": 156,
+            "func": "wc_reduce"
+          }
+        }
+      },
+      {
+        "deps": [
+          "reduce"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/wc_auto_placement_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_0_0",
+          "map_n_0_1"
+        ],
+        "id": "free_distribute_0_m0",
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              50,
+              51
+            ]
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "deps": [],
+        "id": "load_1",
+        "kind": {
+          "Input": {
+            "path": "TestData/corpus_xlarge.txt",
+            "prefetch": true,
+            "slice": [
+              0.25,
+              0.5
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_1"
+        ],
+        "id": "distribute_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 131122,
+            "func": "wc_distribute"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 50,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 51,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_1_0",
+          "map_n_1_1"
+        ],
+        "id": "aggregate_1",
+        "kind": {
+          "Aggregate": {
+            "downstream": 153,
+            "upstream": [
+              150,
+              151
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_1_0",
+          "map_n_1_1"
+        ],
+        "id": "free_distribute_1_m1",
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              50,
+              51
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_1"
+        ],
+        "id": "rs_aggregate_1_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 153,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "deps": [],
+        "id": "load_2",
+        "kind": {
+          "Input": {
+            "path": "TestData/corpus_xlarge.txt",
+            "prefetch": true,
+            "slice": [
+              0.5,
+              0.75
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_2"
+        ],
+        "id": "distribute_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 131122,
+            "func": "wc_distribute"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 50,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 51,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_2_0",
+          "map_n_2_1"
+        ],
+        "id": "aggregate_2",
+        "kind": {
+          "Aggregate": {
+            "downstream": 154,
+            "upstream": [
+              150,
+              151
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_2_0",
+          "map_n_2_1"
+        ],
+        "id": "free_distribute_2_m2",
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              50,
+              51
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_2"
+        ],
+        "id": "rs_aggregate_2_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 154,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "deps": [],
+        "id": "load_3",
+        "kind": {
+          "Input": {
+            "path": "TestData/corpus_xlarge.txt",
+            "prefetch": true,
+            "slice": [
+              0.75,
+              1.0
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_3"
+        ],
+        "id": "distribute_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 131122,
+            "func": "wc_distribute"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 50,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 51,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_3_0",
+          "map_n_3_1"
+        ],
+        "id": "aggregate_3",
+        "kind": {
+          "Aggregate": {
+            "downstream": 155,
+            "upstream": [
+              150,
+              151
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_3_0",
+          "map_n_3_1"
+        ],
+        "id": "free_distribute_3_m3",
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              50,
+              51
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_3"
+        ],
+        "id": "rs_aggregate_3_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 155,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/corpus_xlarge.txt",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_wc_ap",
+  "transfer": true
+}

@@ -1,0 +1,377 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_sgd_ap",
+  "log_level": "info",
+  "total_nodes": 4,
+  "transfer": true,
+  "placement_policy": "balanced",
+  "nodes": [
+    {
+      "id": "load",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/ml/sgd_100000.csv",
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "partition",
+      "placement": "all",
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_partition",
+          "arg": 0,
+          "wasm_arg": 524298
+        }
+      }
+    },
+    {
+      "id": "encode_0",
+      "deps": [
+        "partition"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_encode",
+          "arg": 10,
+          "wasm_arg": 6553610
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "encode_1",
+      "deps": [
+        "partition"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_encode",
+          "arg": 11,
+          "wasm_arg": 6619147
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "encode_2",
+      "deps": [
+        "partition"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_encode",
+          "arg": 12,
+          "wasm_arg": 6684684
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "encode_3",
+      "deps": [
+        "partition"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_encode",
+          "arg": 13,
+          "wasm_arg": 6750221
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "encode_4",
+      "deps": [
+        "partition"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_encode",
+          "arg": 14,
+          "wasm_arg": 6815758
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "encode_5",
+      "deps": [
+        "partition"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_encode",
+          "arg": 15,
+          "wasm_arg": 6881295
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "encode_6",
+      "deps": [
+        "partition"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_encode",
+          "arg": 16,
+          "wasm_arg": 6946832
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "encode_7",
+      "deps": [
+        "partition"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_encode",
+          "arg": 17,
+          "wasm_arg": 7012369
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "train_0",
+      "deps": [
+        "encode_0"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_grad",
+          "arg": 100,
+          "wasm_arg": 19660900
+        }
+      },
+      "node_id": 0,
+      "output_slot": 300
+    },
+    {
+      "id": "train_1",
+      "deps": [
+        "encode_1"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_grad",
+          "arg": 101,
+          "wasm_arg": 19726437
+        }
+      },
+      "node_id": 1,
+      "output_slot": 301
+    },
+    {
+      "id": "train_2",
+      "deps": [
+        "encode_2"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_grad",
+          "arg": 102,
+          "wasm_arg": 19791974
+        }
+      },
+      "node_id": 2,
+      "output_slot": 302
+    },
+    {
+      "id": "train_3",
+      "deps": [
+        "encode_3"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_grad",
+          "arg": 103,
+          "wasm_arg": 19857511
+        }
+      },
+      "node_id": 3,
+      "output_slot": 303
+    },
+    {
+      "id": "train_4",
+      "deps": [
+        "encode_4"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_grad",
+          "arg": 104,
+          "wasm_arg": 19923048
+        }
+      },
+      "node_id": 0,
+      "output_slot": 304
+    },
+    {
+      "id": "train_5",
+      "deps": [
+        "encode_5"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_grad",
+          "arg": 105,
+          "wasm_arg": 19988585
+        }
+      },
+      "node_id": 1,
+      "output_slot": 305
+    },
+    {
+      "id": "train_6",
+      "deps": [
+        "encode_6"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_grad",
+          "arg": 106,
+          "wasm_arg": 20054122
+        }
+      },
+      "node_id": 2,
+      "output_slot": 306
+    },
+    {
+      "id": "train_7",
+      "deps": [
+        "encode_7"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_grad",
+          "arg": 107,
+          "wasm_arg": 20119659
+        }
+      },
+      "node_id": 3,
+      "output_slot": 307
+    },
+    {
+      "id": "aggregate_train",
+      "deps": [
+        "aggregate_train_local_0",
+        "aggregate_train_local_1",
+        "aggregate_train_local_2",
+        "aggregate_train_local_3"
+      ],
+      "kind": {
+        "Aggregate": {
+          "downstream": 1200,
+          "upstream_nodes": [
+            "aggregate_train_local_0",
+            "aggregate_train_local_1",
+            "aggregate_train_local_2",
+            "aggregate_train_local_3"
+          ]
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "aggregate_global",
+      "deps": [
+        "aggregate_train"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "update",
+      "deps": [
+        "aggregate_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_update"
+        }
+      }
+    },
+    {
+      "id": "validate",
+      "deps": [
+        "update"
+      ],
+      "kind": {
+        "Func": {
+          "func": "sgd_validate",
+          "arg": 100,
+          "wasm_arg": 524388
+        }
+      }
+    },
+    {
+      "id": "save",
+      "deps": [
+        "validate"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/ml_training_ap_result.txt"
+        }
+      }
+    },
+    {
+      "id": "aggregate_train_local_0",
+      "node_id": 0,
+      "deps": [
+        "train_0",
+        "train_4"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_train_local_1",
+      "node_id": 1,
+      "deps": [
+        "train_1",
+        "train_5"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_train_local_2",
+      "node_id": 2,
+      "deps": [
+        "train_2",
+        "train_6"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_train_local_3",
+      "node_id": 3,
+      "deps": [
+        "train_3",
+        "train_7"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    }
+  ],
+  "converge_on_coordinator": true
+}

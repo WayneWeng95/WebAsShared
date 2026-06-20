@@ -1,0 +1,160 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_matrix_ap",
+  "log_level": "info",
+  "total_nodes": 3,
+  "transfer": true,
+  "placement_policy": "balanced",
+  "nodes": [
+    {
+      "id": "load_a",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/matrix/A_512.bin",
+          "slot": 0,
+          "binary": true,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "load_b",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/matrix/B_512.bin",
+          "slot": 2,
+          "binary": true,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "tile",
+      "placement": "all",
+      "deps": [
+        "load_a",
+        "load_b"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_tile",
+          "arg": 10,
+          "wasm_arg": 147968
+        }
+      }
+    },
+    {
+      "id": "block_0_0",
+      "placement": "all",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 100,
+          "wasm_arg": 147968
+        }
+      }
+    },
+    {
+      "id": "block_0_1",
+      "placement": "all",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 101,
+          "wasm_arg": 672256
+        }
+      }
+    },
+    {
+      "id": "block_1_0",
+      "placement": "all",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 102,
+          "wasm_arg": 16925184
+        }
+      }
+    },
+    {
+      "id": "block_1_1",
+      "placement": "all",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 103,
+          "wasm_arg": 17449472
+        }
+      }
+    },
+    {
+      "id": "aggregate",
+      "placement": "all",
+      "deps": [
+        "block_0_0",
+        "block_0_1",
+        "block_1_0",
+        "block_1_1"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            100,
+            101,
+            102,
+            103
+          ],
+          "downstream": 600
+        }
+      }
+    },
+    {
+      "id": "aggregate_global",
+      "deps": [
+        "aggregate"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "assemble",
+      "deps": [
+        "aggregate_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_assemble"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "deps": [
+        "assemble"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/matrix_ap_result.txt"
+        }
+      }
+    }
+  ]
+}

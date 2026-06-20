@@ -410,6 +410,31 @@ DAG JSON + `gen_variants.py`. All changes are *additive* (new DAG files, new
 `gen_variants` entries, new run/deploy scripts); no edits to existing guest stages
 or framework code.
 
+> **UPDATE 2026-06-20 — WasMem side of all three missing workloads is DONE
+> (offline-verified; cluster run pending).** The three workloads that were not yet
+> in multi-node mode — **ML inference, Matrix, TeraSort** — now have cross-node
+> auto-placement DAGs + `gen_variants.py` support, additively (no guest/framework
+> edits; `./build.sh` clean):
+> - `DAGs/symbolic_dag/{ml_inference,matrix,terasort}_auto_placement.json` (snapshots)
+>   and parametric generators `Tests/Scheduling_Policy/gen_{inference,matrix,terasort}_ap_dag.py`.
+> - `gen_variants.py`: `FAN_PREFIX`/`AGGREGATOR` entries for `ml_inference` (`predict_`)
+>   and `matrix` (`block_`) reuse the generic fan transform UNCHANGED; `terasort` gets
+>   a dedicated builder (the all-to-all shuffle is an N×N transpose, not a fan→1).
+>   New flags: `--matrix-n` (matrix dimension), `--fanout` regenerates each fan.
+> - **Verified offline** via `gen_variants → partition` for pack/balanced/spread at
+>   `--nodes 1/4` and fanouts 4–32 (12 configs, all clean; no regressions in
+>   word_count/finra/ml_training). ml_inference & matrix reproduce ml_training's exact
+>   deadlock-safe pattern (per-machine local-combine, ONE RemoteSend/peer, reduce/
+>   assemble arg auto-injected). TeraSort at **N == nodes** is one partition + one
+>   owner per node — each directed node-pair carries exactly ONE stream (the
+>   partitioner adds deadlock-prevention ordering for the bidirectional transpose).
+> - **Cluster-validation caveat (TeraSort):** N == P is the deadlock-safe sweet spot;
+>   N > P puts several owners per node → >1 transfer per machine-pair, the
+>   multi-stream-per-peer path §8 flags. Prefer N == P for first bring-up; if N > P
+>   deadlocks, the documented next step is a `ts_demux` guest for one-transfer-per-peer.
+> - **Inputs to stage on the cluster:** `TestData/mnist/{model,test}.csv`,
+>   `TestData/matrix/{A,B}_<N>.bin`, `TestData/terasort/records_*.txt`.
+
 ### A. WasMem side (cluster execution via gen_variants → partition → submit)
 
 | Workload | Cross-node DAG | `gen_variants` | Guest arg ready? | Change needed | Effort |

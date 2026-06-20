@@ -1,0 +1,511 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "rr_aggregate_rules_local_1_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 302,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_rules_local_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 303,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_rules_local_3_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 304,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_trades_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/trades.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_trades_0"
+        ],
+        "id": "fetch_private_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_private"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "fetch_public_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_public"
+          }
+        }
+      },
+      {
+        "deps": [
+          "fetch_private_0",
+          "fetch_public_0"
+        ],
+        "id": "aggregate_inputs_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 200,
+            "upstream": [
+              5,
+              6
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_rules_local_0",
+          "rr_aggregate_rules_local_1_from_1",
+          "rr_aggregate_rules_local_2_from_2",
+          "rr_aggregate_rules_local_3_from_3"
+        ],
+        "id": "aggregate_rules",
+        "kind": {
+          "Aggregate": {
+            "downstream": 300,
+            "upstream": [
+              201,
+              302,
+              303,
+              304
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_rules"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 301,
+            "upstream": [
+              300
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "merge",
+        "kind": {
+          "WasmVoid": {
+            "arg": 301,
+            "func": "finra_merge_results"
+          }
+        }
+      },
+      {
+        "deps": [
+          "merge"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/finra_ap_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs_0"
+        ],
+        "id": "rule_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 2,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs_0"
+        ],
+        "id": "rule_1_s0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 129,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rule_2",
+          "rule_1_s0"
+        ],
+        "id": "aggregate_rules_local_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 201,
+            "upstream": [
+              12,
+              416
+            ]
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "deps": [],
+        "id": "load_trades_1",
+        "kind": {
+          "Input": {
+            "path": "TestData/trades.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_trades_1"
+        ],
+        "id": "fetch_private_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_private"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "fetch_public_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_public"
+          }
+        }
+      },
+      {
+        "deps": [
+          "fetch_private_1",
+          "fetch_public_1"
+        ],
+        "id": "aggregate_inputs_1",
+        "kind": {
+          "Aggregate": {
+            "downstream": 200,
+            "upstream": [
+              5,
+              6
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs_1"
+        ],
+        "id": "rule_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs_1"
+        ],
+        "id": "rule_5_s0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 133,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rule_3",
+          "rule_5_s0"
+        ],
+        "id": "aggregate_rules_local_1",
+        "kind": {
+          "Aggregate": {
+            "downstream": 202,
+            "upstream": [
+              13,
+              480
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_rules_local_1"
+        ],
+        "id": "rs_aggregate_rules_local_1_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 202,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "deps": [],
+        "id": "load_trades_2",
+        "kind": {
+          "Input": {
+            "path": "TestData/trades.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_trades_2"
+        ],
+        "id": "fetch_private_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_private"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "fetch_public_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_public"
+          }
+        }
+      },
+      {
+        "deps": [
+          "fetch_private_2",
+          "fetch_public_2"
+        ],
+        "id": "aggregate_inputs_2",
+        "kind": {
+          "Aggregate": {
+            "downstream": 200,
+            "upstream": [
+              5,
+              6
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs_2"
+        ],
+        "id": "rule_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 4,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs_2"
+        ],
+        "id": "rule_6_s0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 134,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rule_4",
+          "rule_6_s0"
+        ],
+        "id": "aggregate_rules_local_2",
+        "kind": {
+          "Aggregate": {
+            "downstream": 203,
+            "upstream": [
+              14,
+              496
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_rules_local_2"
+        ],
+        "id": "rs_aggregate_rules_local_2_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 203,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "deps": [],
+        "id": "load_trades_3",
+        "kind": {
+          "Input": {
+            "path": "TestData/trades.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_trades_3"
+        ],
+        "id": "fetch_private_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_private"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "fetch_public_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 0,
+            "func": "finra_fetch_public"
+          }
+        }
+      },
+      {
+        "deps": [
+          "fetch_private_3",
+          "fetch_public_3"
+        ],
+        "id": "aggregate_inputs_3",
+        "kind": {
+          "Aggregate": {
+            "downstream": 200,
+            "upstream": [
+              5,
+              6
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs_3"
+        ],
+        "id": "rule_0_s0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 128,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_inputs_3"
+        ],
+        "id": "rule_7_s0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 135,
+            "func": "finra_audit_rule"
+          }
+        }
+      },
+      {
+        "deps": [
+          "rule_0_s0",
+          "rule_7_s0"
+        ],
+        "id": "aggregate_rules_local_3",
+        "kind": {
+          "Aggregate": {
+            "downstream": 204,
+            "upstream": [
+              400,
+              512
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_rules_local_3"
+        ],
+        "id": "rs_aggregate_rules_local_3_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 204,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/trades.csv",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_finra_ap",
+  "transfer": true
+}

@@ -1,0 +1,242 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_mnist_ap",
+  "log_level": "info",
+  "total_nodes": 3,
+  "transfer": true,
+  "placement_policy": "balanced",
+  "nodes": [
+    {
+      "id": "load_model",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/mnist/model.csv",
+          "slot": 5,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "setup_model",
+      "placement": "all",
+      "deps": [
+        "load_model"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_setup_model",
+          "arg": 5
+        }
+      }
+    },
+    {
+      "id": "load_data",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/mnist/test.csv",
+          "slot": 0,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "partition",
+      "placement": "all",
+      "deps": [
+        "load_data"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_partition",
+          "arg": 0,
+          "wasm_arg": 524298
+        }
+      }
+    },
+    {
+      "id": "predict_0",
+      "placement": "all",
+      "deps": [
+        "partition",
+        "setup_model"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_predict",
+          "arg": 10,
+          "wasm_arg": 19660810
+        }
+      }
+    },
+    {
+      "id": "predict_1",
+      "placement": "all",
+      "deps": [
+        "partition",
+        "setup_model"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_predict",
+          "arg": 11,
+          "wasm_arg": 19726347
+        }
+      }
+    },
+    {
+      "id": "predict_2",
+      "placement": "all",
+      "deps": [
+        "partition",
+        "setup_model"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_predict",
+          "arg": 12,
+          "wasm_arg": 19791884
+        }
+      }
+    },
+    {
+      "id": "predict_3",
+      "placement": "all",
+      "deps": [
+        "partition",
+        "setup_model"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_predict",
+          "arg": 13,
+          "wasm_arg": 19857421
+        }
+      }
+    },
+    {
+      "id": "predict_4",
+      "placement": "all",
+      "deps": [
+        "partition",
+        "setup_model"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_predict",
+          "arg": 14,
+          "wasm_arg": 19922958
+        }
+      }
+    },
+    {
+      "id": "predict_5",
+      "placement": "all",
+      "deps": [
+        "partition",
+        "setup_model"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_predict",
+          "arg": 15,
+          "wasm_arg": 19988495
+        }
+      }
+    },
+    {
+      "id": "predict_6",
+      "placement": "all",
+      "deps": [
+        "partition",
+        "setup_model"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_predict",
+          "arg": 16,
+          "wasm_arg": 20054032
+        }
+      }
+    },
+    {
+      "id": "predict_7",
+      "placement": "all",
+      "deps": [
+        "partition",
+        "setup_model"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_predict",
+          "arg": 17,
+          "wasm_arg": 20119569
+        }
+      }
+    },
+    {
+      "id": "aggregate_predict",
+      "placement": "all",
+      "deps": [
+        "predict_0",
+        "predict_1",
+        "predict_2",
+        "predict_3",
+        "predict_4",
+        "predict_5",
+        "predict_6",
+        "predict_7"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            300,
+            301,
+            302,
+            303,
+            304,
+            305,
+            306,
+            307
+          ],
+          "downstream": 1200
+        }
+      }
+    },
+    {
+      "id": "aggregate_global",
+      "deps": [
+        "aggregate_predict"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "reduce",
+      "deps": [
+        "aggregate_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "infer_reduce"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "deps": [
+        "reduce"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/ml_inference_ap_result.txt"
+        }
+      }
+    }
+  ]
+}
