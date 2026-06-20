@@ -914,8 +914,7 @@ fn stage_shared_inputs_rdma(
         }
     }
 
-    // Transition each coordinator QP to RTR → RTS, then post all RDMA WRITEs
-    // before polling — the HCA executes them concurrently across workers.
+    // Transition each coordinator QP to RTR → RTS.
     for &id in &remote_ids {
         let accept = &accepts[&id];
         let mut peer_gid = [0u8; 16];
@@ -924,15 +923,41 @@ fn stage_shared_inputs_rdma(
         let (qp, psn) = qps.get_mut(&id).unwrap();
         qp.to_rtr(&peer_info, RDMA_PORT, GID_IDX)?;
         qp.to_rts(*psn)?;
-        println!("[coordinator] RDMA WRITE → worker {} ({} bytes)", id, buf.len());
-        qp.post_rdma_write(&mr, buf.len() as u32, accept.addr, accept.rkey)?;
     }
 
-    // Poll completions — all writes are in flight simultaneously.
+    // A single RDMA WRITE work request is capped at the IB max message size
+    // (2 GiB — ibv_sge.length is u32 and the spec limits one message to 2^31).
+    // Posting one >2 GiB WRITE for a large shared input (e.g. a 3–4 GB corpus)
+    // is silently dropped by the HCA (completion still reports SUCCESS), so the
+    // workers' buffers stay empty and the reduce sees only node 0's local slice.
+    // Split the transfer into ≤1 GiB chunks: post chunk c to every worker, poll
+    // all completions, then advance the offset (RC QPs preserve concurrency
+    // across workers; staging is pre-job and untimed, so the serialization per
+    // chunk is free).
+    const RDMA_WRITE_CHUNK: usize = 1 << 30; // 1 GiB, well under the 2 GiB WR cap
+    let total = buf.len();
+    let n_chunks = total.div_ceil(RDMA_WRITE_CHUNK);
+    println!("[coordinator] RDMA WRITE {} bytes → {} worker(s) in {} chunk(s)",
+             total, remote_ids.len(), n_chunks);
+    let mut off = 0usize;
+    while off < total {
+        let len = std::cmp::min(RDMA_WRITE_CHUNK, total - off);
+        for &id in &remote_ids {
+            let accept = &accepts[&id];
+            let (qp, _) = &qps[&id];
+            qp.post_rdma_write_raw(
+                mr.addr() + off as u64, mr.lkey(), len as u32,
+                accept.addr + off as u64, accept.rkey,
+            )?;
+        }
+        for &id in &remote_ids {
+            let (qp, _) = &qps[&id];
+            qp.poll_one_blocking()
+                .with_context(|| format!("RDMA WRITE chunk @ {} to worker {} failed", off, id))?;
+        }
+        off += len;
+    }
     for &id in &remote_ids {
-        let (qp, _) = &qps[&id];
-        qp.poll_one_blocking()
-            .with_context(|| format!("RDMA WRITE to worker {} failed", id))?;
         println!("[coordinator] RDMA WRITE to worker {} complete", id);
     }
 

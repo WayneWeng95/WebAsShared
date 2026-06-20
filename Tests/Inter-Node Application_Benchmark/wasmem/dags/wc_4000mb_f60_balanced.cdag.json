@@ -1,0 +1,1297 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "rr_aggregate_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 171,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_3_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 172,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_1_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 170,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/corpus_4gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.0,
+              0.25
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_0"
+        ],
+        "id": "distribute_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 983090,
+            "func": "wc_distribute"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 50,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 51,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 52,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 53,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 54,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 55,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 56,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 57,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_8",
+        "kind": {
+          "WasmVoid": {
+            "arg": 58,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_9",
+        "kind": {
+          "WasmVoid": {
+            "arg": 59,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_10",
+        "kind": {
+          "WasmVoid": {
+            "arg": 60,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_11",
+        "kind": {
+          "WasmVoid": {
+            "arg": 61,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_12",
+        "kind": {
+          "WasmVoid": {
+            "arg": 62,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_0_0",
+          "map_n_0_1",
+          "map_n_0_2",
+          "map_n_0_3",
+          "map_n_0_4",
+          "map_n_0_5",
+          "map_n_0_6",
+          "map_n_0_7",
+          "map_n_0_8",
+          "map_n_0_9",
+          "map_n_0_10",
+          "map_n_0_11",
+          "map_n_0_12",
+          "map_n_0_13",
+          "map_n_0_14"
+        ],
+        "id": "aggregate_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 165,
+            "upstream": [
+              150,
+              151,
+              152,
+              153,
+              154,
+              155,
+              156,
+              157,
+              158,
+              159,
+              160,
+              161,
+              162,
+              163,
+              164
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_0",
+          "rr_aggregate_1_from_1",
+          "rr_aggregate_2_from_2",
+          "rr_aggregate_3_from_3"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 169,
+            "upstream": [
+              165,
+              170,
+              171,
+              172
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "reduce",
+        "kind": {
+          "WasmVoid": {
+            "arg": 169,
+            "func": "wc_reduce"
+          }
+        }
+      },
+      {
+        "deps": [
+          "reduce"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/wc_auto_placement_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_0_0",
+          "map_n_0_1",
+          "map_n_0_2",
+          "map_n_0_3",
+          "map_n_0_4",
+          "map_n_0_5",
+          "map_n_0_6",
+          "map_n_0_7",
+          "map_n_0_8",
+          "map_n_0_9",
+          "map_n_0_10",
+          "map_n_0_11",
+          "map_n_0_12",
+          "map_n_0_13",
+          "map_n_0_14"
+        ],
+        "id": "free_distribute_0_m0",
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59,
+              60,
+              61,
+              62,
+              63,
+              64
+            ]
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "deps": [],
+        "id": "load_1",
+        "kind": {
+          "Input": {
+            "path": "TestData/corpus_4gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.25,
+              0.5
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_1"
+        ],
+        "id": "distribute_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 983090,
+            "func": "wc_distribute"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 50,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 51,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 52,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 53,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 54,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 55,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 56,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 57,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_8",
+        "kind": {
+          "WasmVoid": {
+            "arg": 58,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_9",
+        "kind": {
+          "WasmVoid": {
+            "arg": 59,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_10",
+        "kind": {
+          "WasmVoid": {
+            "arg": 60,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_11",
+        "kind": {
+          "WasmVoid": {
+            "arg": 61,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_12",
+        "kind": {
+          "WasmVoid": {
+            "arg": 62,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_1_0",
+          "map_n_1_1",
+          "map_n_1_2",
+          "map_n_1_3",
+          "map_n_1_4",
+          "map_n_1_5",
+          "map_n_1_6",
+          "map_n_1_7",
+          "map_n_1_8",
+          "map_n_1_9",
+          "map_n_1_10",
+          "map_n_1_11",
+          "map_n_1_12",
+          "map_n_1_13",
+          "map_n_1_14"
+        ],
+        "id": "aggregate_1",
+        "kind": {
+          "Aggregate": {
+            "downstream": 166,
+            "upstream": [
+              150,
+              151,
+              152,
+              153,
+              154,
+              155,
+              156,
+              157,
+              158,
+              159,
+              160,
+              161,
+              162,
+              163,
+              164
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_1_0",
+          "map_n_1_1",
+          "map_n_1_2",
+          "map_n_1_3",
+          "map_n_1_4",
+          "map_n_1_5",
+          "map_n_1_6",
+          "map_n_1_7",
+          "map_n_1_8",
+          "map_n_1_9",
+          "map_n_1_10",
+          "map_n_1_11",
+          "map_n_1_12",
+          "map_n_1_13",
+          "map_n_1_14"
+        ],
+        "id": "free_distribute_1_m1",
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59,
+              60,
+              61,
+              62,
+              63,
+              64
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_1"
+        ],
+        "id": "rs_aggregate_1_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 166,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "deps": [],
+        "id": "load_2",
+        "kind": {
+          "Input": {
+            "path": "TestData/corpus_4gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.5,
+              0.75
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_2"
+        ],
+        "id": "distribute_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 983090,
+            "func": "wc_distribute"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 50,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 51,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 52,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 53,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 54,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 55,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 56,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 57,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_8",
+        "kind": {
+          "WasmVoid": {
+            "arg": 58,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_9",
+        "kind": {
+          "WasmVoid": {
+            "arg": 59,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_10",
+        "kind": {
+          "WasmVoid": {
+            "arg": 60,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_11",
+        "kind": {
+          "WasmVoid": {
+            "arg": 61,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_12",
+        "kind": {
+          "WasmVoid": {
+            "arg": 62,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_2_0",
+          "map_n_2_1",
+          "map_n_2_2",
+          "map_n_2_3",
+          "map_n_2_4",
+          "map_n_2_5",
+          "map_n_2_6",
+          "map_n_2_7",
+          "map_n_2_8",
+          "map_n_2_9",
+          "map_n_2_10",
+          "map_n_2_11",
+          "map_n_2_12",
+          "map_n_2_13",
+          "map_n_2_14"
+        ],
+        "id": "aggregate_2",
+        "kind": {
+          "Aggregate": {
+            "downstream": 167,
+            "upstream": [
+              150,
+              151,
+              152,
+              153,
+              154,
+              155,
+              156,
+              157,
+              158,
+              159,
+              160,
+              161,
+              162,
+              163,
+              164
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_2_0",
+          "map_n_2_1",
+          "map_n_2_2",
+          "map_n_2_3",
+          "map_n_2_4",
+          "map_n_2_5",
+          "map_n_2_6",
+          "map_n_2_7",
+          "map_n_2_8",
+          "map_n_2_9",
+          "map_n_2_10",
+          "map_n_2_11",
+          "map_n_2_12",
+          "map_n_2_13",
+          "map_n_2_14"
+        ],
+        "id": "free_distribute_2_m2",
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59,
+              60,
+              61,
+              62,
+              63,
+              64
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_2"
+        ],
+        "id": "rs_aggregate_2_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 167,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "deps": [],
+        "id": "load_3",
+        "kind": {
+          "Input": {
+            "path": "TestData/corpus_4gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.75,
+              1.0
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_3"
+        ],
+        "id": "distribute_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 983090,
+            "func": "wc_distribute"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 50,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 51,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 52,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 53,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 54,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 55,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 56,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 57,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_8",
+        "kind": {
+          "WasmVoid": {
+            "arg": 58,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_9",
+        "kind": {
+          "WasmVoid": {
+            "arg": 59,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_10",
+        "kind": {
+          "WasmVoid": {
+            "arg": 60,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_11",
+        "kind": {
+          "WasmVoid": {
+            "arg": 61,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_12",
+        "kind": {
+          "WasmVoid": {
+            "arg": 62,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_3_0",
+          "map_n_3_1",
+          "map_n_3_2",
+          "map_n_3_3",
+          "map_n_3_4",
+          "map_n_3_5",
+          "map_n_3_6",
+          "map_n_3_7",
+          "map_n_3_8",
+          "map_n_3_9",
+          "map_n_3_10",
+          "map_n_3_11",
+          "map_n_3_12",
+          "map_n_3_13",
+          "map_n_3_14"
+        ],
+        "id": "aggregate_3",
+        "kind": {
+          "Aggregate": {
+            "downstream": 168,
+            "upstream": [
+              150,
+              151,
+              152,
+              153,
+              154,
+              155,
+              156,
+              157,
+              158,
+              159,
+              160,
+              161,
+              162,
+              163,
+              164
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "map_n_3_0",
+          "map_n_3_1",
+          "map_n_3_2",
+          "map_n_3_3",
+          "map_n_3_4",
+          "map_n_3_5",
+          "map_n_3_6",
+          "map_n_3_7",
+          "map_n_3_8",
+          "map_n_3_9",
+          "map_n_3_10",
+          "map_n_3_11",
+          "map_n_3_12",
+          "map_n_3_13",
+          "map_n_3_14"
+        ],
+        "id": "free_distribute_3_m3",
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              50,
+              51,
+              52,
+              53,
+              54,
+              55,
+              56,
+              57,
+              58,
+              59,
+              60,
+              61,
+              62,
+              63,
+              64
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_3"
+        ],
+        "id": "rs_aggregate_3_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 168,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/corpus_4gb.txt",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_wc_ap",
+  "transfer": true
+}
