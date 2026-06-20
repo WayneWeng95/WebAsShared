@@ -1,2 +1,2 @@
 size_mb,mappers,nodes_used,makespan_ms_median,total_job_ms_median,occurrences,expect,success,reps
-4000,60,4,20701,57438,715227097,715227097,True,3
+4000,60,4,12015,46321,715227097,715227097,True,3
