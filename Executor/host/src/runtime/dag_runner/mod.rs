@@ -465,6 +465,13 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         // Per-run state: rebuilt every iteration so slot counts are correct.
         let mut persist_writer = if has_persistence { Some(PersistenceWriter::new()) } else { None };
         let mut prefetch_handles: HashMap<String, PrefetchHandle> = HashMap::new();
+        // Overlap model: a RemoteRecv thread (deps=[], so spawned in wave 0) is NOT
+        // joined at the end of its spawn wave — its join is DEFERRED to the wave that
+        // consumes the received slot. This lets this node's own pipeline
+        // (load→distribute→map→aggregate) run CONCURRENTLY with receiving peers'
+        // partials, instead of the gather being a barrier in front of compute (which
+        // serialized node 0 after the slowest worker). Keyed by RemoteRecv node id.
+        let mut pending_recv: HashMap<String, std::thread::JoinHandle<Result<()>>> = HashMap::new();
         let mut slot_refcounts = build_slot_refcounts(dag);
         // Per-run countdown for Input and RemoteRecv slot reclamation (reset each iteration).
         let mut input_dep_remaining = input_dep_counts.clone();
@@ -488,7 +495,9 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                 }
             }
 
-            // 1. Pre-join prefetches for all deps of nodes in this wave.
+            // 1. Pre-join prefetches AND deferred RemoteRecv threads for all deps of
+            //    nodes in this wave, so the received data is present in its slot
+            //    before the consumer (e.g. aggregate_global) runs.
             for &idx in wave {
                 let node = &dag.nodes[idx];
                 for dep_id in &node.deps {
@@ -497,6 +506,11 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                         let count = handle.join()
                             .map_err(|e| anyhow!("prefetch '{}' failed: {}", dep_id, e))?;
                         println!("[DAG] Prefetch '{}' ready ({} records in slot {})", dep_id, count, slot);
+                    }
+                    if let Some(handle) = pending_recv.remove(dep_id) {
+                        handle.join()
+                            .map_err(|_| anyhow!("[{}] RemoteRecv thread panicked", dep_id))??;
+                        println!("  [{}] → ok (recv joined at consumer wave)", dep_id);
                     }
                 }
             }
@@ -668,8 +682,16 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
                              mesh.as_ref())?;
             }
 
-            // 3e. Join RDMA threads before post-wave reclamation.
+            // 3e. Join RDMA threads before post-wave reclamation — EXCEPT RemoteRecv
+            //     threads that have a downstream consumer, whose join is DEFERRED to
+            //     the consuming wave (overlap: this node keeps computing while the
+            //     peers' partials stream in). Sends/atomics/StreamOutput still join
+            //     here so their source slots are safe before reclamation.
             for (id, handle) in rdma_threads {
+                if remote_recv_has_consumer.contains(&id) {
+                    pending_recv.insert(id, handle);
+                    continue;
+                }
                 handle.join()
                     .map_err(|_| anyhow!("[{}] RDMA thread panicked", id))??;
                 println!("  [{}] → ok", id);
@@ -850,6 +872,14 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
             if let Err(e) = handle.join() {
                 eprintln!("[DAG] Warning: orphaned prefetch '{}' failed: {}", id, e);
             }
+        }
+
+        // Safety net: join any deferred RemoteRecv threads not yet consumed (e.g. a
+        // recv with no consumer node, or an early break). Normally these are joined
+        // at their consumer wave above.
+        for (id, handle) in pending_recv.drain() {
+            handle.join()
+                .map_err(|_| anyhow!("[{}] RemoteRecv thread panicked", id))??;
         }
 
         // Wait for all background persistence writes to complete.
