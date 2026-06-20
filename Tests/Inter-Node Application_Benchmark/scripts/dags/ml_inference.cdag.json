@@ -4,6 +4,17 @@
     "0": [
       {
         "deps": [],
+        "id": "rr_aggregate_predict_local_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 1203,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
         "id": "rr_aggregate_predict_local_1_from_1",
         "kind": {
           "RemoteRecv": {
@@ -26,21 +37,10 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_predict_local_2_from_2",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 2,
-            "slot": 1203,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
         "id": "load_model_0",
         "kind": {
           "Input": {
-            "path": "TestData/mnist/model.csv",
+            "path": "TestData/ml/infer_model.txt",
             "prefetch": true,
             "replicate": true,
             "slot": 5
@@ -64,7 +64,7 @@
         "id": "load_data_0",
         "kind": {
           "Input": {
-            "path": "TestData/mnist/test.csv",
+            "path": "TestData/ml/test_50000.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -190,7 +190,7 @@
         "id": "load_model_1",
         "kind": {
           "Input": {
-            "path": "TestData/mnist/model.csv",
+            "path": "TestData/ml/infer_model.txt",
             "prefetch": true,
             "replicate": true,
             "slot": 5
@@ -214,7 +214,7 @@
         "id": "load_data_1",
         "kind": {
           "Input": {
-            "path": "TestData/mnist/test.csv",
+            "path": "TestData/ml/test_50000.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -295,7 +295,7 @@
         "id": "load_model_2",
         "kind": {
           "Input": {
-            "path": "TestData/mnist/model.csv",
+            "path": "TestData/ml/infer_model.txt",
             "prefetch": true,
             "replicate": true,
             "slot": 5
@@ -319,7 +319,7 @@
         "id": "load_data_2",
         "kind": {
           "Input": {
-            "path": "TestData/mnist/test.csv",
+            "path": "TestData/ml/test_50000.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -400,7 +400,7 @@
         "id": "load_model_3",
         "kind": {
           "Input": {
-            "path": "TestData/mnist/model.csv",
+            "path": "TestData/ml/infer_model.txt",
             "prefetch": true,
             "replicate": true,
             "slot": 5
@@ -424,7 +424,7 @@
         "id": "load_data_3",
         "kind": {
           "Input": {
-            "path": "TestData/mnist/test.csv",
+            "path": "TestData/ml/test_50000.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -502,11 +502,11 @@
   },
   "shared_inputs": [
     {
-      "path": "TestData/mnist/model.csv",
+      "path": "TestData/ml/infer_model.txt",
       "source_node": 0
     },
     {
-      "path": "TestData/mnist/test.csv",
+      "path": "TestData/ml/test_50000.csv",
       "source_node": 0
     }
   ],

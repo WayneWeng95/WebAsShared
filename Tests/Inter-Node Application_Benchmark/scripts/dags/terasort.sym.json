@@ -12,7 +12,7 @@
       "deps": [],
       "kind": {
         "Input": {
-          "path": "TestData/terasort/records_1m.txt",
+          "path": "TestData/terasort/records_32mb.txt",
           "slot": 0,
           "prefetch": true,
           "replicate": true
@@ -90,7 +90,7 @@
       }
     },
     {
-      "id": "shuf_0_local_0",
+      "id": "combine_0",
       "node_id": 0,
       "deps": [
         "part_0"
@@ -98,325 +98,16 @@
       "kind": {
         "Aggregate": {
           "upstream": [
-            100
-          ]
-        }
-      }
-    },
-    {
-      "id": "shuf_0_local_1",
-      "node_id": 1,
-      "deps": [
-        "part_1"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            104
-          ]
-        }
-      }
-    },
-    {
-      "id": "shuf_0_local_2",
-      "node_id": 2,
-      "deps": [
-        "part_2"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            108
-          ]
-        }
-      }
-    },
-    {
-      "id": "shuf_0_local_3",
-      "node_id": 3,
-      "deps": [
-        "part_3"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            112
-          ]
-        }
-      }
-    },
-    {
-      "id": "agg_0",
-      "node_id": 0,
-      "deps": [
-        "shuf_0_local_0",
-        "shuf_0_local_1",
-        "shuf_0_local_2",
-        "shuf_0_local_3"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream_nodes": [
-            "shuf_0_local_0",
-            "shuf_0_local_1",
-            "shuf_0_local_2",
-            "shuf_0_local_3"
-          ],
-          "downstream": 400
-        }
-      }
-    },
-    {
-      "id": "merge_0",
-      "node_id": 0,
-      "deps": [
-        "agg_0"
-      ],
-      "kind": {
-        "Func": {
-          "func": "ts_merge",
-          "arg": 400,
-          "wasm_arg": 400
-        }
-      }
-    },
-    {
-      "id": "save_0",
-      "node_id": 0,
-      "deps": [
-        "merge_0"
-      ],
-      "kind": {
-        "Output": {
-          "path": "TestOutput/terasort_ap_result.part0",
-          "slot": 2
-        }
-      }
-    },
-    {
-      "id": "shuf_1_local_0",
-      "node_id": 0,
-      "deps": [
-        "part_0"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            101
-          ]
-        }
-      }
-    },
-    {
-      "id": "shuf_1_local_1",
-      "node_id": 1,
-      "deps": [
-        "part_1"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            105
-          ]
-        }
-      }
-    },
-    {
-      "id": "shuf_1_local_2",
-      "node_id": 2,
-      "deps": [
-        "part_2"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            109
-          ]
-        }
-      }
-    },
-    {
-      "id": "shuf_1_local_3",
-      "node_id": 3,
-      "deps": [
-        "part_3"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            113
-          ]
-        }
-      }
-    },
-    {
-      "id": "agg_1",
-      "node_id": 1,
-      "deps": [
-        "shuf_1_local_0",
-        "shuf_1_local_1",
-        "shuf_1_local_2",
-        "shuf_1_local_3"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream_nodes": [
-            "shuf_1_local_0",
-            "shuf_1_local_1",
-            "shuf_1_local_2",
-            "shuf_1_local_3"
-          ],
-          "downstream": 401
-        }
-      }
-    },
-    {
-      "id": "merge_1",
-      "node_id": 1,
-      "deps": [
-        "agg_1"
-      ],
-      "kind": {
-        "Func": {
-          "func": "ts_merge",
-          "arg": 401,
-          "wasm_arg": 65937
-        }
-      }
-    },
-    {
-      "id": "save_1",
-      "node_id": 1,
-      "deps": [
-        "merge_1"
-      ],
-      "kind": {
-        "Output": {
-          "path": "TestOutput/terasort_ap_result.part1",
-          "slot": 3
-        }
-      }
-    },
-    {
-      "id": "shuf_2_local_0",
-      "node_id": 0,
-      "deps": [
-        "part_0"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            102
-          ]
-        }
-      }
-    },
-    {
-      "id": "shuf_2_local_1",
-      "node_id": 1,
-      "deps": [
-        "part_1"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            106
-          ]
-        }
-      }
-    },
-    {
-      "id": "shuf_2_local_2",
-      "node_id": 2,
-      "deps": [
-        "part_2"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            110
-          ]
-        }
-      }
-    },
-    {
-      "id": "shuf_2_local_3",
-      "node_id": 3,
-      "deps": [
-        "part_3"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            114
-          ]
-        }
-      }
-    },
-    {
-      "id": "agg_2",
-      "node_id": 2,
-      "deps": [
-        "shuf_2_local_0",
-        "shuf_2_local_1",
-        "shuf_2_local_2",
-        "shuf_2_local_3"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream_nodes": [
-            "shuf_2_local_0",
-            "shuf_2_local_1",
-            "shuf_2_local_2",
-            "shuf_2_local_3"
-          ],
-          "downstream": 402
-        }
-      }
-    },
-    {
-      "id": "merge_2",
-      "node_id": 2,
-      "deps": [
-        "agg_2"
-      ],
-      "kind": {
-        "Func": {
-          "func": "ts_merge",
-          "arg": 402,
-          "wasm_arg": 131474
-        }
-      }
-    },
-    {
-      "id": "save_2",
-      "node_id": 2,
-      "deps": [
-        "merge_2"
-      ],
-      "kind": {
-        "Output": {
-          "path": "TestOutput/terasort_ap_result.part2",
-          "slot": 4
-        }
-      }
-    },
-    {
-      "id": "shuf_3_local_0",
-      "node_id": 0,
-      "deps": [
-        "part_0"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
+            100,
+            101,
+            102,
             103
           ]
         }
       }
     },
     {
-      "id": "shuf_3_local_1",
+      "id": "combine_1",
       "node_id": 1,
       "deps": [
         "part_1"
@@ -424,13 +115,16 @@
       "kind": {
         "Aggregate": {
           "upstream": [
+            104,
+            105,
+            106,
             107
           ]
         }
       }
     },
     {
-      "id": "shuf_3_local_2",
+      "id": "combine_2",
       "node_id": 2,
       "deps": [
         "part_2"
@@ -438,13 +132,16 @@
       "kind": {
         "Aggregate": {
           "upstream": [
+            108,
+            109,
+            110,
             111
           ]
         }
       }
     },
     {
-      "id": "shuf_3_local_3",
+      "id": "combine_3",
       "node_id": 3,
       "deps": [
         "part_3"
@@ -452,56 +149,81 @@
       "kind": {
         "Aggregate": {
           "upstream": [
+            112,
+            113,
+            114,
             115
           ]
         }
       }
     },
     {
-      "id": "agg_3",
-      "node_id": 3,
+      "id": "gather",
+      "node_id": 0,
       "deps": [
-        "shuf_3_local_0",
-        "shuf_3_local_1",
-        "shuf_3_local_2",
-        "shuf_3_local_3"
+        "combine_0",
+        "combine_1",
+        "combine_2",
+        "combine_3"
       ],
       "kind": {
         "Aggregate": {
           "upstream_nodes": [
-            "shuf_3_local_0",
-            "shuf_3_local_1",
-            "shuf_3_local_2",
-            "shuf_3_local_3"
+            "combine_0",
+            "combine_1",
+            "combine_2",
+            "combine_3"
           ],
-          "downstream": 403
+          "downstream": 400
         }
       }
     },
     {
-      "id": "merge_3",
-      "node_id": 3,
+      "id": "summary",
+      "node_id": 0,
       "deps": [
-        "agg_3"
+        "gather"
+      ],
+      "output_slot": 500,
+      "kind": {
+        "Func": {
+          "func": "ts_range_summary",
+          "arg": 400,
+          "wasm_arg": 32768400
+        }
+      }
+    },
+    {
+      "id": "summary_global",
+      "node_id": 0,
+      "deps": [
+        "summary"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "finalize",
+      "node_id": 0,
+      "deps": [
+        "summary_global"
       ],
       "kind": {
         "Func": {
-          "func": "ts_merge",
-          "arg": 403,
-          "wasm_arg": 197011
+          "func": "ts_finalize"
         }
       }
     },
     {
-      "id": "save_3",
-      "node_id": 3,
+      "id": "save",
+      "node_id": 0,
       "deps": [
-        "merge_3"
+        "finalize"
       ],
       "kind": {
         "Output": {
-          "path": "TestOutput/terasort_ap_result.part3",
-          "slot": 5
+          "path": "TestOutput/terasort_ap_result.txt"
         }
       }
     }

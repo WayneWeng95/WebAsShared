@@ -360,11 +360,23 @@ fn rand_psn() -> u32 {
 /// 5. Writes each file to its destination path on disk.
 /// 6. Sends `InputShareDone`.
 fn remove_staged_files(paths: &mut Vec<String>, node_id: u32) {
+    // Dedup: `current_staged_files` can hold the same path more than once — a worker
+    // is staged to for jobs it never executes (e.g. a 1-node ground-truth run still
+    // stages inputs to every worker), and those entries aren't cleaned until the next
+    // job completes, so re-staging the same file appends a duplicate. Removing each
+    // unique path once — and treating an already-absent file as success — keeps the
+    // cleanup idempotent and quiet (was: a spurious "No such file" error per dup).
+    let mut seen = std::collections::HashSet::new();
     for path in paths.drain(..) {
-        if let Err(e) = std::fs::remove_file(&path) {
-            eprintln!("[worker {}] failed to remove staged file '{}': {}", node_id, path, e);
-        } else {
-            println!("[worker {}] removed staged file '{}'", node_id, path);
+        if !seen.insert(path.clone()) {
+            continue;
+        }
+        match std::fs::remove_file(&path) {
+            Ok(()) => println!("[worker {}] removed staged file '{}'", node_id, path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // already gone
+            Err(e) => eprintln!(
+                "[worker {}] failed to remove staged file '{}': {}", node_id, path, e
+            ),
         }
     }
 }

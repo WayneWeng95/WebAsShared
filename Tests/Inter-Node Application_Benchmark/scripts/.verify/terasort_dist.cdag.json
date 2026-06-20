@@ -3,40 +3,34 @@
   "node_dags": {
     "0": [
       {
-        "deps": [
-          "rs_shuf_2_local_0_to_2"
-        ],
-        "id": "rr_shuf_0_local_2_from_2",
+        "deps": [],
+        "id": "rr_combine_2_from_2",
         "kind": {
           "RemoteRecv": {
             "peer": 2,
-            "slot": 405,
+            "slot": 403,
             "slot_kind": "Stream"
           }
         }
       },
       {
-        "deps": [
-          "rs_shuf_3_local_0_to_3"
-        ],
-        "id": "rr_shuf_0_local_3_from_3",
+        "deps": [],
+        "id": "rr_combine_3_from_3",
         "kind": {
           "RemoteRecv": {
             "peer": 3,
-            "slot": 406,
+            "slot": 404,
             "slot_kind": "Stream"
           }
         }
       },
       {
-        "deps": [
-          "rs_shuf_1_local_0_to_1"
-        ],
-        "id": "rr_shuf_0_local_1_from_1",
+        "deps": [],
+        "id": "rr_combine_1_from_1",
         "kind": {
           "RemoteRecv": {
             "peer": 1,
-            "slot": 404,
+            "slot": 402,
             "slot_kind": "Stream"
           }
         }
@@ -81,97 +75,14 @@
         "deps": [
           "part_0"
         ],
-        "id": "shuf_0_local_0",
+        "id": "combine_0",
         "kind": {
           "Aggregate": {
             "downstream": 2,
             "upstream": [
-              100
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "shuf_0_local_0",
-          "rr_shuf_0_local_1_from_1",
-          "rr_shuf_0_local_2_from_2",
-          "rr_shuf_0_local_3_from_3"
-        ],
-        "id": "agg_0",
-        "kind": {
-          "Aggregate": {
-            "downstream": 400,
-            "upstream": [
-              2,
-              404,
-              405,
-              406
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "agg_0"
-        ],
-        "id": "merge_0",
-        "kind": {
-          "WasmVoid": {
-            "arg": 400,
-            "func": "ts_merge"
-          }
-        }
-      },
-      {
-        "deps": [
-          "merge_0"
-        ],
-        "id": "save_0",
-        "kind": {
-          "Output": {
-            "path": "TestOutput/terasort_ap_result.part0",
-            "slot": 1
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_0"
-        ],
-        "id": "shuf_1_local_0",
-        "kind": {
-          "Aggregate": {
-            "downstream": 3,
-            "upstream": [
-              101
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_0"
-        ],
-        "id": "shuf_2_local_0",
-        "kind": {
-          "Aggregate": {
-            "downstream": 4,
-            "upstream": [
-              102
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_0"
-        ],
-        "id": "shuf_3_local_0",
-        "kind": {
-          "Aggregate": {
-            "downstream": 5,
-            "upstream": [
+              100,
+              101,
+              102,
               103
             ]
           }
@@ -179,84 +90,76 @@
       },
       {
         "deps": [
-          "shuf_2_local_0"
+          "combine_0",
+          "rr_combine_1_from_1",
+          "rr_combine_2_from_2",
+          "rr_combine_3_from_3"
         ],
-        "id": "rs_shuf_2_local_0_to_2",
+        "id": "gather",
         "kind": {
-          "RemoteSend": {
-            "peer": 2,
-            "slot": 4,
-            "slot_kind": "Stream"
+          "Aggregate": {
+            "downstream": 400,
+            "upstream": [
+              2,
+              402,
+              403,
+              404
+            ]
           }
         }
       },
       {
         "deps": [
-          "shuf_3_local_0"
+          "gather"
         ],
-        "id": "rs_shuf_3_local_0_to_3",
+        "id": "summary",
         "kind": {
-          "RemoteSend": {
-            "peer": 3,
-            "slot": 5,
-            "slot_kind": "Stream"
+          "WasmVoid": {
+            "arg": 32768400,
+            "func": "ts_range_summary"
           }
         }
       },
       {
         "deps": [
-          "shuf_1_local_0"
+          "summary"
         ],
-        "id": "rs_shuf_1_local_0_to_1",
+        "id": "summary_global",
         "kind": {
-          "RemoteSend": {
-            "peer": 1,
-            "slot": 3,
-            "slot_kind": "Stream"
+          "Aggregate": {
+            "downstream": 401,
+            "upstream": [
+              500
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "summary_global"
+        ],
+        "id": "finalize",
+        "kind": {
+          "WasmVoid": {
+            "arg": 401,
+            "func": "ts_finalize"
+          }
+        }
+      },
+      {
+        "deps": [
+          "finalize"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/terasort_ap_result.txt",
+            "slot": 1
           }
         }
       }
     ],
     "1": [
-      {
-        "deps": [
-          "rs_shuf_2_local_1_to_2"
-        ],
-        "id": "rr_shuf_1_local_2_from_2",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 2,
-            "slot": 408,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "rs_shuf_3_local_1_to_3"
-        ],
-        "id": "rr_shuf_1_local_3_from_3",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 3,
-            "slot": 409,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "rs_shuf_0_local_1_to_0"
-        ],
-        "id": "rr_shuf_1_local_0_from_0",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 0,
-            "slot": 407,
-            "slot_kind": "Stream"
-          }
-        }
-      },
       {
         "deps": [],
         "id": "load_1",
@@ -297,97 +200,14 @@
         "deps": [
           "part_1"
         ],
-        "id": "shuf_0_local_1",
+        "id": "combine_1",
         "kind": {
           "Aggregate": {
-            "downstream": 6,
+            "downstream": 3,
             "upstream": [
-              104
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_1"
-        ],
-        "id": "shuf_1_local_1",
-        "kind": {
-          "Aggregate": {
-            "downstream": 7,
-            "upstream": [
-              105
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "rr_shuf_1_local_0_from_0",
-          "shuf_1_local_1",
-          "rr_shuf_1_local_2_from_2",
-          "rr_shuf_1_local_3_from_3"
-        ],
-        "id": "agg_1",
-        "kind": {
-          "Aggregate": {
-            "downstream": 401,
-            "upstream": [
-              407,
-              7,
-              408,
-              409
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "agg_1"
-        ],
-        "id": "merge_1",
-        "kind": {
-          "WasmVoid": {
-            "arg": 65937,
-            "func": "ts_merge"
-          }
-        }
-      },
-      {
-        "deps": [
-          "merge_1"
-        ],
-        "id": "save_1",
-        "kind": {
-          "Output": {
-            "path": "TestOutput/terasort_ap_result.part1",
-            "slot": 1
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_1"
-        ],
-        "id": "shuf_2_local_1",
-        "kind": {
-          "Aggregate": {
-            "downstream": 8,
-            "upstream": [
-              106
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_1"
-        ],
-        "id": "shuf_3_local_1",
-        "kind": {
-          "Aggregate": {
-            "downstream": 9,
-            "upstream": [
+              104,
+              105,
+              106,
               107
             ]
           }
@@ -395,84 +215,19 @@
       },
       {
         "deps": [
-          "shuf_2_local_1"
+          "combine_1"
         ],
-        "id": "rs_shuf_2_local_1_to_2",
-        "kind": {
-          "RemoteSend": {
-            "peer": 2,
-            "slot": 8,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "shuf_3_local_1"
-        ],
-        "id": "rs_shuf_3_local_1_to_3",
-        "kind": {
-          "RemoteSend": {
-            "peer": 3,
-            "slot": 9,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "shuf_0_local_1"
-        ],
-        "id": "rs_shuf_0_local_1_to_0",
+        "id": "rs_combine_1_to_0",
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 6,
+            "slot": 3,
             "slot_kind": "Stream"
           }
         }
       }
     ],
     "2": [
-      {
-        "deps": [
-          "rs_shuf_1_local_2_to_1"
-        ],
-        "id": "rr_shuf_2_local_1_from_1",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 1,
-            "slot": 411,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "rs_shuf_0_local_2_to_0"
-        ],
-        "id": "rr_shuf_2_local_0_from_0",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 0,
-            "slot": 410,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "rs_shuf_3_local_2_to_3"
-        ],
-        "id": "rr_shuf_2_local_3_from_3",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 3,
-            "slot": 412,
-            "slot_kind": "Stream"
-          }
-        }
-      },
       {
         "deps": [],
         "id": "load_2",
@@ -513,97 +268,14 @@
         "deps": [
           "part_2"
         ],
-        "id": "shuf_0_local_2",
+        "id": "combine_2",
         "kind": {
           "Aggregate": {
-            "downstream": 10,
+            "downstream": 4,
             "upstream": [
-              108
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_2"
-        ],
-        "id": "shuf_1_local_2",
-        "kind": {
-          "Aggregate": {
-            "downstream": 11,
-            "upstream": [
-              109
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_2"
-        ],
-        "id": "shuf_2_local_2",
-        "kind": {
-          "Aggregate": {
-            "downstream": 12,
-            "upstream": [
-              110
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "rr_shuf_2_local_0_from_0",
-          "rr_shuf_2_local_1_from_1",
-          "shuf_2_local_2",
-          "rr_shuf_2_local_3_from_3"
-        ],
-        "id": "agg_2",
-        "kind": {
-          "Aggregate": {
-            "downstream": 402,
-            "upstream": [
-              410,
-              411,
-              12,
-              412
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "agg_2"
-        ],
-        "id": "merge_2",
-        "kind": {
-          "WasmVoid": {
-            "arg": 131474,
-            "func": "ts_merge"
-          }
-        }
-      },
-      {
-        "deps": [
-          "merge_2"
-        ],
-        "id": "save_2",
-        "kind": {
-          "Output": {
-            "path": "TestOutput/terasort_ap_result.part2",
-            "slot": 1
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_2"
-        ],
-        "id": "shuf_3_local_2",
-        "kind": {
-          "Aggregate": {
-            "downstream": 13,
-            "upstream": [
+              108,
+              109,
+              110,
               111
             ]
           }
@@ -611,84 +283,19 @@
       },
       {
         "deps": [
-          "shuf_3_local_2"
+          "combine_2"
         ],
-        "id": "rs_shuf_3_local_2_to_3",
-        "kind": {
-          "RemoteSend": {
-            "peer": 3,
-            "slot": 13,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "shuf_1_local_2"
-        ],
-        "id": "rs_shuf_1_local_2_to_1",
-        "kind": {
-          "RemoteSend": {
-            "peer": 1,
-            "slot": 11,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "shuf_0_local_2"
-        ],
-        "id": "rs_shuf_0_local_2_to_0",
+        "id": "rs_combine_2_to_0",
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 10,
+            "slot": 4,
             "slot_kind": "Stream"
           }
         }
       }
     ],
     "3": [
-      {
-        "deps": [
-          "rs_shuf_2_local_3_to_2"
-        ],
-        "id": "rr_shuf_3_local_2_from_2",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 2,
-            "slot": 415,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "rs_shuf_1_local_3_to_1"
-        ],
-        "id": "rr_shuf_3_local_1_from_1",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 1,
-            "slot": 414,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "rs_shuf_0_local_3_to_0"
-        ],
-        "id": "rr_shuf_3_local_0_from_0",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 0,
-            "slot": 413,
-            "slot_kind": "Stream"
-          }
-        }
-      },
       {
         "deps": [],
         "id": "load_3",
@@ -729,53 +336,14 @@
         "deps": [
           "part_3"
         ],
-        "id": "shuf_0_local_3",
+        "id": "combine_3",
         "kind": {
           "Aggregate": {
-            "downstream": 14,
+            "downstream": 5,
             "upstream": [
-              112
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_3"
-        ],
-        "id": "shuf_1_local_3",
-        "kind": {
-          "Aggregate": {
-            "downstream": 15,
-            "upstream": [
-              113
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_3"
-        ],
-        "id": "shuf_2_local_3",
-        "kind": {
-          "Aggregate": {
-            "downstream": 16,
-            "upstream": [
-              114
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "part_3"
-        ],
-        "id": "shuf_3_local_3",
-        "kind": {
-          "Aggregate": {
-            "downstream": 17,
-            "upstream": [
+              112,
+              113,
+              114,
               115
             ]
           }
@@ -783,83 +351,13 @@
       },
       {
         "deps": [
-          "rr_shuf_3_local_0_from_0",
-          "rr_shuf_3_local_1_from_1",
-          "rr_shuf_3_local_2_from_2",
-          "shuf_3_local_3"
+          "combine_3"
         ],
-        "id": "agg_3",
-        "kind": {
-          "Aggregate": {
-            "downstream": 403,
-            "upstream": [
-              413,
-              414,
-              415,
-              17
-            ]
-          }
-        }
-      },
-      {
-        "deps": [
-          "agg_3"
-        ],
-        "id": "merge_3",
-        "kind": {
-          "WasmVoid": {
-            "arg": 197011,
-            "func": "ts_merge"
-          }
-        }
-      },
-      {
-        "deps": [
-          "merge_3"
-        ],
-        "id": "save_3",
-        "kind": {
-          "Output": {
-            "path": "TestOutput/terasort_ap_result.part3",
-            "slot": 1
-          }
-        }
-      },
-      {
-        "deps": [
-          "shuf_0_local_3"
-        ],
-        "id": "rs_shuf_0_local_3_to_0",
+        "id": "rs_combine_3_to_0",
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 14,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "shuf_2_local_3"
-        ],
-        "id": "rs_shuf_2_local_3_to_2",
-        "kind": {
-          "RemoteSend": {
-            "peer": 2,
-            "slot": 16,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [
-          "shuf_1_local_3"
-        ],
-        "id": "rs_shuf_1_local_3_to_1",
-        "kind": {
-          "RemoteSend": {
-            "peer": 1,
-            "slot": 15,
+            "slot": 5,
             "slot_kind": "Stream"
           }
         }

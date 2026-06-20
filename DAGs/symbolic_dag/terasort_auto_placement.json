@@ -90,31 +90,99 @@
       }
     },
     {
-      "id": "agg_0",
+      "id": "combine_0",
       "node_id": 0,
       "deps": [
-        "part_0",
-        "part_1",
-        "part_2",
-        "part_3"
+        "part_0"
       ],
       "kind": {
         "Aggregate": {
           "upstream": [
             100,
+            101,
+            102,
+            103
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_1",
+      "node_id": 1,
+      "deps": [
+        "part_1"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
             104,
+            105,
+            106,
+            107
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_2",
+      "node_id": 2,
+      "deps": [
+        "part_2"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
             108,
-            112
+            109,
+            110,
+            111
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_3",
+      "node_id": 3,
+      "deps": [
+        "part_3"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            112,
+            113,
+            114,
+            115
+          ]
+        }
+      }
+    },
+    {
+      "id": "gather",
+      "node_id": 0,
+      "deps": [
+        "combine_0",
+        "combine_1",
+        "combine_2",
+        "combine_3"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream_nodes": [
+            "combine_0",
+            "combine_1",
+            "combine_2",
+            "combine_3"
           ],
           "downstream": 400
         }
       }
     },
     {
-      "id": "summary_0",
+      "id": "summary",
       "node_id": 0,
       "deps": [
-        "agg_0"
+        "gather"
       ],
       "output_slot": 500,
       "kind": {
@@ -126,161 +194,10 @@
       }
     },
     {
-      "id": "agg_1",
-      "node_id": 1,
-      "deps": [
-        "part_0",
-        "part_1",
-        "part_2",
-        "part_3"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            101,
-            105,
-            109,
-            113
-          ],
-          "downstream": 401
-        }
-      }
-    },
-    {
-      "id": "summary_1",
-      "node_id": 1,
-      "deps": [
-        "agg_1"
-      ],
-      "output_slot": 501,
-      "kind": {
-        "Func": {
-          "func": "ts_range_summary",
-          "arg": 401,
-          "wasm_arg": 32833937
-        }
-      }
-    },
-    {
-      "id": "agg_2",
-      "node_id": 2,
-      "deps": [
-        "part_0",
-        "part_1",
-        "part_2",
-        "part_3"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            102,
-            106,
-            110,
-            114
-          ],
-          "downstream": 402
-        }
-      }
-    },
-    {
-      "id": "summary_2",
-      "node_id": 2,
-      "deps": [
-        "agg_2"
-      ],
-      "output_slot": 502,
-      "kind": {
-        "Func": {
-          "func": "ts_range_summary",
-          "arg": 402,
-          "wasm_arg": 32899474
-        }
-      }
-    },
-    {
-      "id": "agg_3",
-      "node_id": 3,
-      "deps": [
-        "part_0",
-        "part_1",
-        "part_2",
-        "part_3"
-      ],
-      "kind": {
-        "Aggregate": {
-          "upstream": [
-            103,
-            107,
-            111,
-            115
-          ],
-          "downstream": 403
-        }
-      }
-    },
-    {
-      "id": "summary_3",
-      "node_id": 3,
-      "deps": [
-        "agg_3"
-      ],
-      "output_slot": 503,
-      "kind": {
-        "Func": {
-          "func": "ts_range_summary",
-          "arg": 403,
-          "wasm_arg": 32965011
-        }
-      }
-    },
-    {
-      "id": "summary_local_0",
-      "node_id": 0,
-      "deps": [
-        "summary_0"
-      ],
-      "kind": {
-        "Aggregate": {}
-      }
-    },
-    {
-      "id": "summary_local_1",
-      "node_id": 1,
-      "deps": [
-        "summary_1"
-      ],
-      "kind": {
-        "Aggregate": {}
-      }
-    },
-    {
-      "id": "summary_local_2",
-      "node_id": 2,
-      "deps": [
-        "summary_2"
-      ],
-      "kind": {
-        "Aggregate": {}
-      }
-    },
-    {
-      "id": "summary_local_3",
-      "node_id": 3,
-      "deps": [
-        "summary_3"
-      ],
-      "kind": {
-        "Aggregate": {}
-      }
-    },
-    {
       "id": "summary_global",
       "node_id": 0,
       "deps": [
-        "summary_local_0",
-        "summary_local_1",
-        "summary_local_2",
-        "summary_local_3"
+        "summary"
       ],
       "kind": {
         "Aggregate": {}

@@ -48,7 +48,7 @@
       }
     },
     {
-      "id": "shuf_0_local_0",
+      "id": "combine_0",
       "node_id": 0,
       "deps": [
         "part_0"
@@ -62,44 +62,66 @@
       }
     },
     {
-      "id": "agg_0",
+      "id": "gather",
       "node_id": 0,
       "deps": [
-        "shuf_0_local_0"
+        "combine_0"
       ],
       "kind": {
         "Aggregate": {
           "upstream_nodes": [
-            "shuf_0_local_0"
+            "combine_0"
           ],
           "downstream": 400
         }
       }
     },
     {
-      "id": "merge_0",
+      "id": "summary",
       "node_id": 0,
       "deps": [
-        "agg_0"
+        "gather"
       ],
+      "output_slot": 500,
       "kind": {
         "Func": {
-          "func": "ts_merge",
+          "func": "ts_range_summary",
           "arg": 400,
-          "wasm_arg": 400
+          "wasm_arg": 32768400
         }
       }
     },
     {
-      "id": "save_0",
+      "id": "summary_global",
       "node_id": 0,
       "deps": [
-        "merge_0"
+        "summary"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "finalize",
+      "node_id": 0,
+      "deps": [
+        "summary_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_finalize"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "node_id": 0,
+      "deps": [
+        "finalize"
       ],
       "kind": {
         "Output": {
-          "path": "TestOutput/terasort_ap_result.part0",
-          "slot": 2
+          "path": "TestOutput/terasort_ap_result.txt"
         }
       }
     }

@@ -11,7 +11,7 @@
       "deps": [],
       "kind": {
         "Input": {
-          "path": "TestData/mnist/model.csv",
+          "path": "TestData/ml/infer_model.txt",
           "slot": 5,
           "prefetch": true,
           "replicate": true
@@ -37,7 +37,7 @@
       "deps": [],
       "kind": {
         "Input": {
-          "path": "TestData/mnist/test.csv",
+          "path": "TestData/ml/test_50000.csv",
           "slot": 0,
           "prefetch": true,
           "replicate": true

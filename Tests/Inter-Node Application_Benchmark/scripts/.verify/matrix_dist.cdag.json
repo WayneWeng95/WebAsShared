@@ -4,22 +4,22 @@
     "0": [
       {
         "deps": [],
-        "id": "rr_aggregate_local_2_from_2",
+        "id": "rr_aggregate_local_1_from_1",
         "kind": {
           "RemoteRecv": {
-            "peer": 2,
-            "slot": 603,
+            "peer": 1,
+            "slot": 602,
             "slot_kind": "Stream"
           }
         }
       },
       {
         "deps": [],
-        "id": "rr_aggregate_local_1_from_1",
+        "id": "rr_aggregate_local_2_from_2",
         "kind": {
           "RemoteRecv": {
-            "peer": 1,
-            "slot": 602,
+            "peer": 2,
+            "slot": 603,
             "slot_kind": "Stream"
           }
         }

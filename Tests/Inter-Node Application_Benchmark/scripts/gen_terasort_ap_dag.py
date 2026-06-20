@@ -67,10 +67,11 @@ def build_dag(n, part_nodes=None, owner_nodes=None,
     """Return the TeraSort auto-placement SymbolicDag for `n` partition workers and
     `n` range-owners.
 
-    `part_nodes[i]`  = node hosting partition worker i   (default: all node 0).
-    `owner_nodes[j]` = node hosting owner j's merge/range (default: all node 0).
-    gen_variants.py computes both via its placement policy and passes them in; the
-    standalone CLI default (all on node 0) is the single-node ground-truth shape.
+    `part_nodes[i]` = node hosting partition worker i (default: all node 0). The
+    merge is CENTRALIZED on node 0 (see below), so `owner_nodes` is accepted for
+    call-compatibility with gen_variants.py but not used for placement. Both the
+    single-node GT (all on node 0) and the distributed run use this same structure,
+    so their gates match exactly.
     """
     if part_nodes is None:
         part_nodes = [0] * n
@@ -102,45 +103,41 @@ def build_dag(n, part_nodes=None, owner_nodes=None,
                       "kind": {"Func": {"func": "ts_partition", "arg": TS_DIST_BASE + i,
                                         "wasm_arg": packed(TS_DIST_BASE + i, n)}}})
 
-    # ── per-owner shuffle gather → range summary ─────────────────────────────────
-    # Owner j gathers its sub-slot from EVERY partition worker {100+i*N+j : all i}
-    # into one range (slot 400+j). With N == nodes (one partition + one owner per
-    # node) each directed node-pair carries exactly one stream — the partitioner adds
-    # send/recv ordering for the bidirectional transpose (deadlock-safe). ts_range_
-    # summary then sorts the range and emits its (records, sorted, keysum) as a STREAM
-    # record on 500+j, so the N ranges can be folded into ONE output (below).
-    summary_ids = []
-    for j in range(n):
-        owner_node = owner_nodes[j]
-        nodes.append({"id": f"agg_{j}", "node_id": owner_node, "deps": list(part_ids),
-                      "kind": {"Aggregate": {"upstream": [TS_PART_BASE + i * n + j for i in range(n)],
-                                             "downstream": TS_MERGE_IN + j}}})
-        sid = f"summary_{j}"
-        summary_ids.append(sid)
-        nodes.append({"id": sid, "node_id": owner_node, "deps": [f"agg_{j}"],
-                      "output_slot": TS_SUMMARY_BASE + j,
-                      "kind": {"Func": {"func": "ts_range_summary", "arg": TS_MERGE_IN + j,
-                                        "wasm_arg": packed(TS_MERGE_IN + j, TS_SUMMARY_BASE + j)}}})
+    # ── centralized gather (all-to-ONE) → sort on node 0 ─────────────────────────
+    # WHY CENTRALIZED (not a true all-to-all transpose): the executor's blocking RDMA
+    # transport deadlocks on the bidirectional all-to-all (every node sends to AND
+    # receives from every other; the partitioner can't order all sends before all
+    # recvs without a cycle — splitter.rs:443). So we use the proven UNIDIRECTIONAL
+    # fan-gather instead: each worker routes its shard by owner (ts_partition — the
+    # real partition compute stays distributed), combines its N sub-slots into ONE
+    # declared stream, and sends exactly ONE transfer to node 0. Node 0 gathers the N
+    # combined streams (one RemoteRecv per peer, like every working workload) and
+    # sorts the whole dataset. The cross-node cost is the full shuffled dataset moving
+    # to node 0 over RDMA; the merge is centralized (single reducer node).
+    #
+    # combine_i consumes part_i's raw sub-slots LOCALLY (same node), so the only slot
+    # that crosses the network is its DECLARED downstream — which the partitioner can
+    # route (the raw sub-slots have no output_slot and could not be routed directly).
+    combine_ids = []
+    for i in range(n):
+        cid = f"combine_{i}"
+        combine_ids.append(cid)
+        nodes.append({"id": cid, "node_id": part_nodes[i], "deps": [f"part_{i}"],
+                      "kind": {"Aggregate": {"upstream": [TS_PART_BASE + i * n + j for j in range(n)]}}})
 
-    # ── single-output tail (mirrors the fan workloads) ───────────────────────────
-    # Per-machine local-combine of the tiny range summaries (one transfer/peer), a
-    # global gather on node 0, then ts_finalize sums them into ONE output record
-    # (slot 1). Empty {Aggregate:{}} → the partitioner derives each upstream from the
-    # summaries' output_slot, exactly as the fan workloads' local-combine does.
-    by_machine = {}
-    for j in range(n):
-        by_machine.setdefault(owner_nodes[j], []).append(f"summary_{j}")
-    local_ids = []
-    for m in sorted(by_machine):
-        lid = f"summary_local_{m}"
-        local_ids.append(lid)
-        nodes.append({"id": lid, "node_id": m, "deps": by_machine[m],
-                      "kind": {"Aggregate": {}}})
+    # Node 0 gathers every worker's combined stream → the full dataset in slot 400.
+    nodes.append({"id": "gather", "node_id": 0, "deps": combine_ids,
+                  "kind": {"Aggregate": {"upstream_nodes": combine_ids,
+                                         "downstream": TS_MERGE_IN}}})
+    # Sort the gathered dataset and emit its (records, sorted, keysum) summary, then
+    # finalize into ONE output record (slot 1). ts_finalize takes NO arg → the
+    # partitioner auto-wires it to summary_global's downstream (like the fan reduce).
     nodes += [
-        {"id": "summary_global", "node_id": 0, "deps": local_ids,
+        {"id": "summary", "node_id": 0, "deps": ["gather"], "output_slot": TS_SUMMARY_BASE,
+         "kind": {"Func": {"func": "ts_range_summary", "arg": TS_MERGE_IN,
+                           "wasm_arg": packed(TS_MERGE_IN, TS_SUMMARY_BASE)}}},
+        {"id": "summary_global", "node_id": 0, "deps": ["summary"],
          "kind": {"Aggregate": {}}},
-        # ts_finalize: NO arg → the partitioner auto-wires it to summary_global's
-        # downstream slot (same as the fan workloads' reduce).
         {"id": "finalize", "node_id": 0, "deps": ["summary_global"],
          "kind": {"Func": {"func": "ts_finalize"}}},
         {"id": "save", "node_id": 0, "deps": ["finalize"],
@@ -150,7 +147,7 @@ def build_dag(n, part_nodes=None, owner_nodes=None,
     return {
         "shm_path_prefix": "/dev/shm/rdma_terasort_ap",
         "log_level": "info",
-        "total_nodes": max(max(part_nodes), max(owner_nodes)) + 1,
+        "total_nodes": max(part_nodes) + 1,
         "transfer": True,
         "placement_policy": "balanced",
         "converge_on_coordinator": False,

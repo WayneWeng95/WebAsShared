@@ -54,10 +54,27 @@ Produces `scripts/dags/<wl>.cdag.json`, ready for `node-agent submit`.
 | matrix       | `TestData/matrix/A_<N>.bin`, `TestData/matrix/B_<N>.bin` |
 | terasort     | `TestData/terasort/records_*.txt` |
 
-## TeraSort note (the all-to-all shuffle)
+## Verifying correctness on the cluster
 
-TeraSort is an N×N transpose, not a fan→1 gather. **`--fanout == --nodes`** (the
-driver's default) places one partition worker + one range-owner per node, so each
-directed node-pair carries exactly one stream — the deadlock-safe layout. `N > nodes`
-puts several owners per node (>1 transfer per machine-pair); prefer `N == nodes` for
-first bring-up.
+`./verify.sh` runs each workload as ground-truth (`--nodes 1`) and distributed
+(`--nodes N`) and asserts the fan-out-invariant gate matches. Cluster-verified
+2026-06-20 (4 nodes): ml_inference `prediction_checksum=155371`, matrix
+`checksum=2722562338`, terasort `records=335544 keysum=216366291 sorted=1`.
+
+```bash
+Tests/Inter-Node\ Application_Benchmark/scripts/verify.sh                 # ml_inference matrix terasort
+NODES=4 Tests/Inter-Node\ Application_Benchmark/scripts/verify.sh matrix  # one workload
+```
+
+## TeraSort note — CENTRALIZED gather, not all-to-all
+
+TeraSort's true all-to-all transpose (every node ↔ every node) **deadlocks the
+executor's blocking RDMA transport** — the partitioner can't order all sends before
+all recvs without a cycle. So the multi-node path uses the proven UNIDIRECTIONAL
+fan-gather instead: each worker routes its shard by owner (`ts_partition`), combines
+into ONE stream, and sends ONE transfer to node 0, which gathers (one RemoteRecv per
+peer) and sorts the dataset. The cross-node cost is the full shuffled dataset moving
+to node 0 over RDMA; the merge is centralized (single reducer node). True all-to-all
+would need executor-side non-blocking/phased transfers (see the plan §8). The two
+guest fns this uses — `ts_range_summary`, `ts_finalize` — are additive; the
+intra-node `ts_merge` + per-range outputs are untouched.

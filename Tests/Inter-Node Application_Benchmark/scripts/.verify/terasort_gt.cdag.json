@@ -42,7 +42,7 @@
         "deps": [
           "part_0"
         ],
-        "id": "shuf_0_local_0",
+        "id": "combine_0",
         "kind": {
           "Aggregate": {
             "downstream": 2,
@@ -54,9 +54,9 @@
       },
       {
         "deps": [
-          "shuf_0_local_0"
+          "combine_0"
         ],
-        "id": "agg_0",
+        "id": "gather",
         "kind": {
           "Aggregate": {
             "downstream": 400,
@@ -68,24 +68,50 @@
       },
       {
         "deps": [
-          "agg_0"
+          "gather"
         ],
-        "id": "merge_0",
+        "id": "summary",
         "kind": {
           "WasmVoid": {
-            "arg": 400,
-            "func": "ts_merge"
+            "arg": 32768400,
+            "func": "ts_range_summary"
           }
         }
       },
       {
         "deps": [
-          "merge_0"
+          "summary"
         ],
-        "id": "save_0",
+        "id": "summary_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 401,
+            "upstream": [
+              500
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "summary_global"
+        ],
+        "id": "finalize",
+        "kind": {
+          "WasmVoid": {
+            "arg": 401,
+            "func": "ts_finalize"
+          }
+        }
+      },
+      {
+        "deps": [
+          "finalize"
+        ],
+        "id": "save",
         "kind": {
           "Output": {
-            "path": "TestOutput/terasort_ap_result.part0",
+            "path": "TestOutput/terasort_ap_result.txt",
             "slot": 1
           }
         }

@@ -15,22 +15,22 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_3_from_3",
+        "id": "rr_aggregate_2_from_2",
         "kind": {
           "RemoteRecv": {
-            "peer": 3,
-            "slot": 159,
+            "peer": 2,
+            "slot": 158,
             "slot_kind": "Stream"
           }
         }
       },
       {
         "deps": [],
-        "id": "rr_aggregate_2_from_2",
+        "id": "rr_aggregate_3_from_3",
         "kind": {
           "RemoteRecv": {
-            "peer": 2,
-            "slot": 158,
+            "peer": 3,
+            "slot": 159,
             "slot_kind": "Stream"
           }
         }

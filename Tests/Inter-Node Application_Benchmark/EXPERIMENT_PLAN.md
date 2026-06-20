@@ -410,11 +410,21 @@ DAG JSON + `gen_variants.py`. All changes are *additive* (new DAG files, new
 `gen_variants` entries, new run/deploy scripts); no edits to existing guest stages
 or framework code.
 
-> **UPDATE 2026-06-20 — WasMem side of all three missing workloads is DONE
-> (offline-verified; cluster run pending).** The three workloads that were not yet
-> in multi-node mode — **ML inference, Matrix, TeraSort** — now have cross-node
-> auto-placement DAGs + `gen_variants.py` support, additively (no guest/framework
-> edits; `./build.sh` clean):
+> **UPDATE 2026-06-20 — all three missing workloads CLUSTER-VERIFIED.** ML
+> inference, Matrix, TeraSort now run multi-node and pass on the 4-node cluster:
+> ground-truth (`--nodes 1`) == distributed (`--nodes 4`) on the fan-out-invariant
+> gate — ml_inference `prediction_checksum=155371`, matrix `checksum=2722562338`,
+> terasort `records=335544 keysum=216366291 sorted=1` (3/3 stable reps). Verified via
+> `scripts/verify.sh`; inputs RDMA-staged to workers automatically. **TeraSort note:**
+> the true all-to-all transpose deadlocks the executor's blocking RDMA transport, so
+> its multi-node path uses a CENTRALIZED gather (workers route+combine → one transfer
+> each → node 0 sorts) — distributed partition, single-reducer merge. True all-to-all
+> needs executor-side non-blocking/phased transfers (§8). Two additive guest fns
+> (`ts_range_summary`, `ts_finalize`) were added; `ts_merge` + the intra path are
+> untouched. Original adoption (offline) details below:
+>
+> The three workloads now have cross-node auto-placement DAGs + `gen_variants.py`
+> support, additively:
 > - `DAGs/symbolic_dag/{ml_inference,matrix,terasort}_auto_placement.json` (snapshots)
 >   and parametric generators `Tests/Scheduling_Policy/gen_{inference,matrix,terasort}_ap_dag.py`.
 > - `gen_variants.py`: `FAN_PREFIX`/`AGGREGATOR` entries for `ml_inference` (`predict_`)
