@@ -154,3 +154,68 @@ fn hex_key(rec: &[u8]) -> alloc::string::String {
     }
     s
 }
+
+// ─── Inter-node (cluster) tail: single-output range-summary + finalize ────────
+//
+// The intra-node path writes ONE output file per range (ts_merge → I/O slot 2+j).
+// The cluster partitioner, however, gives every workload a SINGLE Output at the
+// reserved OUTPUT_IO_SLOT (1) and treats a terminal Func as writing there — so the
+// per-range I/O slots are never flushed and the multi-Output DAG stalls. The
+// inter-node DAG therefore funnels the N range merges into ONE reducer, mirroring
+// the fan workloads (per-worker partial → gather → single reduce → one Output):
+//   ts_range_summary ×N  → emit each range's (records, keysum, sorted) as a STREAM
+//                          record so the host Aggregate can gather them
+//   ts_finalize          → sum the gathered summaries → ONE output record (slot 1)
+// Both are ADDITIVE (new #[no_mangle] fns); ts_merge and the intra path are untouched.
+
+/// Range summary (cluster path): sort range `in_slot` by key and emit its
+/// `(records, sorted, keysum)` as a STREAM record on `out_slot` (so a final
+/// reducer can gather every range into one output). `arg` packs
+/// `in_slot | (out_slot << 16)`. Same sort + checksum as `ts_merge`, but the
+/// summary goes to a stream slot instead of a per-range I/O file.
+#[no_mangle]
+pub extern "C" fn ts_range_summary(arg: u32) {
+    let in_slot = arg & 0xFFFF;
+    let out_slot = arg >> 16;
+    let mut keys: alloc::vec::Vec<[u8; KEY_LEN]> = alloc::vec::Vec::new();
+    let mut keysum: u64 = 0;
+    ShmApi::for_each_stream_record(in_slot, |_origin, rec| {
+        if rec.is_empty() { return; }
+        let mut k = [0u8; KEY_LEN];
+        let klen = KEY_LEN.min(rec.len());
+        k[..klen].copy_from_slice(&rec[..klen]);
+        for &b in &k[..klen] { keysum = keysum.wrapping_add(b as u64); }
+        keys.push(k);
+    });
+    keys.sort_unstable();
+    let sorted = keys.windows(2).all(|w| w[0] <= w[1]) as u32;
+    ShmApi::append_stream_data(out_slot, alloc::format!(
+        "ts_range records={} sorted={} keysum={}", keys.len(), sorted, keysum).as_bytes());
+}
+
+/// Finalize (cluster path): sum every gathered `ts_range …` summary (aggregated
+/// into `arg`'s slot) into ONE output record — total records, total keysum, range
+/// count, and whether all ranges were sorted. The fan-out-invariant gate: total
+/// records == input count and total keysum identical at every fan-out/placement.
+#[no_mangle]
+pub extern "C" fn ts_finalize(arg: u32) {
+    let mut records: u64 = 0;
+    let mut keysum: u64 = 0;
+    let mut ranges: u64 = 0;
+    let mut all_sorted: u32 = 1;
+    for (_origin, rec) in &ShmApi::read_all_stream_records(arg) {
+        let s = core::str::from_utf8(rec).unwrap_or("").trim();
+        if !s.starts_with("ts_range") { continue; }
+        ranges += 1;
+        for tok in s.split_whitespace() {
+            if let Some(v) = tok.strip_prefix("records=") { records += v.parse().unwrap_or(0); }
+            else if let Some(v) = tok.strip_prefix("keysum=") { keysum = keysum.wrapping_add(v.parse().unwrap_or(0)); }
+            else if let Some(v) = tok.strip_prefix("sorted=") { if v != "1" { all_sorted = 0; } }
+        }
+    }
+    ShmApi::write_output_str("=== terasort_results ===");
+    ShmApi::write_output_str(&alloc::format!("ranges={}", ranges));
+    ShmApi::write_output_str(&alloc::format!("records={}", records));
+    ShmApi::write_output_str(&alloc::format!("keysum={}", keysum));
+    ShmApi::write_output_str(&alloc::format!("sorted={}", all_sorted));
+}

@@ -1,0 +1,107 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_terasort_ap",
+  "log_level": "info",
+  "total_nodes": 1,
+  "transfer": true,
+  "placement_policy": "balanced",
+  "converge_on_coordinator": false,
+  "nodes": [
+    {
+      "id": "load",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/terasort/records_32mb.txt",
+          "slot": 0,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "distribute",
+      "placement": "all",
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_distribute",
+          "arg": 10,
+          "wasm_arg": 65546
+        }
+      }
+    },
+    {
+      "id": "part_0",
+      "node_id": 0,
+      "deps": [
+        "distribute"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition",
+          "arg": 10,
+          "wasm_arg": 65546
+        }
+      }
+    },
+    {
+      "id": "shuf_0_local_0",
+      "node_id": 0,
+      "deps": [
+        "part_0"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            100
+          ]
+        }
+      }
+    },
+    {
+      "id": "agg_0",
+      "node_id": 0,
+      "deps": [
+        "shuf_0_local_0"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream_nodes": [
+            "shuf_0_local_0"
+          ],
+          "downstream": 400
+        }
+      }
+    },
+    {
+      "id": "merge_0",
+      "node_id": 0,
+      "deps": [
+        "agg_0"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_merge",
+          "arg": 400,
+          "wasm_arg": 400
+        }
+      }
+    },
+    {
+      "id": "save_0",
+      "node_id": 0,
+      "deps": [
+        "merge_0"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/terasort_ap_result.part0",
+          "slot": 2
+        }
+      }
+    }
+  ]
+}

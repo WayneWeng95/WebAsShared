@@ -1,0 +1,251 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "load_model_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/infer_model.txt",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 5
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_model_0"
+        ],
+        "id": "setup_model_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 5,
+            "func": "infer_setup_model"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_data_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/test_50000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_data_0"
+        ],
+        "id": "partition_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "infer_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19660810,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19726347,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19791884,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19857421,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19922958,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19988495,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20054032,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20119569,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_predict_local_0"
+        ],
+        "id": "aggregate_predict",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1200,
+            "upstream": [
+              2
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_predict"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1201,
+            "upstream": [
+              1200
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "reduce",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1201,
+            "func": "infer_reduce"
+          }
+        }
+      },
+      {
+        "deps": [
+          "reduce"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/ml_inference_ap_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "predict_0",
+          "predict_1",
+          "predict_2",
+          "predict_3",
+          "predict_4",
+          "predict_5",
+          "predict_6",
+          "predict_7"
+        ],
+        "id": "aggregate_predict_local_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 2,
+            "upstream": [
+              300,
+              301,
+              302,
+              303,
+              304,
+              305,
+              306,
+              307
+            ]
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/ml/infer_model.txt",
+      "source_node": 0
+    },
+    {
+      "path": "TestData/ml/test_50000.csv",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_mnist_ap",
+  "transfer": true
+}

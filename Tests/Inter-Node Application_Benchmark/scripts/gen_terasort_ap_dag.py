@@ -41,17 +41,20 @@
 # identical at every N and every placement, so any record dropped or duplicated in
 # the shuffle is caught. run.sh sums the per-range summaries into the gate.
 #
-# Slots match Tests/Intra-Node Application_Benchmark/TeraSort/gen_dag.py and the
-# guest (Executor/guest/src/workloads/terasort.rs):
+# SINGLE-OUTPUT cluster tail (vs the intra path's per-range I/O files): the cluster
+# partitioner gives every workload ONE Output at the reserved slot 1, so the N range
+# summaries are folded into one reducer (ts_range_summary → gather → ts_finalize).
+#
+# Slots match the guest (Executor/guest/src/workloads/terasort.rs):
 #   input slot 0; worker shards 10..10+N; per-(worker,owner) sub-slots 100+i*N+j;
-#   per-owner gathered range 400+j; per-range summary I/O slot 2+j.
+#   per-owner gathered range 400+j; per-range STREAM summary 500+j; single output → slot 1.
 import json
 import sys
 
 TS_DIST_BASE = 10     # per-worker input shards: 10 .. 10+N
 TS_PART_BASE = 100    # ts_partition(i) writes owner j to 100 + i*N + j
 TS_MERGE_IN = 400     # owner j's gathered range slot
-TS_OUT_BASE = 2       # owner j's summary I/O slot (0=input, 1=default output)
+TS_SUMMARY_BASE = 500  # owner j's range-summary STREAM slot (gathered into one output)
 
 
 def packed(lo, hi):
@@ -99,37 +102,50 @@ def build_dag(n, part_nodes=None, owner_nodes=None,
                       "kind": {"Func": {"func": "ts_partition", "arg": TS_DIST_BASE + i,
                                         "wasm_arg": packed(TS_DIST_BASE + i, n)}}})
 
-    # ── per-owner shuffle: per-machine local-combine → owner gather → merge → save ─
+    # ── per-owner shuffle gather → range summary ─────────────────────────────────
+    # Owner j gathers its sub-slot from EVERY partition worker {100+i*N+j : all i}
+    # into one range (slot 400+j). With N == nodes (one partition + one owner per
+    # node) each directed node-pair carries exactly one stream — the partitioner adds
+    # send/recv ordering for the bidirectional transpose (deadlock-safe). ts_range_
+    # summary then sorts the range and emits its (records, sorted, keysum) as a STREAM
+    # record on 500+j, so the N ranges can be folded into ONE output (below).
+    summary_ids = []
     for j in range(n):
         owner_node = owner_nodes[j]
-        # Group this owner's source sub-slots {100+i*N+j} by the machine that
-        # PRODUCED them (= where partition worker i was placed).
-        by_machine = {}
-        for i in range(n):
-            by_machine.setdefault(part_nodes[i], []).append(TS_PART_BASE + i * n + j)
-
-        # One local Aggregate per source machine: combine that machine's owner-j
-        # sub-slots into a single stream → exactly ONE transfer per (machine, owner).
-        local_ids = []
-        for m in sorted(by_machine):
-            lid = f"shuf_{j}_local_{m}"
-            local_ids.append(lid)
-            nodes.append({"id": lid, "node_id": m,
-                          "deps": [f"part_{i}" for i in range(n) if part_nodes[i] == m],
-                          "kind": {"Aggregate": {"upstream": by_machine[m]}}})
-
-        # Owner j's gather: collect one combined stream per source machine (the
-        # partitioner emits RemoteSend/Recv for locals not on owner_node) → 400+j.
-        nodes.append({"id": f"agg_{j}", "node_id": owner_node, "deps": local_ids,
-                      "kind": {"Aggregate": {"upstream_nodes": local_ids,
+        nodes.append({"id": f"agg_{j}", "node_id": owner_node, "deps": list(part_ids),
+                      "kind": {"Aggregate": {"upstream": [TS_PART_BASE + i * n + j for i in range(n)],
                                              "downstream": TS_MERGE_IN + j}}})
-        # Merge: owner j sorts its range and writes a summary to I/O slot 2+j.
-        nodes.append({"id": f"merge_{j}", "node_id": owner_node, "deps": [f"agg_{j}"],
-                      "kind": {"Func": {"func": "ts_merge", "arg": TS_MERGE_IN + j,
-                                        "wasm_arg": packed(TS_MERGE_IN + j, j)}}})
-        nodes.append({"id": f"save_{j}", "node_id": owner_node, "deps": [f"merge_{j}"],
-                      "kind": {"Output": {"path": f"{out_prefix}.part{j}",
-                                          "slot": TS_OUT_BASE + j}}})
+        sid = f"summary_{j}"
+        summary_ids.append(sid)
+        nodes.append({"id": sid, "node_id": owner_node, "deps": [f"agg_{j}"],
+                      "output_slot": TS_SUMMARY_BASE + j,
+                      "kind": {"Func": {"func": "ts_range_summary", "arg": TS_MERGE_IN + j,
+                                        "wasm_arg": packed(TS_MERGE_IN + j, TS_SUMMARY_BASE + j)}}})
+
+    # ── single-output tail (mirrors the fan workloads) ───────────────────────────
+    # Per-machine local-combine of the tiny range summaries (one transfer/peer), a
+    # global gather on node 0, then ts_finalize sums them into ONE output record
+    # (slot 1). Empty {Aggregate:{}} → the partitioner derives each upstream from the
+    # summaries' output_slot, exactly as the fan workloads' local-combine does.
+    by_machine = {}
+    for j in range(n):
+        by_machine.setdefault(owner_nodes[j], []).append(f"summary_{j}")
+    local_ids = []
+    for m in sorted(by_machine):
+        lid = f"summary_local_{m}"
+        local_ids.append(lid)
+        nodes.append({"id": lid, "node_id": m, "deps": by_machine[m],
+                      "kind": {"Aggregate": {}}})
+    nodes += [
+        {"id": "summary_global", "node_id": 0, "deps": local_ids,
+         "kind": {"Aggregate": {}}},
+        # ts_finalize: NO arg → the partitioner auto-wires it to summary_global's
+        # downstream slot (same as the fan workloads' reduce).
+        {"id": "finalize", "node_id": 0, "deps": ["summary_global"],
+         "kind": {"Func": {"func": "ts_finalize"}}},
+        {"id": "save", "node_id": 0, "deps": ["finalize"],
+         "kind": {"Output": {"path": f"{out_prefix}.txt"}}},
+    ]
 
     return {
         "shm_path_prefix": "/dev/shm/rdma_terasort_ap",
@@ -144,6 +160,6 @@ def build_dag(n, part_nodes=None, owner_nodes=None,
 
 if __name__ == "__main__":
     n = int(sys.argv[1]) if len(sys.argv) > 1 else 4
-    records = sys.argv[2] if len(sys.argv) > 2 else "TestData/terasort/records_1m.txt"
+    records = sys.argv[2] if len(sys.argv) > 2 else "TestData/terasort/records_32mb.txt"
     # Standalone default: square layout, one partition + one owner per node 0..N-1.
     print(json.dumps(build_dag(n, list(range(n)), list(range(n)), records), indent=2))

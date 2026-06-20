@@ -1,7 +1,7 @@
 {
   "shm_path_prefix": "/dev/shm/rdma_mnist_ap",
   "log_level": "info",
-  "total_nodes": 3,
+  "total_nodes": 1,
   "transfer": true,
   "placement_policy": "balanced",
   "nodes": [
@@ -60,7 +60,6 @@
     },
     {
       "id": "predict_0",
-      "placement": "all",
       "deps": [
         "partition",
         "setup_model"
@@ -71,11 +70,12 @@
           "arg": 10,
           "wasm_arg": 19660810
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 300
     },
     {
       "id": "predict_1",
-      "placement": "all",
       "deps": [
         "partition",
         "setup_model"
@@ -86,11 +86,12 @@
           "arg": 11,
           "wasm_arg": 19726347
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 301
     },
     {
       "id": "predict_2",
-      "placement": "all",
       "deps": [
         "partition",
         "setup_model"
@@ -101,11 +102,12 @@
           "arg": 12,
           "wasm_arg": 19791884
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 302
     },
     {
       "id": "predict_3",
-      "placement": "all",
       "deps": [
         "partition",
         "setup_model"
@@ -116,11 +118,12 @@
           "arg": 13,
           "wasm_arg": 19857421
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 303
     },
     {
       "id": "predict_4",
-      "placement": "all",
       "deps": [
         "partition",
         "setup_model"
@@ -131,11 +134,12 @@
           "arg": 14,
           "wasm_arg": 19922958
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 304
     },
     {
       "id": "predict_5",
-      "placement": "all",
       "deps": [
         "partition",
         "setup_model"
@@ -146,11 +150,12 @@
           "arg": 15,
           "wasm_arg": 19988495
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 305
     },
     {
       "id": "predict_6",
-      "placement": "all",
       "deps": [
         "partition",
         "setup_model"
@@ -161,11 +166,12 @@
           "arg": 16,
           "wasm_arg": 20054032
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 306
     },
     {
       "id": "predict_7",
-      "placement": "all",
       "deps": [
         "partition",
         "setup_model"
@@ -176,36 +182,24 @@
           "arg": 17,
           "wasm_arg": 20119569
         }
-      }
+      },
+      "node_id": 0,
+      "output_slot": 307
     },
     {
       "id": "aggregate_predict",
-      "placement": "all",
       "deps": [
-        "predict_0",
-        "predict_1",
-        "predict_2",
-        "predict_3",
-        "predict_4",
-        "predict_5",
-        "predict_6",
-        "predict_7"
+        "aggregate_predict_local_0"
       ],
       "kind": {
         "Aggregate": {
-          "upstream": [
-            300,
-            301,
-            302,
-            303,
-            304,
-            305,
-            306,
-            307
-          ],
-          "downstream": 1200
+          "downstream": 1200,
+          "upstream_nodes": [
+            "aggregate_predict_local_0"
+          ]
         }
-      }
+      },
+      "node_id": 0
     },
     {
       "id": "aggregate_global",
@@ -237,6 +231,24 @@
           "path": "TestOutput/ml_inference_ap_result.txt"
         }
       }
+    },
+    {
+      "id": "aggregate_predict_local_0",
+      "node_id": 0,
+      "deps": [
+        "predict_0",
+        "predict_1",
+        "predict_2",
+        "predict_3",
+        "predict_4",
+        "predict_5",
+        "predict_6",
+        "predict_7"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
     }
-  ]
+  ],
+  "converge_on_coordinator": true
 }

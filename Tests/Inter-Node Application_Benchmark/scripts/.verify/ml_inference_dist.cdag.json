@@ -1,0 +1,515 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "rr_aggregate_predict_local_1_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 1202,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_predict_local_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 1203,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_predict_local_3_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 1204,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_model_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/infer_model.txt",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 5
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_model_0"
+        ],
+        "id": "setup_model_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 5,
+            "func": "infer_setup_model"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_data_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/test_50000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_data_0"
+        ],
+        "id": "partition_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "infer_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19660810,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0",
+          "setup_model_0"
+        ],
+        "id": "predict_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19922958,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_predict_local_0",
+          "rr_aggregate_predict_local_1_from_1",
+          "rr_aggregate_predict_local_2_from_2",
+          "rr_aggregate_predict_local_3_from_3"
+        ],
+        "id": "aggregate_predict",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1200,
+            "upstream": [
+              2,
+              1202,
+              1203,
+              1204
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_predict"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1201,
+            "upstream": [
+              1200
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "reduce",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1201,
+            "func": "infer_reduce"
+          }
+        }
+      },
+      {
+        "deps": [
+          "reduce"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/ml_inference_ap_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "predict_0",
+          "predict_4"
+        ],
+        "id": "aggregate_predict_local_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 2,
+            "upstream": [
+              300,
+              304
+            ]
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "deps": [],
+        "id": "load_model_1",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/infer_model.txt",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 5
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_model_1"
+        ],
+        "id": "setup_model_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 5,
+            "func": "infer_setup_model"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_data_1",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/test_50000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_data_1"
+        ],
+        "id": "partition_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "infer_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1",
+          "setup_model_1"
+        ],
+        "id": "predict_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19726347,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1",
+          "setup_model_1"
+        ],
+        "id": "predict_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19988495,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "predict_1",
+          "predict_5"
+        ],
+        "id": "aggregate_predict_local_1",
+        "kind": {
+          "Aggregate": {
+            "downstream": 3,
+            "upstream": [
+              301,
+              305
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_predict_local_1"
+        ],
+        "id": "rs_aggregate_predict_local_1_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 3,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "deps": [],
+        "id": "load_model_2",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/infer_model.txt",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 5
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_model_2"
+        ],
+        "id": "setup_model_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 5,
+            "func": "infer_setup_model"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_data_2",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/test_50000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_data_2"
+        ],
+        "id": "partition_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "infer_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2",
+          "setup_model_2"
+        ],
+        "id": "predict_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19791884,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2",
+          "setup_model_2"
+        ],
+        "id": "predict_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20054032,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "predict_2",
+          "predict_6"
+        ],
+        "id": "aggregate_predict_local_2",
+        "kind": {
+          "Aggregate": {
+            "downstream": 4,
+            "upstream": [
+              302,
+              306
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_predict_local_2"
+        ],
+        "id": "rs_aggregate_predict_local_2_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 4,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "deps": [],
+        "id": "load_model_3",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/infer_model.txt",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 5
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_model_3"
+        ],
+        "id": "setup_model_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 5,
+            "func": "infer_setup_model"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_data_3",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml/test_50000.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_data_3"
+        ],
+        "id": "partition_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524298,
+            "func": "infer_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3",
+          "setup_model_3"
+        ],
+        "id": "predict_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19857421,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3",
+          "setup_model_3"
+        ],
+        "id": "predict_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20119569,
+            "func": "infer_predict"
+          }
+        }
+      },
+      {
+        "deps": [
+          "predict_3",
+          "predict_7"
+        ],
+        "id": "aggregate_predict_local_3",
+        "kind": {
+          "Aggregate": {
+            "downstream": 5,
+            "upstream": [
+              303,
+              307
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_predict_local_3"
+        ],
+        "id": "rs_aggregate_predict_local_3_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 5,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/ml/infer_model.txt",
+      "source_node": 0
+    },
+    {
+      "path": "TestData/ml/test_50000.csv",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_mnist_ap",
+  "transfer": true
+}

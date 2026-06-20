@@ -59,8 +59,13 @@ PART_BASE = 10       # predict-worker shard slots: PART_BASE .. PART_BASE+W
 OUT_BASE = 300       # predict outputs: infer_predict(i) writes OUT_BASE+i
 AGG_DOWN = 1200      # aggregate_predict gather slot
 
-DEFAULT_MODEL = "TestData/mnist/model.csv"
-DEFAULT_DATA = "TestData/mnist/test.csv"
+# Shared with the intra-node ML_inference benchmark: the frozen integer linear
+# classifier (gen_model.py) and the synthetic test set (ML_training/gen_data.py,
+# "label,f0..f15" per line). The model is keyed to the same per-class prototypes
+# as the data, so argmax(Σ w·x) is a meaningful classifier and the prediction
+# checksum is exact + fan-out-invariant.
+DEFAULT_MODEL = "TestData/ml/infer_model.txt"
+DEFAULT_DATA = "TestData/ml/test_50000.csv"
 
 
 def packed(lo, hi):
