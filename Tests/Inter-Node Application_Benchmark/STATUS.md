@@ -37,8 +37,8 @@ precompiles `guest.wasm`→`.cwasm`). Tokenizers are **aligned** (see fixes).
 |----------|-------|--------|--------------|
 | **WordCount** | ✅ 4 GB @ 60, 15 reps | ✅ 4 GB @ 60 (overlap fix), 15 reps | ✅ 4 GB: WasMem 13.8±0.1 s **beats** Faasm 15.7±0.1 s (1.14×) |
 | **FINRA** | ✅ 5M @ 60 hybrid-shard (58 wkrs), 15 reps | ✅ 5M @ 60 (197 MB, under OOM ceiling), 15 reps | ✅ 5M: WasMem 10.25±0.14 s **beats** Faasm 13.08±0.22 s (1.28×); OOMs at 10M |
-| **ML training** | ✅ 600k @ 60 (new sgd_grad baseline), 15 reps | ✅ 600k @ 60 (1 epoch), 15 reps | ✅ WasMem 0.82±0.04 s **beats** Faasm 1.20±0.03 s (1.47×) |
-| **ML inference** | ✅ 600k @ 60 (new infer_predict baseline), 15 reps | ✅ 600k @ 60, 15 reps | ✅ WasMem 0.68±0.03 s **beats** Faasm 0.99±0.03 s (1.45×) |
+| **ML training** | ✅ 600k–6M @ 60 (new sgd baseline) | ✅ 600k @ 60 (1 epoch), 15 reps | ⚖️ 600k: WasMem 0.85 s **wins** 1.41× → **6M: Faasm wins** (crossover) |
+| **ML inference** | ✅ 600k–6M @ 60 (new infer baseline) | ✅ 600k @ 60, 15 reps | ⚖️ 600k: WasMem 0.69 s **wins** 1.45× → **6M: Faasm wins** (crossover) |
 | **Matrix** | ✅ N4096 @64 (new matblock baseline) | ✅ N4096 @64 (8×8, widened layout), 15 reps | ⚠️ **Faasm 1.19×** (9.67±0.50 vs 8.12±0.22 s) — compute-bound; heap-bound ceiling at N=4096 |
 | **TeraSort** | ✅ 1.2 GiB @ 4 (new WC-shaped baseline), 15 reps | ✅ 1.2 GiB @ 4 (input-shard + MR2 2 GiB), 15 reps | ✅ **1.2 GiB: WasMem 11.2±0.6 s beats Faasm 15.5±0.4 s (1.39×)**; cap ~1.2 GiB, fan N==P=4 |
 
@@ -172,6 +172,38 @@ needs widening the `n` field (caps at 8191). So 4096 is Matrix's max for full-cl
 (`TestData/matrix/{A,B}_4096.bin`). WasMem driver `wasmem/run_matrix.py`; Faasm baseline
 `faasm/run_matrix.py` + `matblock_faaslet.py` reuse the intra `matblock.cwasm` over Redis
 panels/blocks. Guest rebuilt + pushed to workers via `deploy.sh distribute` (not committed).
+
+**ML inference & ML training — head-to-head, @ fanout 60, 4-node (new this session, 2026-06-21)** (`{wasmem,faasm}/results_ml_{inference,training}.csv`):
+
+| Workload | Size | WasMem | Faasm | Winner |
+|----------|------|--------|-------|--------|
+| **ML inference** (MNIST predict fan) | 600k (15 reps) | **692 ± 19 ms** | 1,001 ± 27 ms | **WasMem 1.45×** |
+| | 6M (3 reps) | 3,533 ± 96 ms | 3,092 ± 159 ms | Faasm 1.14× |
+| **ML training** (1-epoch SGD grad fan) | 600k (15 reps) | **846 ± 130 ms** | 1,189 ± 45 ms | **WasMem 1.41×** |
+| | 6M (3 reps) | 5,336 ± 100 ms | 4,748 ± 59 ms | Faasm 1.12× |
+
+Gates match exactly (inference prediction_checksum, training weight_checksum=1232 at any N —
+the SGD step is N-normalized), accuracy 74.3% both. **Both ML workloads CROSS OVER with data
+size:** WasMem wins at 600k, Faasm wins at ≥3M (3M read Faasm ~2×/1.6× — even wider). Two new
+Faasm baselines (`faasm/run_ml_{inference,training}.py` + `{infer,sgd}_faaslet.py` reuse the
+intra `infer_predict.cwasm`/`sgd_grad.cwasm` over Redis frames); WasMem drivers
+`wasmem/run_ml_{inference,training}.py` (homogeneous fan, scales to 60 like WordCount/FINRA).
+
+**Why the crossover (investigated, key finding):** ML has two costs — (1) data-movement
+(broadcast model + gather predictions/gradients), WasMem's SHM/RDMA wins, dominates at small
+data → WasMem wins 600k; (2) **per-record compute** (parse each CSV line + integer forward
+pass/gradient) over MILLIONS of tiny records, dominates at ≥3M → WasMem loses ~2×/sample
+(~28 µs vs Faasm ~13 µs for ~180 int ops). **Two guest parse-optimizations were tried and
+neither helped (≤6%):** stack-array (no per-record `Vec`) and a byte-level parser (no
+per-record `from_utf8`/`str`). So the cost is NOT alloc/parse — it's STRUCTURAL: `for_each_
+stream_record` walks the SHM **page chain per record** (6M Acquire-loads), and the forward
+pass runs in **shared wasm memory** (the same shared-mem tax as Matrix). Faasm avoids both
+(non-shared wasm, contiguous stdin shard). The byte-parse changes (`{ml_inference,ml_training}.rs
+*_parse_into`) are kept as a minor cleanup. **Takeaway:** WasMem's zero-copy SHM win inverts
+into a loss for per-record compute over many small records (ML ≥3M, Matrix) — the opposite
+regime from its data-movement wins (WordCount 4 GB, TeraSort). See [[ml-crossover-compute-bound]].
+(NB: at 6M with both parsing in-wasm — a fair test before reverting Faasm to numpy — Faasm was
+~2.6× faster, since the numpy `make_frame` is a node-0 timed-window bottleneck for Faasm at 6M.)
 
 ## Fixes made this session (with locations)
 
