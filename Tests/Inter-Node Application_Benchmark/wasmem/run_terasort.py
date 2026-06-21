@@ -38,10 +38,12 @@ AGENT_TOML = os.path.join(ROOT, "NodeAgent", "agent.toml")
 RESULT = os.path.join(ROOT, "TestOutput", "terasort_ap_result.txt")
 
 
-def median(xs):
-    xs = sorted(xs)
-    n = len(xs)
-    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+def mean_std(xs):
+    """(mean, sample-stdev); stdev=0 for <2 samples. Headline summary for N reps."""
+    m = sum(xs) / len(xs)
+    if len(xs) < 2:
+        return m, 0.0
+    return m, (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5
 
 
 def gen_sym(records_rel, fanout, nodes, policy, pack_cap, out_path, shard_input=False):
@@ -142,7 +144,7 @@ def main():
     new = not os.path.exists(args.csv)
     fcsv = open(args.csv, "a")
     if new:
-        fcsv.write("size_mb,fanout,nodes_used,makespan_ms_median,total_job_ms_median,"
+        fcsv.write("size_mb,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,"
                    "records,keysum,sorted,expect,success,reps\n")
 
     print(f"[terasort] records={size_mb}MB fanout={fanout} nodes={args.nodes} "
@@ -165,17 +167,18 @@ def main():
         print(f"[terasort] rep {rep}: makespan={makespan}ms total_job={total_job}ms "
               f"per_node={per_node} gate={g} expect={gate} ok={success}")
 
-    med = int(median(ms_list))
-    job_med = int(median(job_list))
+    mean_ms, std_ms = mean_std(ms_list)
+    mean_ms, std_ms = int(mean_ms), round(std_ms, 1)
+    job_mean = int(sum(job_list) / len(job_list))
     gate = expect if expect is not None else gate_seen
     rec, ks, srt = (gate_seen if gate_seen is not None else (None, None, None))
     exp_str = ("|".join(str(x) for x in gate)) if gate is not None else ""
-    fcsv.write(f"{size_mb},{fanout},{args.nodes},{med},{job_med},"
+    fcsv.write(f"{size_mb},{fanout},{args.nodes},{mean_ms},{std_ms},{job_mean},"
                f"{rec},{ks},{srt},{exp_str},{ok_all},{args.reps}\n")
     fcsv.close()
-    print(f"[terasort] median makespan={med}ms total_job={job_med}ms gate={gate_seen} "
+    print(f"[terasort] mean makespan={mean_ms}±{std_ms}ms total_job={job_mean}ms gate={gate_seen} "
           f"success={ok_all} → {args.csv}")
-    print(f"RESULT gate={gate_seen} makespan_ms={med} success={ok_all}")
+    print(f"RESULT gate={gate_seen} makespan_ms={mean_ms} std={std_ms} success={ok_all}")
     sys.exit(0 if ok_all else 1)
 
 

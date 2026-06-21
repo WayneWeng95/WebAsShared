@@ -1,0 +1,1255 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "rr_aggregate_local_1_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 602,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_local_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 603,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_local_3_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 604,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_a_0",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/A_6144.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_b_0",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/B_6144.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 2
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_a_0",
+          "load_b_0"
+        ],
+        "id": "tile_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1120256,
+            "func": "mat_tile"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_0_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1120256,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_0_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9508864,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_1_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 68229120,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_1_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 76617728,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_2_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 135337984,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_2_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 143726592,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_3_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 202446848,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_3_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 210835456,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_4_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 269555712,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_4_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 277944320,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_5_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 336664576,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_5_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 345053184,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_6_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 403773440,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_6_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 412162048,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_7_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 470882304,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_0"
+        ],
+        "id": "block_7_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 479270912,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_local_0",
+          "rr_aggregate_local_1_from_1",
+          "rr_aggregate_local_2_from_2",
+          "rr_aggregate_local_3_from_3"
+        ],
+        "id": "aggregate",
+        "kind": {
+          "Aggregate": {
+            "downstream": 600,
+            "upstream": [
+              2,
+              602,
+              603,
+              604
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 601,
+            "upstream": [
+              600
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "assemble",
+        "kind": {
+          "WasmVoid": {
+            "arg": 601,
+            "func": "mat_assemble"
+          }
+        }
+      },
+      {
+        "deps": [
+          "assemble"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/matrix_ap_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "block_0_0",
+          "block_0_4",
+          "block_1_0",
+          "block_1_4",
+          "block_2_0",
+          "block_2_4",
+          "block_3_0",
+          "block_3_4",
+          "block_4_0",
+          "block_4_4",
+          "block_5_0",
+          "block_5_4",
+          "block_6_0",
+          "block_6_4",
+          "block_7_0",
+          "block_7_4"
+        ],
+        "id": "aggregate_local_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 2,
+            "upstream": [
+              100,
+              104,
+              108,
+              112,
+              116,
+              120,
+              124,
+              128,
+              132,
+              136,
+              140,
+              144,
+              148,
+              152,
+              156,
+              160
+            ]
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "deps": [],
+        "id": "load_a_1",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/A_6144.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_b_1",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/B_6144.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 2
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_a_1",
+          "load_b_1"
+        ],
+        "id": "tile_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1120256,
+            "func": "mat_tile"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_0_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 3217408,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_0_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11606016,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_1_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 70326272,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_1_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 78714880,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_2_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 137435136,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_2_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 145823744,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_3_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 204544000,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_3_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 212932608,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_4_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 271652864,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_4_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 280041472,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_5_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 338761728,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_5_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 347150336,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_6_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 405870592,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_6_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 414259200,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_7_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 472979456,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_1"
+        ],
+        "id": "block_7_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 481368064,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "block_0_1",
+          "block_0_5",
+          "block_1_1",
+          "block_1_5",
+          "block_2_1",
+          "block_2_5",
+          "block_3_1",
+          "block_3_5",
+          "block_4_1",
+          "block_4_5",
+          "block_5_1",
+          "block_5_5",
+          "block_6_1",
+          "block_6_5",
+          "block_7_1",
+          "block_7_5"
+        ],
+        "id": "aggregate_local_1",
+        "kind": {
+          "Aggregate": {
+            "downstream": 3,
+            "upstream": [
+              101,
+              105,
+              109,
+              113,
+              117,
+              121,
+              125,
+              129,
+              133,
+              137,
+              141,
+              145,
+              149,
+              153,
+              157,
+              161
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_local_1"
+        ],
+        "id": "rs_aggregate_local_1_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 3,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "deps": [],
+        "id": "load_a_2",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/A_6144.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_b_2",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/B_6144.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 2
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_a_2",
+          "load_b_2"
+        ],
+        "id": "tile_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1120256,
+            "func": "mat_tile"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_0_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 5314560,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_0_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13703168,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_1_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 72423424,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_1_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 80812032,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_2_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 139532288,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_2_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 147920896,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_3_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 206641152,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_3_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 215029760,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_4_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 273750016,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_4_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 282138624,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_5_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 340858880,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_5_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 349247488,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_6_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 407967744,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_6_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 416356352,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_7_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 475076608,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_2"
+        ],
+        "id": "block_7_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 483465216,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "block_0_2",
+          "block_0_6",
+          "block_1_2",
+          "block_1_6",
+          "block_2_2",
+          "block_2_6",
+          "block_3_2",
+          "block_3_6",
+          "block_4_2",
+          "block_4_6",
+          "block_5_2",
+          "block_5_6",
+          "block_6_2",
+          "block_6_6",
+          "block_7_2",
+          "block_7_6"
+        ],
+        "id": "aggregate_local_2",
+        "kind": {
+          "Aggregate": {
+            "downstream": 4,
+            "upstream": [
+              102,
+              106,
+              110,
+              114,
+              118,
+              122,
+              126,
+              130,
+              134,
+              138,
+              142,
+              146,
+              150,
+              154,
+              158,
+              162
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_local_2"
+        ],
+        "id": "rs_aggregate_local_2_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 4,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "deps": [],
+        "id": "load_a_3",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/A_6144.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_b_3",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/B_6144.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 2
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_a_3",
+          "load_b_3"
+        ],
+        "id": "tile_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1120256,
+            "func": "mat_tile"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_0_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7411712,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_0_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 15800320,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_1_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 74520576,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_1_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 82909184,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_2_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 141629440,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_2_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 150018048,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_3_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 208738304,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_3_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 217126912,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_4_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 275847168,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_4_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 284235776,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_5_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 342956032,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_5_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 351344640,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_6_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 410064896,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_6_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 418453504,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_7_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 477173760,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "tile_3"
+        ],
+        "id": "block_7_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 485562368,
+            "func": "mat_block"
+          }
+        }
+      },
+      {
+        "deps": [
+          "block_0_3",
+          "block_0_7",
+          "block_1_3",
+          "block_1_7",
+          "block_2_3",
+          "block_2_7",
+          "block_3_3",
+          "block_3_7",
+          "block_4_3",
+          "block_4_7",
+          "block_5_3",
+          "block_5_7",
+          "block_6_3",
+          "block_6_7",
+          "block_7_3",
+          "block_7_7"
+        ],
+        "id": "aggregate_local_3",
+        "kind": {
+          "Aggregate": {
+            "downstream": 5,
+            "upstream": [
+              103,
+              107,
+              111,
+              115,
+              119,
+              123,
+              127,
+              131,
+              135,
+              139,
+              143,
+              147,
+              151,
+              155,
+              159,
+              163
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_local_3"
+        ],
+        "id": "rs_aggregate_local_3_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 5,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/matrix/A_6144.bin",
+      "source_node": 0
+    },
+    {
+      "path": "TestData/matrix/B_6144.bin",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_matrix_ap",
+  "transfer": true
+}

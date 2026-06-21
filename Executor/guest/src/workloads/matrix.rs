@@ -31,10 +31,10 @@
 // The `Func` DAG node passes a single u32, so every parameter is packed into
 // `arg` (the same convention word_count uses for base|count):
 //   N : bits 0..12   (≤ 8191)
-//   c : bits 13..15  (≤ 7, block-cols)
-//   r : bits 16..18  (≤ 7, block-rows)
-//   j : bits 19..23  (≤ 31, this worker's block-col)         [mat_block only]
-//   i : bits 24..28  (≤ 31, this worker's block-row)         [mat_block only]
+//   c : bits 13..16  (≤ 15, block-cols)
+//   r : bits 17..20  (≤ 15, block-rows)
+//   j : bits 21..25  (≤ 31, this worker's block-col)         [mat_block only]
+//   i : bits 26..30  (≤ 31, this worker's block-row)         [mat_block only]
 // mat_assemble's arg is just the aggregated stream slot.
 //
 // C-block record format (mat_block → mat_assemble):
@@ -94,10 +94,14 @@ fn bytes_to_f64(bytes: &[u8]) -> Vec<f64> {
 }
 
 /// Unpack the packed `(r, c, N)` triple shared by `mat_tile` and `mat_block`.
+/// Layout: n[0..12] (13b, N<8192) | c[13..16] (4b) | r[17..20] (4b); mat_block
+/// also packs j[21..25] (5b) | i[26..30] (5b). r,c are 4 bits (was 3) so grids up
+/// to 15×15 fit — needed for the 8×8 grid (64 blocks). Keep in sync with
+/// gen_matrix_ap_dag.py.
 fn unpack_rcn(arg: u32) -> (usize, usize, usize) {
     let n = (arg & 0x1FFF) as usize;
-    let c = ((arg >> 13) & 0x7) as usize;
-    let r = ((arg >> 16) & 0x7) as usize;
+    let c = ((arg >> 13) & 0xF) as usize;
+    let r = ((arg >> 17) & 0xF) as usize;
     (r, c, n)
 }
 
@@ -147,8 +151,8 @@ pub extern "C" fn mat_tile(arg: u32) {
 #[no_mangle]
 pub extern "C" fn mat_block(arg: u32) {
     let (r, c, n) = unpack_rcn(arg);
-    let j = ((arg >> 19) & 0x1F) as usize;
-    let i = ((arg >> 24) & 0x1F) as usize;
+    let j = ((arg >> 21) & 0x1F) as usize;
+    let i = ((arg >> 26) & 0x1F) as usize;
     if r == 0 || c == 0 || n == 0 {
         return;
     }

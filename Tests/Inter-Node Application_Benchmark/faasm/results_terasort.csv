@@ -1,3 +1,2 @@
-size_mb,workers,nodes_used,makespan_ms_median,total_job_ms_median,records,keysum,sorted,expect,success,reps
-32,1,1,1808,1688,335544,216366291,1,335544|216366291|1,True,1
-32,4,4,1323,3693,335544,216366291,1,335544|216366291|1,True,3
+size_mb,workers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,records,keysum,sorted,expect,success,reps
+1229,4,4,15496,351.5,51111,12886999,8312165245,1,12886999|8312165245|1,True,15

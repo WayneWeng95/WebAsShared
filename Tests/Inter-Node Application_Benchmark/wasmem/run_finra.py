@@ -31,10 +31,12 @@ AGENT_TOML = os.path.join(ROOT, "NodeAgent", "agent.toml")
 RESULT = os.path.join(ROOT, "TestOutput", "finra_ap_result.txt")
 
 
-def median(xs):
-    xs = sorted(xs)
-    n = len(xs)
-    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+def mean_std(xs):
+    """(mean, sample-stdev); stdev=0 for <2 samples. Headline summary for N reps."""
+    m = sum(xs) / len(xs)
+    if len(xs) < 2:
+        return m, 0.0
+    return m, (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5
 
 
 def gen_sym(trades_rel, fanout, nodes, policy, pack_cap, out_path):
@@ -84,7 +86,7 @@ def read_violations():
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--trades", default="TestData/finra/trades_10000000.csv",
+    ap.add_argument("--trades", default="TestData/finra/trades_5000000.csv",
                     help="trades path RELATIVE to repo root (RDMA-staged from node 0)")
     ap.add_argument("--fanout", type=int, default=60, help="audit-rule fan width (~F workers)")
     ap.add_argument("--nodes", type=int, default=4)
@@ -115,7 +117,7 @@ def main():
     new = not os.path.exists(args.csv)
     fcsv = open(args.csv, "a")
     if new:
-        fcsv.write("trades,fanout,nodes_used,makespan_ms_median,total_job_ms_median,"
+        fcsv.write("trades,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,"
                    "violations,expect,success,reps\n")
 
     print(f"[finra] trades={n_trades} ({size_mb}MB) fanout={args.fanout} nodes={args.nodes} "
@@ -133,15 +135,16 @@ def main():
         print(f"[finra] rep {rep}: makespan={makespan}ms total_job={total_job}ms "
               f"per_node={per_node} violations={viol} gate={gate} ok={success}")
 
-    med = int(median(ms_list))
-    job_med = int(median(job_list))
+    mean_ms, std_ms = mean_std(ms_list)
+    mean_ms, std_ms = int(mean_ms), round(std_ms, 1)
+    job_mean = int(sum(job_list) / len(job_list))
     gate = args.expect if args.expect is not None else viol_seen
-    fcsv.write(f"{n_trades},{args.fanout},{args.nodes},{med},{job_med},"
+    fcsv.write(f"{n_trades},{args.fanout},{args.nodes},{mean_ms},{std_ms},{job_mean},"
                f"{viol_seen},{gate},{ok_all},{args.reps}\n")
     fcsv.close()
-    print(f"[finra] median makespan={med}ms total_job={job_med}ms violations={viol_seen} "
+    print(f"[finra] mean makespan={mean_ms}±{std_ms}ms total_job={job_mean}ms violations={viol_seen} "
           f"success={ok_all} → {args.csv}")
-    print(f"RESULT viol={viol_seen} makespan_ms={med} success={ok_all}")
+    print(f"RESULT viol={viol_seen} makespan_ms={mean_ms} std={std_ms} success={ok_all}")
     sys.exit(0 if ok_all else 1)
 
 

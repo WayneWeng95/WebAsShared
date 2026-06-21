@@ -1,0 +1,397 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_matrix_ap",
+  "log_level": "info",
+  "total_nodes": 4,
+  "transfer": true,
+  "placement_policy": "balanced",
+  "nodes": [
+    {
+      "id": "load_a",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/matrix/A_1024.bin",
+          "slot": 0,
+          "binary": true,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "load_b",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/matrix/B_1024.bin",
+          "slot": 2,
+          "binary": true,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "tile",
+      "placement": "all",
+      "deps": [
+        "load_a",
+        "load_b"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_tile",
+          "arg": 10,
+          "wasm_arg": 295936
+        }
+      }
+    },
+    {
+      "id": "block_0_0",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 100,
+          "wasm_arg": 295936
+        }
+      },
+      "node_id": 0,
+      "output_slot": 100
+    },
+    {
+      "id": "block_0_1",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 101,
+          "wasm_arg": 820224
+        }
+      },
+      "node_id": 1,
+      "output_slot": 101
+    },
+    {
+      "id": "block_0_2",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 102,
+          "wasm_arg": 1344512
+        }
+      },
+      "node_id": 2,
+      "output_slot": 102
+    },
+    {
+      "id": "block_0_3",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 103,
+          "wasm_arg": 1868800
+        }
+      },
+      "node_id": 3,
+      "output_slot": 103
+    },
+    {
+      "id": "block_1_0",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 104,
+          "wasm_arg": 17073152
+        }
+      },
+      "node_id": 0,
+      "output_slot": 104
+    },
+    {
+      "id": "block_1_1",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 105,
+          "wasm_arg": 17597440
+        }
+      },
+      "node_id": 1,
+      "output_slot": 105
+    },
+    {
+      "id": "block_1_2",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 106,
+          "wasm_arg": 18121728
+        }
+      },
+      "node_id": 2,
+      "output_slot": 106
+    },
+    {
+      "id": "block_1_3",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 107,
+          "wasm_arg": 18646016
+        }
+      },
+      "node_id": 3,
+      "output_slot": 107
+    },
+    {
+      "id": "block_2_0",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 108,
+          "wasm_arg": 33850368
+        }
+      },
+      "node_id": 0,
+      "output_slot": 108
+    },
+    {
+      "id": "block_2_1",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 109,
+          "wasm_arg": 34374656
+        }
+      },
+      "node_id": 1,
+      "output_slot": 109
+    },
+    {
+      "id": "block_2_2",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 110,
+          "wasm_arg": 34898944
+        }
+      },
+      "node_id": 2,
+      "output_slot": 110
+    },
+    {
+      "id": "block_2_3",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 111,
+          "wasm_arg": 35423232
+        }
+      },
+      "node_id": 3,
+      "output_slot": 111
+    },
+    {
+      "id": "block_3_0",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 112,
+          "wasm_arg": 50627584
+        }
+      },
+      "node_id": 0,
+      "output_slot": 112
+    },
+    {
+      "id": "block_3_1",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 113,
+          "wasm_arg": 51151872
+        }
+      },
+      "node_id": 1,
+      "output_slot": 113
+    },
+    {
+      "id": "block_3_2",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 114,
+          "wasm_arg": 51676160
+        }
+      },
+      "node_id": 2,
+      "output_slot": 114
+    },
+    {
+      "id": "block_3_3",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 115,
+          "wasm_arg": 52200448
+        }
+      },
+      "node_id": 3,
+      "output_slot": 115
+    },
+    {
+      "id": "aggregate",
+      "deps": [
+        "aggregate_local_0",
+        "aggregate_local_1",
+        "aggregate_local_2",
+        "aggregate_local_3"
+      ],
+      "kind": {
+        "Aggregate": {
+          "downstream": 600,
+          "upstream_nodes": [
+            "aggregate_local_0",
+            "aggregate_local_1",
+            "aggregate_local_2",
+            "aggregate_local_3"
+          ]
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "aggregate_global",
+      "deps": [
+        "aggregate"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "assemble",
+      "deps": [
+        "aggregate_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_assemble"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "deps": [
+        "assemble"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/matrix_ap_result.txt"
+        }
+      }
+    },
+    {
+      "id": "aggregate_local_0",
+      "node_id": 0,
+      "deps": [
+        "block_0_0",
+        "block_1_0",
+        "block_2_0",
+        "block_3_0"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_1",
+      "node_id": 1,
+      "deps": [
+        "block_0_1",
+        "block_1_1",
+        "block_2_1",
+        "block_3_1"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_2",
+      "node_id": 2,
+      "deps": [
+        "block_0_2",
+        "block_1_2",
+        "block_2_2",
+        "block_3_2"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_3",
+      "node_id": 3,
+      "deps": [
+        "block_0_3",
+        "block_1_3",
+        "block_2_3",
+        "block_3_3"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    }
+  ],
+  "converge_on_coordinator": true
+}

@@ -107,10 +107,12 @@ def write_result(path, merged, size_mb, mappers, nodes_used):
     return occ
 
 
-def median(xs):
-    xs = sorted(xs)
-    n = len(xs)
-    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+def mean_std(xs):
+    """(mean, sample-stdev); stdev=0 for <2 samples. Headline summary for N reps."""
+    m = sum(xs) / len(xs)
+    if len(xs) < 2:
+        return m, 0.0
+    return m, (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5
 
 
 def main():
@@ -120,7 +122,7 @@ def main():
     ap.add_argument("--nodes", type=int, default=4, help="spread map Faaslets over the first K nodes")
     ap.add_argument("--reps", type=int, default=1)
     ap.add_argument("--expect", type=int, default=None, help="gate occurrences against this count")
-    ap.add_argument("--csv", default=os.path.join(HERE, "results.csv"))
+    ap.add_argument("--csv", default=os.path.join(HERE, "results_wordcount.csv"))
     ap.add_argument("--out", default=os.path.join(ROOT, "TestOutput", "wc_faasm_result.txt"),
                     help="where node 0 saves the merged result (in the timed window)")
     args = ap.parse_args()
@@ -149,7 +151,7 @@ def main():
     new = not os.path.exists(args.csv)
     fcsv = open(args.csv, "a")
     if new:
-        fcsv.write("size_mb,mappers,nodes_used,makespan_ms_median,total_job_ms_median,"
+        fcsv.write("size_mb,mappers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,"
                    "occurrences,expect,success,reps\n")
 
     print(f"[wc] corpus={size_mb}MB mappers={N} nodes={[*range(len(nodes))]} reps={args.reps}")
@@ -197,16 +199,17 @@ def main():
               f"occurrences={occ} gate={gate} ok={success}")
         # Redis is flushed at the top of each rep, so no per-rep key cleanup is needed.
 
-    med = int(median(ms_list))
-    job_med = int(median(job_list))
+    mean_ms, std_ms = mean_std(ms_list)
+    mean_ms, std_ms = int(mean_ms), round(std_ms, 1)
+    job_mean = int(sum(job_list) / len(job_list))
     gate = args.expect if args.expect is not None else occ_seen
     nodes_used = min(N, len(nodes))
-    fcsv.write(f"{size_mb},{N},{nodes_used},{med},{job_med},{occ_seen},{gate},{ok_all},{args.reps}\n")
+    fcsv.write(f"{size_mb},{N},{nodes_used},{mean_ms},{std_ms},{job_mean},{occ_seen},{gate},{ok_all},{args.reps}\n")
     fcsv.close()
-    print(f"[wc] median makespan={med}ms total_job={job_med}ms occurrences={occ_seen} "
+    print(f"[wc] mean makespan={mean_ms}±{std_ms}ms total_job={job_mean}ms occurrences={occ_seen} "
           f"success={ok_all} → {args.csv}")
     print(f"[wc] result saved → {args.out}")
-    print(f"RESULT occ={occ_seen} makespan_ms={med} success={ok_all}")
+    print(f"RESULT occ={occ_seen} makespan_ms={mean_ms} std={std_ms} success={ok_all}")
     sys.exit(0 if ok_all else 1)
 
 

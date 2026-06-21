@@ -1,0 +1,2 @@
+matrix_n,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,gflops,checksum,expect,success,reps
+4096,64,4,9674,496.1,34923,14.207,1391095867672,1391095867672,True,15

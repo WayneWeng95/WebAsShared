@@ -183,8 +183,8 @@ for Faasm — plus repointing every `REDIS_HOST` at the dedicated Redis box.
 Carry over the intra-node shared columns so figures overlay, and **add the
 cross-node metrics** the Scheduling-Policy harness already emits:
 
-- **makespan_ms** — end-to-end latency = coordinator "total wall time" (median of
-  ≥5 reps). The headline latency.
+- **makespan_ms** — end-to-end latency = coordinator "total wall time" (**mean ± sample-std
+  over the reps**, 15 for the headline configs; switched from median 2026-06-21). The headline latency.
 - **total_exec_ms** — Σ per-node busy time over **working** nodes (idle nodes
   excluded), the resource-cost axis.
 - **throughput** — workload unit / (makespan/1000): MB/s (WordCount/ML-train),

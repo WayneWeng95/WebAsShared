@@ -33,15 +33,27 @@ const INF_MODEL_SLOT: u32 = 1901;       // broadcast model (distinct from SGD's 
 const INF_PART_BASE: u32 = 10;
 
 /// Parse a "label,f0,f1,..." data line. `None` for blank / header / non-data.
-fn inf_parse(rec: &[u8]) -> Option<(i64, Vec<i64>)> {
+/// Max feature columns parsed into the reusable stack buffer (model F is 16).
+const MAX_FEATURES: usize = 64;
+
+/// Parse a CSV record into `feats` (no heap alloc), returning (label, n_features).
+/// Reuses a caller-owned buffer — the old `Vec<i64>`-per-record version allocated
+/// once PER SAMPLE (~6M allocs at 6M samples), which dominated infer_predict; this
+/// fills a stack array instead so the hot loop is allocation-free.
+fn inf_parse_into(rec: &[u8], feats: &mut [i64]) -> Option<(i64, usize)> {
     let s = core::str::from_utf8(rec).unwrap_or("").trim();
     if s.is_empty() || s.starts_with("label") || s.starts_with("model")
         || s.starts_with("pred") { return None; }
     let mut it = s.split(',');
     let label: i64 = it.next()?.parse().ok()?;
-    let feats: Vec<i64> = it.map(|v| v.parse().unwrap_or(0)).collect();
-    if feats.is_empty() { return None; }
-    Some((label, feats))
+    let mut nf = 0usize;
+    for v in it {
+        if nf >= feats.len() { return None; }
+        feats[nf] = v.parse().unwrap_or(0);
+        nf += 1;
+    }
+    if nf == 0 { return None; }
+    Some((label, nf))
 }
 
 /// Read the broadcast model record: (classes, features, weights).
@@ -91,9 +103,12 @@ pub extern "C" fn infer_predict(arg: u32) {
     let mut correct: i64 = 0;
     let mut total: i64 = 0;
     let mut predsum: i64 = 0;
-    for (_o, rec) in &ShmApi::read_all_stream_records(data_slot) {
-        let (label, feats) = match inf_parse(rec) { Some(s) => s, None => continue };
-        if feats.len() != f { continue; }
+    let mut feats = [0i64; MAX_FEATURES];   // reused across records — no per-sample alloc
+    // STREAM the shard one record at a time (no read_all materialization of the
+    // whole shard) and parse into the stack buffer — the alloc-free hot path.
+    ShmApi::for_each_stream_record(data_slot, |_o, rec| {
+        let (label, nf) = match inf_parse_into(rec, &mut feats) { Some(s) => s, None => return };
+        if nf != f { return; }
         let mut best = 0usize;
         let mut best_val = i64::MIN;
         for cls in 0..c {
@@ -104,7 +119,7 @@ pub extern "C" fn infer_predict(arg: u32) {
         total += 1;
         predsum += best as i64;
         if best as i64 == label { correct += 1; }
-    }
+    });
     ShmApi::append_stream_data(out_slot,
         alloc::format!("pred,{},{},{}", correct, total, predsum).as_bytes());
 }

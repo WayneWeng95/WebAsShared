@@ -1,6 +1,2 @@
-trades,nodes_used,makespan_ms_median,violations,expect,success,reps
-10000,4,484,6183,6183,True,3
-100000,4,624,49763,49763,True,3
-1000000,4,2967,456574,456574,True,3
-10000000,4,23858,4529641,4529641,True,3
-5000000,4,12165,2271415,2271415,True,3
+trades,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,violations,expect,success,reps
+5000000,58,4,13079,224.4,2271415,2271415,True,15

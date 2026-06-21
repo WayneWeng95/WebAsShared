@@ -1,0 +1,205 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_matrix_ap",
+  "log_level": "info",
+  "total_nodes": 4,
+  "transfer": true,
+  "placement_policy": "balanced",
+  "nodes": [
+    {
+      "id": "load_a",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/matrix/A_2048.bin",
+          "slot": 0,
+          "binary": true,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "load_b",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/matrix/B_2048.bin",
+          "slot": 2,
+          "binary": true,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "tile",
+      "placement": "all",
+      "deps": [
+        "load_a",
+        "load_b"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_tile",
+          "arg": 10,
+          "wasm_arg": 149504
+        }
+      }
+    },
+    {
+      "id": "block_0_0",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 100,
+          "wasm_arg": 149504
+        }
+      },
+      "node_id": 0,
+      "output_slot": 100
+    },
+    {
+      "id": "block_0_1",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 101,
+          "wasm_arg": 673792
+        }
+      },
+      "node_id": 1,
+      "output_slot": 101
+    },
+    {
+      "id": "block_1_0",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 102,
+          "wasm_arg": 16926720
+        }
+      },
+      "node_id": 2,
+      "output_slot": 102
+    },
+    {
+      "id": "block_1_1",
+      "deps": [
+        "tile"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_block",
+          "arg": 103,
+          "wasm_arg": 17451008
+        }
+      },
+      "node_id": 3,
+      "output_slot": 103
+    },
+    {
+      "id": "aggregate",
+      "deps": [
+        "aggregate_local_0",
+        "aggregate_local_1",
+        "aggregate_local_2",
+        "aggregate_local_3"
+      ],
+      "kind": {
+        "Aggregate": {
+          "downstream": 600,
+          "upstream_nodes": [
+            "aggregate_local_0",
+            "aggregate_local_1",
+            "aggregate_local_2",
+            "aggregate_local_3"
+          ]
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "aggregate_global",
+      "deps": [
+        "aggregate"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "assemble",
+      "deps": [
+        "aggregate_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "mat_assemble"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "deps": [
+        "assemble"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/matrix_ap_result.txt"
+        }
+      }
+    },
+    {
+      "id": "aggregate_local_0",
+      "node_id": 0,
+      "deps": [
+        "block_0_0"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_1",
+      "node_id": 1,
+      "deps": [
+        "block_0_1"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_2",
+      "node_id": 2,
+      "deps": [
+        "block_1_0"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_3",
+      "node_id": 3,
+      "deps": [
+        "block_1_1"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    }
+  ],
+  "converge_on_coordinator": true
+}

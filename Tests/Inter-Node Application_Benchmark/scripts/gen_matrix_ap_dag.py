@@ -74,14 +74,16 @@ def build_dag(workers, n, a_path=None, b_path=None):
         sys.exit(f"[gen_matrix] {workers} not factorable into a balanced grid")
     if n % R != 0 or n % C != 0:
         sys.exit(f"[gen_matrix] N={n} not divisible by grid {R}x{C}")
-    if not (n < (1 << 13) and R < 8 and C < 8):
-        sys.exit("[gen_matrix] params exceed the packed-arg layout (N<8192, r,c<8)")
+    if not (n < (1 << 13) and R < 16 and C < 16):
+        sys.exit("[gen_matrix] params exceed the packed-arg layout (N<8192, r,c<16)")
     a_path = a_path or f"TestData/matrix/A_{n}.bin"
     b_path = b_path or f"TestData/matrix/B_{n}.bin"
 
     # Packed (r, c, N) triple shared by mat_tile and mat_block:
-    #   N: bits 0..12, c: 13..15, r: 16..18  (+ j: 19..23, i: 24..28 for mat_block)
-    rcn = (R << 16) | (C << 13) | n
+    #   N: bits 0..12, c: 13..16 (4b), r: 17..20 (4b)  (+ j: 21..25, i: 26..30 for mat_block)
+    # r,c are 4 bits (was 3) so grids up to 15×15 fit — needed for the 8×8 grid (64
+    # blocks). Keep in sync with Executor/guest/src/workloads/matrix.rs::unpack_rcn.
+    rcn = (R << 17) | (C << 13) | n
 
     # IMPORTANT — packed args go in `wasm_arg`, NOT `arg`.
     # rcn and the per-block (i<<24)|(j<<19)|rcn are HUGE integers (r<<16 ≥ 65536).
@@ -113,7 +115,7 @@ def build_dag(workers, n, a_path=None, b_path=None):
             c_slots.append(out_slot)
             nodes.append({"id": f"block_{i}_{j}", "placement": "all", "deps": ["tile"],
                           "kind": {"Func": {"func": "mat_block", "arg": out_slot,
-                                            "wasm_arg": (i << 24) | (j << 19) | rcn}}})
+                                            "wasm_arg": (i << 26) | (j << 21) | rcn}}})
 
     # AGGREGATOR: upstream declares each block's output slot (C_BASE+i*c+j) so
     # gen_variants/the partitioner know where the guest writes; downstream is the

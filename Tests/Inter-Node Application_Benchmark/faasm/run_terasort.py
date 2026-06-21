@@ -119,7 +119,7 @@ def main():
     new = not os.path.exists(args.csv)
     fcsv = open(args.csv, "a")
     if new:
-        fcsv.write("size_mb,workers,nodes_used,makespan_ms_median,total_job_ms_median,"
+        fcsv.write("size_mb,workers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,"
                    "records,keysum,sorted,expect,success,reps\n")
 
     print(f"[terasort] records={size_mb}MB workers={N} nodes={len(nodes)} reps={args.reps}")
@@ -175,18 +175,19 @@ def main():
         print(f"[terasort] rep {rep}: makespan={makespan}ms total_job={job_ms}ms "
               f"gate={g} expect={gate} ok={success}")
 
-    med = int(fl.median(ms_list))
-    job_med = int(fl.median(job_list))
+    mean_ms, std_ms = fl.mean_std(ms_list)
+    mean_ms, std_ms = int(mean_ms), round(std_ms, 1)
+    job_mean = int(sum(job_list) / len(job_list))
     gate = expect if expect is not None else gate_seen
     rec, ks, srt = gate_seen if gate_seen is not None else (None, None, None)
     exp_str = ("|".join(str(x) for x in gate)) if gate is not None else ""
-    fcsv.write(f"{size_mb},{N},{len(nodes)},{med},{job_med},"
+    fcsv.write(f"{size_mb},{N},{len(nodes)},{mean_ms},{std_ms},{job_mean},"
                f"{rec},{ks},{srt},{exp_str},{ok_all},{args.reps}\n")
     fcsv.close()
-    print(f"[terasort] median makespan={med}ms total_job={job_med}ms gate={gate_seen} "
+    print(f"[terasort] mean makespan={mean_ms}±{std_ms}ms total_job={job_mean}ms gate={gate_seen} "
           f"success={ok_all} → {args.csv}")
     print(f"[terasort] result saved → {RESULT}")
-    print(f"RESULT gate={gate_seen} makespan_ms={med} success={ok_all}")
+    print(f"RESULT gate={gate_seen} makespan_ms={mean_ms} std={std_ms} success={ok_all}")
     sys.exit(0 if ok_all else 1)
 
 

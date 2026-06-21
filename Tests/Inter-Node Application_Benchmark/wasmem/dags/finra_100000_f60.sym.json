@@ -1,0 +1,1113 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_finra_ap",
+  "log_level": "info",
+  "total_nodes": 4,
+  "transfer": true,
+  "placement_policy": "balanced",
+  "nodes": [
+    {
+      "id": "load_trades",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/finra/trades_100000.csv",
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "fetch_private",
+      "placement": "all",
+      "deps": [
+        "load_trades"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_fetch_private",
+          "arg": 0,
+          "arg2": 5
+        }
+      }
+    },
+    {
+      "id": "fetch_public",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Func": {
+          "func": "finra_fetch_public",
+          "arg": 6,
+          "wasm_arg": 0
+        }
+      }
+    },
+    {
+      "id": "aggregate_inputs",
+      "placement": "all",
+      "deps": [
+        "fetch_private",
+        "fetch_public"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            5,
+            6
+          ],
+          "downstream": 200
+        }
+      }
+    },
+    {
+      "id": "aggregate_rules",
+      "deps": [
+        "aggregate_rules_local_0",
+        "aggregate_rules_local_1",
+        "aggregate_rules_local_2",
+        "aggregate_rules_local_3"
+      ],
+      "kind": {
+        "Aggregate": {
+          "downstream": 300,
+          "upstream_nodes": [
+            "aggregate_rules_local_0",
+            "aggregate_rules_local_1",
+            "aggregate_rules_local_2",
+            "aggregate_rules_local_3"
+          ]
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "aggregate_global",
+      "deps": [
+        "aggregate_rules"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "merge",
+      "deps": [
+        "aggregate_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "finra_merge_results"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "deps": [
+        "merge"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/finra_ap_result.txt"
+        }
+      }
+    },
+    {
+      "id": "rule_2",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 12,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 2
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_3",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 13,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 3
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_4",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 14,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 4
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_0_s0",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 400,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1536
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_0_s1",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 401,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1544
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_0_s2",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 402,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1552
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_0_s3",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 403,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1560
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_0_s4",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 404,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1568
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_0_s5",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 405,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1576
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_0_s6",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 406,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1584
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_0_s7",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 407,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1592
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_0_s8",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 408,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1600
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_0_s9",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 409,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1608
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_0_s10",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 410,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1616
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_0_s11",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 411,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1624
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_1_s0",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 416,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1537
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_1_s1",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 417,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1545
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_1_s2",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 418,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1553
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_1_s3",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 419,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1561
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_1_s4",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 420,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1569
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_1_s5",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 421,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1577
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_1_s6",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 422,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1585
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_1_s7",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 423,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1593
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_1_s8",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 424,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1601
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_1_s9",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 425,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1609
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_1_s10",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 426,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1617
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_1_s11",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 427,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1625
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_5_s0",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 480,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1413
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_5_s1",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 481,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1421
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_5_s2",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 482,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1429
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_5_s3",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 483,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1437
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_5_s4",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 484,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1445
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_5_s5",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 485,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1453
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_5_s6",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 486,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1461
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_5_s7",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 487,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1469
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_5_s8",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 488,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1477
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_5_s9",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 489,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1485
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_5_s10",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 490,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1493
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_6_s0",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 496,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1414
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_6_s1",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 497,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1422
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_6_s2",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 498,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1430
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_6_s3",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 499,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1438
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_6_s4",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 500,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1446
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_6_s5",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 501,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1454
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_6_s6",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 502,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1462
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_6_s7",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 503,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1470
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_6_s8",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 504,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1478
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_6_s9",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 505,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1486
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_6_s10",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 506,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1494
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_7_s0",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 512,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1415
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_7_s1",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 513,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1423
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_7_s2",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 514,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1431
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_7_s3",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 515,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1439
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_7_s4",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 516,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1447
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_7_s5",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 517,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1455
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_7_s6",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 518,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1463
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "rule_7_s7",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 519,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1471
+        }
+      },
+      "node_id": 0
+    },
+    {
+      "id": "rule_7_s8",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 520,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1479
+        }
+      },
+      "node_id": 1
+    },
+    {
+      "id": "rule_7_s9",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 521,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1487
+        }
+      },
+      "node_id": 2
+    },
+    {
+      "id": "rule_7_s10",
+      "deps": [
+        "aggregate_inputs"
+      ],
+      "output_slot": 522,
+      "kind": {
+        "Func": {
+          "func": "finra_audit_rule",
+          "arg": 200,
+          "wasm_arg": 1495
+        }
+      },
+      "node_id": 3
+    },
+    {
+      "id": "aggregate_rules_local_0",
+      "node_id": 0,
+      "deps": [
+        "rule_2",
+        "rule_0_s1",
+        "rule_0_s5",
+        "rule_0_s9",
+        "rule_1_s1",
+        "rule_1_s5",
+        "rule_1_s9",
+        "rule_5_s1",
+        "rule_5_s5",
+        "rule_5_s9",
+        "rule_6_s2",
+        "rule_6_s6",
+        "rule_6_s10",
+        "rule_7_s3",
+        "rule_7_s7"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_rules_local_1",
+      "node_id": 1,
+      "deps": [
+        "rule_3",
+        "rule_0_s2",
+        "rule_0_s6",
+        "rule_0_s10",
+        "rule_1_s2",
+        "rule_1_s6",
+        "rule_1_s10",
+        "rule_5_s2",
+        "rule_5_s6",
+        "rule_5_s10",
+        "rule_6_s3",
+        "rule_6_s7",
+        "rule_7_s0",
+        "rule_7_s4",
+        "rule_7_s8"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_rules_local_2",
+      "node_id": 2,
+      "deps": [
+        "rule_4",
+        "rule_0_s3",
+        "rule_0_s7",
+        "rule_0_s11",
+        "rule_1_s3",
+        "rule_1_s7",
+        "rule_1_s11",
+        "rule_5_s3",
+        "rule_5_s7",
+        "rule_6_s0",
+        "rule_6_s4",
+        "rule_6_s8",
+        "rule_7_s1",
+        "rule_7_s5",
+        "rule_7_s9"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_rules_local_3",
+      "node_id": 3,
+      "deps": [
+        "rule_0_s0",
+        "rule_0_s4",
+        "rule_0_s8",
+        "rule_1_s0",
+        "rule_1_s4",
+        "rule_1_s8",
+        "rule_5_s0",
+        "rule_5_s4",
+        "rule_5_s8",
+        "rule_6_s1",
+        "rule_6_s5",
+        "rule_6_s9",
+        "rule_7_s2",
+        "rule_7_s6",
+        "rule_7_s10"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    }
+  ],
+  "converge_on_coordinator": true
+}

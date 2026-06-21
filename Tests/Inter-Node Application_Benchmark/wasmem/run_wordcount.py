@@ -43,10 +43,12 @@ AGENT_TOML = os.path.join(ROOT, "NodeAgent", "agent.toml")
 RESULT = os.path.join(ROOT, "TestOutput", "wc_auto_placement_result.txt")
 
 
-def median(xs):
-    xs = sorted(xs)
-    n = len(xs)
-    return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
+def mean_std(xs):
+    """(mean, sample-stdev); stdev=0 for <2 samples. Headline summary for N reps."""
+    m = sum(xs) / len(xs)
+    if len(xs) < 2:
+        return m, 0.0
+    return m, (sum((x - m) ** 2 for x in xs) / (len(xs) - 1)) ** 0.5
 
 
 def build_sym(corpus_rel, fanout, nodes, policy, out_path):
@@ -127,7 +129,7 @@ def main():
                     help="comma-separated per-node capacity weights → weighted policy "
                          "(e.g. 6,11,11,12 gives node 0 fewer maps + smaller slice)")
     ap.add_argument("--expect", type=int, default=None, help="gate occurrences against this count")
-    ap.add_argument("--csv", default=os.path.join(HERE, "results.csv"))
+    ap.add_argument("--csv", default=os.path.join(HERE, "results_wordcount.csv"))
     args = ap.parse_args()
 
     corpus_abs = os.path.join(ROOT, args.corpus)
@@ -158,7 +160,7 @@ def main():
     new = not os.path.exists(args.csv)
     fcsv = open(args.csv, "a")
     if new:
-        fcsv.write("size_mb,mappers,nodes_used,makespan_ms_median,total_job_ms_median,"
+        fcsv.write("size_mb,mappers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,"
                    "occurrences,expect,success,reps\n")
 
     print(f"[wc] corpus={size_mb}MB fanout={args.fanout} nodes={args.nodes} "
@@ -176,15 +178,16 @@ def main():
         print(f"[wc] rep {rep}: makespan={makespan}ms total_job={total_job}ms "
               f"per_node={per_node} occurrences={occ} gate={gate} ok={success}")
 
-    med = int(median(ms_list))
-    job_med = int(median(job_list))
+    mean_ms, std_ms = mean_std(ms_list)
+    mean_ms, std_ms = int(mean_ms), round(std_ms, 1)
+    job_mean = int(sum(job_list) / len(job_list))
     gate = args.expect if args.expect is not None else occ_seen
-    fcsv.write(f"{size_mb},{args.fanout},{args.nodes},{med},{job_med},"
+    fcsv.write(f"{size_mb},{args.fanout},{args.nodes},{mean_ms},{std_ms},{job_mean},"
                f"{occ_seen},{gate},{ok_all},{args.reps}\n")
     fcsv.close()
-    print(f"[wc] median makespan={med}ms total_job={job_med}ms occurrences={occ_seen} "
+    print(f"[wc] mean makespan={mean_ms}±{std_ms}ms total_job={job_mean}ms occurrences={occ_seen} "
           f"success={ok_all} → {args.csv}")
-    print(f"RESULT occ={occ_seen} makespan_ms={med} success={ok_all}")
+    print(f"RESULT occ={occ_seen} makespan_ms={mean_ms} std={std_ms} success={ok_all}")
     sys.exit(0 if ok_all else 1)
 
 

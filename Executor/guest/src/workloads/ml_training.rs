@@ -331,15 +331,27 @@ fn sgd_trunc_div(n: i64, d: i64) -> i64 { if d == 0 { 0 } else { n / d } }
 
 /// Parse a "label,f0,f1,..." data line into (label, features). `None` for
 /// blank / header / non-data lines.
-fn sgd_parse_sample(rec: &[u8]) -> Option<(i64, Vec<i64>)> {
+/// Max feature columns parsed into the reusable stack buffer (data F is 16).
+const SGD_MAX_FEATURES: usize = 64;
+
+/// Parse a CSV sample into `feats` (no heap alloc), returning (label, n_features).
+/// Reuses a caller-owned buffer — the old `Vec<i64>`-per-record version allocated
+/// once PER SAMPLE in sgd_encode (~6M allocs at 6M samples), which dominated the
+/// encode stage; this fills a stack array so the parse loop is allocation-free.
+fn sgd_parse_into(rec: &[u8], feats: &mut [i64]) -> Option<(i64, usize)> {
     let s = core::str::from_utf8(rec).unwrap_or("").trim();
     if s.is_empty() || s.starts_with("label") || s.starts_with("model")
         || s.starts_with("grad") { return None; }
     let mut it = s.split(',');
     let label: i64 = it.next()?.parse().ok()?;
-    let feats: Vec<i64> = it.map(|v| v.parse().unwrap_or(0)).collect();
-    if feats.is_empty() { return None; }
-    Some((label, feats))
+    let mut nf = 0usize;
+    for v in it {
+        if nf >= feats.len() { return None; }
+        feats[nf] = v.parse().unwrap_or(0);
+        nf += 1;
+    }
+    if nf == 0 { return None; }
+    Some((label, nf))
 }
 
 /// Read the latest model record: returns (classes, features, n_samples, lr_den, weights).
@@ -420,15 +432,18 @@ pub extern "C" fn sgd_encode(arg: u32) {
     let mut f: usize = 0;
     let mut body: Vec<u8> = Vec::new();
     let mut count: u32 = 0;
-    for (_o, rec) in &ShmApi::read_all_stream_records(text_slot) {
-        let (label, feats) = match sgd_parse_sample(rec) { Some(s) => s, None => continue };
-        if f == 0 { f = feats.len(); }
-        if feats.len() != f { continue; }
+    let mut feats = [0i64; SGD_MAX_FEATURES];   // reused across records — no per-sample alloc
+    // STREAM the text shard (no read_all materialization) and parse into the stack
+    // buffer — the alloc-free hot path for the encode stage.
+    ShmApi::for_each_stream_record(text_slot, |_o, rec| {
+        let (label, nf) = match sgd_parse_into(rec, &mut feats) { Some(s) => s, None => return };
+        if f == 0 { f = nf; }
+        if nf != f { return; }
         body.extend_from_slice(&(label as i32).to_le_bytes());
-        for &v in &feats { body.extend_from_slice(&(v as i32).to_le_bytes()); }   // i32 feature
+        for &v in &feats[..nf] { body.extend_from_slice(&(v as i32).to_le_bytes()); }   // i32 feature
         count += 1;
         if count as usize >= SGD_BIN_BLK { sgd_flush_block(bin_slot, &mut body, count, f); count = 0; }
-    }
+    });
     sgd_flush_block(bin_slot, &mut body, count, f);
 }
 

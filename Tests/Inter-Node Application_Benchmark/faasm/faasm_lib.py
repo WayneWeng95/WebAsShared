@@ -83,6 +83,16 @@ def median(xs):
     return xs[n // 2] if n % 2 else (xs[n // 2 - 1] + xs[n // 2]) / 2
 
 
+def mean_std(xs):
+    """Return (mean, sample-stdev) over xs. stdev=0 for <2 samples. The headline
+    summary for N-rep benchmarks (replaces median 2026-06-21)."""
+    m = sum(xs) / len(xs)
+    if len(xs) < 2:
+        return m, 0.0
+    var = sum((x - m) ** 2 for x in xs) / (len(xs) - 1)
+    return m, var ** 0.5
+
+
 def generic_wrapper():
     """Abs path to faaslet_run.py (the generic per-node runner), git-synced to all nodes."""
     return os.path.join(HERE, "faaslet_run.py")

@@ -35,82 +35,143 @@ precompiles `guest.wasm`→`.cwasm`). Tokenizers are **aligned** (see fixes).
 
 | Workload | Faasm | WasMem | Head-to-head |
 |----------|-------|--------|--------------|
-| **WordCount** | ✅ done, 50 MB–4 GB @ 60 | ✅ done, 4 GB @ 60 (overlap fix) | ✅ 4 GB: WasMem 12.0 s **beats** Faasm 15.7 s |
-| **FINRA** | ✅ done, 10k–10M trades; +5M | ✅ 5M @ 60 (197 MB, under OOM ceiling); OOMs at 10M | ✅ 5M: WasMem 9.0 s **beats** Faasm 12.2 s (1.35×) |
-| ml_training | — | gen script exists | not run this session |
-| ml_inference | — | gen script exists | not run this session |
-| matrix | — | gen script exists | not run this session |
-| **TeraSort** | ✅ 32 MB @ 4 (new WordCount-shaped baseline) | ✅ 32 MB @ 4 (centralized-gather path) | ⚖️ 32 MB: **tie** — WasMem 1.32 s ≈ Faasm 1.32 s (centralized gather; see caveat) |
+| **WordCount** | ✅ 4 GB @ 60, 15 reps | ✅ 4 GB @ 60 (overlap fix), 15 reps | ✅ 4 GB: WasMem 13.8±0.1 s **beats** Faasm 15.7±0.1 s (1.14×) |
+| **FINRA** | ✅ 5M @ 60 hybrid-shard (58 wkrs), 15 reps | ✅ 5M @ 60 (197 MB, under OOM ceiling), 15 reps | ✅ 5M: WasMem 10.25±0.14 s **beats** Faasm 13.08±0.22 s (1.28×); OOMs at 10M |
+| **ML training** | ✅ 600k @ 60 (new sgd_grad baseline), 15 reps | ✅ 600k @ 60 (1 epoch), 15 reps | ✅ WasMem 0.82±0.04 s **beats** Faasm 1.20±0.03 s (1.47×) |
+| **ML inference** | ✅ 600k @ 60 (new infer_predict baseline), 15 reps | ✅ 600k @ 60, 15 reps | ✅ WasMem 0.68±0.03 s **beats** Faasm 0.99±0.03 s (1.45×) |
+| **Matrix** | ✅ N4096 @64 (new matblock baseline) | ✅ N4096 @64 (8×8, widened layout), 15 reps | ⚠️ **Faasm 1.19×** (9.67±0.50 vs 8.12±0.22 s) — compute-bound; heap-bound ceiling at N=4096 |
+| **TeraSort** | ✅ 1.2 GiB @ 4 (new WC-shaped baseline), 15 reps | ✅ 1.2 GiB @ 4 (input-shard + MR2 2 GiB), 15 reps | ✅ **1.2 GiB: WasMem 11.2±0.6 s beats Faasm 15.5±0.4 s (1.39×)**; cap ~1.2 GiB, fan N==P=4 |
 
 ## Results so far
 
-**WordCount — Faasm, 60 mappers (15/node), 4 nodes** (`faasm/results.csv`):
+**WordCount — head-to-head, 4 GB @ 60 mappers (15/node), 4 nodes, 15 reps** (`{wasmem,faasm}/results_wordcount.csv`):
 
-| Size | Makespan | Occurrences | ✓ |
-|------|----------|-------------|---|
-| 50 MB | 988 ms | 8,940,339 | ✓ |
-| 500 MB | 2,597 ms | 89,403,388 | ✓ |
-| 1 GB | 4,488 ms | 178,806,775 | ✓ |
-| 3 GB | 12,144 ms | 536,420,323 | ✓ |
-| 4 GB | 15,727 ms | 715,227,097 | ✓ |
+| System | Makespan (mean ± std, 15 reps) | Occurrences | ✓ |
+|--------|--------------------------------|-------------|---|
+| **WasMem** | **13,834 ± 100 ms** | 715,227,097 | ✓ |
+| Faasm | 15,724 ± 131 ms | 715,227,097 | ✓ |
 
-**WordCount — WasMem, fanout 60, balanced, 4 nodes** (`wasmem/results.csv`):
+**WasMem wins 1.14×** — single bounded config (4 GB @ 60, 15 reps). Occurrence counts match
+exactly. The RDMA zero-copy map→reduce gather beats Faasm's serialized-KV shuffle, with the
+node-0 overlap fix (deferred RemoteRecv join) keeping the gather off the critical path.
+(The earlier reps-3 median read 12.0 s → 1.31×; the 15-rep mean 13.8 s is higher and more
+representative, so the honest win is **1.14×**. NB Faasm pays its 4 GB Redis upload in the
+timed window, by design — the real KV cost; WasMem excludes RDMA staging. Smaller sizes
+dropped per user — only the 4 GB head-to-head is kept.)
 
-| Size | Makespan | Occurrences | ✓ |
-|------|----------|-------------|---|
-| 4 GB | **12,015 ms** | 715,227,097 | ✓ |
+**FINRA — head-to-head, 5M trades @ fanout 60 (hybrid shard → 58 workers), 4 nodes, 15 reps** (2026-06-21) (`{wasmem,faasm}/results_finra.csv`):
 
-(Counts match Faasm exactly. Only 4 GB recorded post-overlap-fix; smaller sizes need
-re-running — earlier fanout-40 numbers are stale/pre-fix.)
+| System | Makespan (mean ± std, 15 reps) | Violations | ✓ |
+|--------|--------------------------------|-----------|---|
+| **WasMem** | **10,251 ± 138 ms** | 2,271,415 | ✓ |
+| Faasm | 13,079 ± 224 ms | 2,271,415 | ✓ |
 
-**FINRA — Faasm, fixed 8-rule fan (2/node), 4 nodes** (`faasm/results_finra.csv`):
+**WasMem wins 1.28×**, single bounded config (5M @ 60, 15 reps). Now a FAIR
+60-vs-60 comparison: previously WasMem ran 60-way (hybrid shard) but Faasm was only 8-way;
+this session the **Faasm side was brought to the same hybrid sharding** — the 5 stateless
+rules each split into S=11 disjoint slices (header prepended so `finra.cwasm`'s header-skip
+lands right; per-shard counts sum exactly) + 3 stateful rules full-data = 58 workers
+(`faasm/run_finra.py --fanout 60`, no module change). Violations match exactly.
 
-| Trades | Makespan | Violations | ✓ |
-|--------|----------|-----------|---|
-| 10k | 484 ms | 6,183 | ✓ |
-| 100k | 624 ms | 49,763 | ✓ |
-| 1M | 2,967 ms | 456,574 | ✓ |
-| 10M | 23,858 ms | 4,529,641 | ✓ |
-| **5M** | **12,165 ms** | 2,271,415 | ✓ |
+**Why fan-out doesn't separate them more:** the 3 **unsharded stateful rules**
+(wash/spoofing/concentration) each re-scan the full trade set and cap the makespan on both
+sides — the extra 55 stateless Faaslets just add launch + Redis overhead for Faasm. WasMem
+hits the same stateful wall but pays it in cheap SHM reads (vs Faasm's full-set Redis reads),
+which is the 1.28× edge. (Earlier reps-3 runs read ~1.45×; the 15-rep mean±std is higher and
+more representative — WasMem 8.99 s→10.25±0.14 s, Faasm 13.08±0.22 s.)
 
-**FINRA — 5M head-to-head, fanout 60, 4 nodes** (added 2026-06-21):
+**10M dropped** (per user): WasMem FINRA OOMs at 10M (the stateful rules' `chain_read_all`
+loads the whole 403 MB set into wasm32 linear memory → `rust_oom` at ~384 MB; 5M=197 MB fits),
+so there's no WasMem counterpart. The fix would be to stream/shard the stateful rules in the
+guest (open item). Faasm alone does 10M @ 60 (streams stdin), but it's not a head-to-head.
 
-| System | Makespan (median) | Violations | ✓ | Reps |
-|--------|-------------------|-----------|---|------|
-| **WasMem** | **8,991 ms** | 2,271,415 | ✓ | 3/3 |
-| Faasm | 12,165 ms | 2,271,415 | ✓ | 3/3 |
+**TeraSort — head-to-head, 4-node, 32 MB & 1 GB (new this session, 2026-06-21)** (`{wasmem,faasm}/results_terasort.csv`):
 
-WasMem's first valid FINRA datapoint — **wins 1.35×**. Violation counts match exactly
-across systems (and match the WasMem `--nodes 1` ground truth = 2,271,415), so the gate
-is hard-`--expect`, not just rep-consistency. **Scaling caveat:** WasMem 4-node (8,991 ms)
-is barely faster than its own 1-node ground truth (9,052 ms) — the 3 **unsharded stateful
-rules** each re-scan the full trade set on one worker (per-node durations all ~8.5–9 s),
-so they cap the makespan regardless of node count. Same architectural limit that causes
-the OOM at 10M, here surfacing as a scaling wall instead of a crash.
+| Size | WasMem makespan mean±std | Faasm makespan mean±std | Winner | gate (records, keysum, sorted) | Reps |
+|------|--------------------------|-------------------------|--------|--------------------------------|------|
+| **1.2 GiB** (1229 MB) | **11,180 ± 647 ms** | 15,496 ± 352 ms | **WasMem 1.39×** | 12886999, 8312165245, 1 | **15** |
 
-**TeraSort — 32 MB head-to-head (new this session, 2026-06-21)** (`{wasmem,faasm}/results_terasort.csv`):
+Single bounded config: **1.2 GiB @ fan-out 4 (N==P), 15 reps.** Gates match exactly across
+systems and against the WasMem `--nodes 1` ground truth. **WasMem wins 1.39×** — the RDMA
+zero-copy gather dominates Faasm's full-dataset Redis serialization even though WasMem's merge
+is still a **centralized single-reducer** (node 0 sorts the whole dataset, vs Faasm's
+*distributed* 4-way merge). So WasMem leads *despite* the merge disadvantage — conservative
+for WasMem; the true distributed all-to-all (§gaps) would widen it further. (At small sizes,
+e.g. 32 MB, the two are a tie — the gap opens with data size.)
 
-| System | 1-node (ground truth) | 4-node | gate (records, keysum, sorted) | Reps |
-|--------|----------------------|--------|--------------------------------|------|
-| **WasMem** | 517 ms | **1,317 ms** | 335544, 216366291, 1 | 3/3 |
-| Faasm | 1,808 ms | 1,323 ms | 335544, 216366291, 1 | 3/3 |
+**Fan-out is capped at N==P=4** (unlike FINRA's 58 / Matrix's 64): the input-shard path that
+enables 1 GB+ needs exactly one partition worker per node (`--shard-input --fanout 60` →
+15 workers/node all read the same node-slice → 15× record duplication, verified offline), and
+the replicate path that supports N>P caps at ~512 MB + risks the N>P deadlock. More fan
+wouldn't help anyway — the centralized merge is the bottleneck, not partition parallelism.
 
-First TeraSort head-to-head — a **tie** at 4 nodes (1.32 s vs 1.32 s); gates match exactly
-across systems and against ground truth. The two systems scale in **opposite directions**:
-WasMem goes 517 ms → 1,317 ms (1-node → 4-node, *slower*), Faasm goes 1,808 ms → 1,323 ms
-(*faster*). Why: WasMem's multi-node TeraSort uses a **CENTRALIZED gather** (the true
-all-to-all transpose deadlocks the executor's blocking RDMA transport, §gaps) — workers
-route+local-combine, send ONE transfer each, then **node 0 sorts the whole dataset
-single-reducer**. So distributing *adds* a cross-node hop + a non-parallel final merge
-on top of WasMem's already-fast in-SHM single-node path, while Faasm genuinely parallelizes
-the sort across 4 range-owners. TeraSort is therefore the one workload where WasMem does
-**not** win — exactly because its real distributed shuffle is still blocked. The headline
-RDMA-zero-copy advantage needs the **true all-to-all transpose** (non-blocking/phased
-transfers, §gaps); until then, expect WasMem to *lose* at larger TeraSort sizes as node 0's
-single-reducer merge becomes the bottleneck. **Baseline note:** the Faasm side is new code
-this session — `faasm/run_terasort.py` + `faasm/ts_faaslet.py` reuse the intra-node
-`ts.cwasm` (partition/merge filter) over Redis buckets (the serialized all-to-all shuffle),
-distributed via `deploy.sh distribute`. Only 32 MB run so far (the only records file staged).
+**1.2 GiB is the largest size run** (the practical ceiling under the current 1.5 GiB SHM cap).
+Pushing to 1.5 GB was scoped and rejected: it needs widening the SHM window
+(`CAPACITY_HARD_LIMIT` + the coupled wasm Memory `min` in `worker.rs`), which shrinks the guest
+heap node 0's sort needs — too marginal/invasive. (1 GB head-to-head also dropped per user;
+its input `records_1024mb.txt` was removed in cleanup.)
+
+**Reaching 1 GB required two framework changes this session (it was capped at ~512 MB):**
+the original TeraSort DAG `replicate`d the whole input on every node (1.5 GiB SHM ceiling)
+and `gather`ed the full dataset into one node-0 SHM slot. Both walls were lifted:
+1. **Per-node input sharding** — new additive guest fn `ts_partition_local`
+   (`Executor/guest/.../terasort.rs`) reads the node-local input slice via `for_each_input`
+   (the host slices slot 0 across nodes, no `replicate`/`ts_distribute`); new
+   `gen_terasort_ap_dag.build_dag(..., shard_input=True)` + `gen_variants --shard-input` +
+   `run_terasort.py --shard-input`. Cuts per-node footprint from the whole file to 1/P.
+2. **RDMA MR2 512 MiB → 2 GiB** (`Executor/common/src/lib.rs` `RDMA_MR2_INITIAL_SIZE`) —
+   node 0's centralized gather reserves all N incoming transfers concurrently in one MR2
+   bump region; 512 MiB overflowed at ~1 GB (`mr2_reserve: no room`). 2 GiB covers the
+   gather up to the ~1.5 GiB SHM-slot ceiling.
+
+**Ceiling now ~1–1.3 GB** (node 0's post-gather dataset still lands in a single SHM slot
+capped at ~1.5 GiB usable). **2 GB confirmed infeasible** on the centralized path — needs
+the true distributed merge (each owner gathers only its 1/N range). See [[terasort-shm-ceiling]].
+
+**Baseline note:** the Faasm side is new code this session — `faasm/run_terasort.py` +
+`faasm/ts_faaslet.py` reuse the intra-node `ts.cwasm` (partition/merge filter) over Redis
+buckets (the serialized all-to-all shuffle), distributed via `deploy.sh distribute`.
+
+**Deploy note:** the input-shard guest + MR2 host changes are built on node 0 and pushed to
+all workers via the Faasm `/upload` (`deploy.sh distribute`), NOT committed/rebuilt per node.
+For durability, commit the source + `./build.sh` on every node.
+
+**Matrix (SUMMA) — head-to-head, 4-node, N=4096 @ fanout 64 (8×8), 15 reps (2026-06-21)** (`{wasmem,faasm}/results_matrix.csv`):
+
+| N | fanout | WasMem makespan mean±std (GFLOP/s) | Faasm makespan mean±std (GFLOP/s) | Winner | checksum |
+|---|--------|-----------------------------------|-----------------------------------|--------|----------|
+| **4096** | **64 (8×8)** | **9,674 ± 496 ms (14.2)** | 8,120 ± 217 ms (16.9) | **Faasm 1.19×** | 1391095867672 |
+
+(Makespan = **mean ± sample-std over 15 reps** — switched from median 2026-06-21; all 6
+re-run. Means track the earlier medians closely, low std → conclusions unchanged.)
+
+Single bounded config: **N=4096, full-cluster 64-way (8×8 grid, 16 blocks/node), 15 reps.**
+Checksums match exactly across systems and against ground truth (gate = f64 Σ of all C
+entries, exact integer, order-independent). **Faasm wins 1.19×** — Matrix is the workload that
+runs *opposite* to the data-movement ones (WordCount/FINRA/TeraSort), and it's *expected*:
+Matrix is **compute-bound** (N³ FLOPs) with an **identical naive-ikj kernel** both sides
+(`matrix.rs` mat_block ≡ intra `matblock.rs`, same zero-skip, same integer data), so WasMem's
+RDMA zero-copy data path — its whole advantage — is a negligible fraction of the work. WasMem's
+per-block compute is somewhat slower; likely (a) the guest's **shared wasm linear memory**
+(mandatory for the SHM page-chain) carries a per-load/store codegen tax that only bites in a
+tight FLOP loop, and (b) `tile` re-slices A/B panels on **every** node. **But at full 64-core
+parallelism the gap is only 1.19×** (it was 1.92× at the under-utilized N=2048/16 earlier) —
+the tax is real but WasMem stays competitive once the cluster is saturated. Intra-node WasMem
+matrix *wins* (SHM, `results_aot.csv`), so the gap is inter-node-specific. **Fairness caveat:**
+"same kernel" holds at source but not realized speed — a genuine WasMem-unfavorable axis.
+
+**Why bounded at N=4096:** larger N OOMs the **guest heap**. Matrix is GUEST-HEAP-bound, not
+SHM-bound: each block reads its A+B panels into wasm heap (~75 MB/block at N=6144), and 16
+concurrent blocks/node far exceed the **0.5 GiB guest heap** (the half of the wasm32 window
+not given to the SHM page-chain). N=6144 @ 64 fails (`Success: false`, workers die); N=4096 @
+64 (~34 MB/block × 16 ≈ 0.5 GiB) is right at the edge and the practical ceiling. N=8192 also
+needs widening the `n` field (caps at 8191). So 4096 is Matrix's max for full-cluster runs.
+
+**Code (new this session, additive):** packed-arg layout widened r,c 3→4 bits
+(`matrix.rs::unpack_rcn` + `gen_matrix_ap_dag.py`) so 8×8 (64 blocks) fits; new N=4096 matrix
+(`TestData/matrix/{A,B}_4096.bin`). WasMem driver `wasmem/run_matrix.py`; Faasm baseline
+`faasm/run_matrix.py` + `matblock_faaslet.py` reuse the intra `matblock.cwasm` over Redis
+panels/blocks. Guest rebuilt + pushed to workers via `deploy.sh distribute` (not committed).
 
 ## Fixes made this session (with locations)
 
@@ -149,9 +210,11 @@ distributed via `deploy.sh distribute`. Only 32 MB run so far (the only records 
   to get inter-node *scaling* — see the 5M scaling caveat above), still need to make the
   stateful rules stream/shard the trades in `Executor/guest`. Until then, 5M is the largest
   valid WasMem FINRA point; 10M remains Faasm-only.
-- [ ] **Refresh WasMem WordCount curve** at 50 MB / 500 MB / 1 GB / 3 GB with the
-  overlap fix (only 4 GB is post-fix; rest are stale fanout-40 pre-fix numbers).
-- [ ] **Faasm FINRA** is capped at 8-way (one Faaslet per rule, no trade sharding). To
+- [x] **WordCount bounded at 4 GB @ 60, 15 reps, mean±std** (smaller-size curve dropped per
+  user). WasMem 13.8±0.1 s vs Faasm 15.7±0.1 s (1.14×). A size-sweep curve could be re-added
+  later if wanted, but the headline is the single 4 GB point.
+- [~] **Faasm FINRA** is no longer capped at 8-way — now hybrid-sharded to 58 workers
+  (`run_finra.py --fanout 60`); the original 8-way note below is historical. To
   scale parallelism past 8 it would need to shard trades within each rule.
 - [ ] **Remaining workloads** (ml_training, ml_inference, matrix): run the
   Faasm-vs-WasMem head-to-head. Gen scripts exist in `scripts/`. (TeraSort ✅ done 32 MB.)

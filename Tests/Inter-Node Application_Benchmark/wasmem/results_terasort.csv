@@ -1,7 +1,2 @@
-size_mb,fanout,nodes_used,makespan_ms_median,total_job_ms_median,records,keysum,sorted,expect,success,reps
-32,1,1,517,517,335544,216366291,1,335544|216366291|1,True,1
-32,4,4,1317,4604,335544,216366291,1,335544|216366291|1,True,3
-512,1,1,6278,6278,5368709,3462765781,1,5368709|3462765781|1,True,1
-512,4,4,1933,6804,0,0,1,5368709|3462765781|1,False,1
-512,4,4,5685,14415,5368709,3462765781,1,5368709|3462765781|1,True,1
-1024,4,4,3703,6511,None,None,None,,False,3
+size_mb,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,records,keysum,sorted,expect,success,reps
+1229,4,4,11180,647.2,28280,12886999,8312165245,1,12886999|8312165245|1,True,15
