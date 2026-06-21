@@ -118,7 +118,10 @@ pub extern "C" fn ts_partition_local(arg: u32) {
     let n = arg >> 16;
     if n == 0 { return; }
     let out_base = TS_PART_BASE + i * n;
-    ShmApi::for_each_stream_record(common::INPUT_IO_SLOT, |_origin, rec| {
+    // The node-local input slice lives in the IO input slot (the host sliced it per
+    // node), so iterate it with for_each_input — NOT for_each_stream_record (the
+    // replicate path only gets a stream after ts_distribute converts the IO slot).
+    ShmApi::for_each_input(|_origin, rec| {
         if rec.is_empty() { return; }
         let owner = owner_of(rec[0], n);
         ShmApi::append_stream_data(out_base + owner, rec);
