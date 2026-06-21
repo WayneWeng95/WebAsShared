@@ -3,10 +3,9 @@
 
 Launched on a node by that node's agent. infer_predict.cwasm is the intra-node inference
 Faaslet (wasm32-wasip1 stdin→stdout, reused verbatim): stdin = a binary frame
-([n][f] + model + n samples), stdout = [correct][total][predsum] (3× i64 le). This wrapper
-does the Faasm KV (Redis) I/O around it — the serialized model+shard+result WasMem moves
-zero-copy. The driver pre-builds the full frame per shard (model replicated in), so this
-wrapper just pipes it (no numpy/parsing here).
+([n][f] + model + n samples), stdout = [correct][total][predsum] (3× i64 le). This
+wrapper does the Faasm KV (Redis) I/O around it. The driver pre-builds the full frame per
+shard (model replicated in), so this wrapper just pipes it.
 
   <uid> <i> : read {uid}_frame_{i} → infer_predict.cwasm → write {uid}_r_{i} (24-byte result).
 

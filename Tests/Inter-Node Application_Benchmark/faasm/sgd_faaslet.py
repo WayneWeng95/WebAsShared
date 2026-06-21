@@ -4,9 +4,8 @@
 Launched on a node by that node's agent. sgd_grad.cwasm is the intra-node SGD gradient
 Faaslet (wasm32-wasip1 stdin→stdout, reused verbatim): stdin = a binary frame
 ([n][f] + model + n samples), stdout = the gradient SUM over the shard (C*f i64 le). This
-wrapper does the Faasm KV (Redis) I/O — the serialized model+shard+gradient WasMem moves
-zero-copy. The driver pre-builds the full frame per shard (model replicated in), so this
-wrapper just pipes it.
+wrapper does the Faasm KV (Redis) I/O. The driver pre-builds the full frame per shard
+(model replicated in), so this wrapper just pipes it.
 
   <uid> <i> : read {uid}_frame_{i} → sgd_grad.cwasm → write {uid}_g_{i} (C*f i64 gradient).
 

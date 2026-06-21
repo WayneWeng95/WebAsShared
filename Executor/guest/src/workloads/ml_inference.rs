@@ -36,22 +36,29 @@ const INF_PART_BASE: u32 = 10;
 /// Max feature columns parsed into the reusable stack buffer (model F is 16).
 const MAX_FEATURES: usize = 64;
 
-/// Parse a CSV record into `feats` (no heap alloc), returning (label, n_features).
-/// Reuses a caller-owned buffer — the old `Vec<i64>`-per-record version allocated
-/// once PER SAMPLE (~6M allocs at 6M samples), which dominated infer_predict; this
-/// fills a stack array instead so the hot loop is allocation-free.
+/// BYTE-LEVEL CSV line parser (PROTOTYPE) — fills `feats` from the raw bytes with
+/// no `from_utf8` validation, no `str::split`, no `str::parse`. The old per-record
+/// `from_utf8` + str parse ran ~6M times at 6M samples (Faasm does from_utf8 ONCE
+/// over its whole contiguous shard); this scans bytes directly, so the per-record
+/// cost collapses to a digit scan. Returns (label, n_features). Skips header/blank.
 fn inf_parse_into(rec: &[u8], feats: &mut [i64]) -> Option<(i64, usize)> {
-    let s = core::str::from_utf8(rec).unwrap_or("").trim();
-    if s.is_empty() || s.starts_with("label") || s.starts_with("model")
-        || s.starts_with("pred") { return None; }
-    let mut it = s.split(',');
-    let label: i64 = it.next()?.parse().ok()?;
-    let mut nf = 0usize;
-    for v in it {
-        if nf >= feats.len() { return None; }
-        feats[nf] = v.parse().unwrap_or(0);
-        nf += 1;
+    let mut e = rec.len();
+    while e > 0 && matches!(rec[e - 1], b'\n' | b'\r' | b' ' | b'\t') { e -= 1; }
+    let mut s = 0;
+    while s < e && matches!(rec[s], b' ' | b'\t') { s += 1; }
+    let rec = &rec[s..e];
+    if rec.is_empty() || !(rec[0] == b'-' || rec[0].is_ascii_digit()) { return None; } // skip header/blank
+    let (mut label, mut nf, mut field, mut val, mut neg) = (0i64, 0usize, 0usize, 0i64, false);
+    for &ch in rec.iter() {
+        if ch == b',' {
+            let v = if neg { -val } else { val };
+            if field == 0 { label = v; } else { if nf >= feats.len() { return None; } feats[nf] = v; nf += 1; }
+            field += 1; val = 0; neg = false;
+        } else if ch == b'-' { neg = true; }
+        else if ch.is_ascii_digit() { val = val * 10 + (ch - b'0') as i64; }
     }
+    let v = if neg { -val } else { val };  // flush the last field
+    if field == 0 { label = v; } else { if nf >= feats.len() { return None; } feats[nf] = v; nf += 1; }
     if nf == 0 { return None; }
     Some((label, nf))
 }

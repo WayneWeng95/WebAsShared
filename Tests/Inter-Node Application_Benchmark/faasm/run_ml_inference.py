@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """run_ml_inference.py — Faasm inter-node MNIST-inference driver (runs on node 0).
 
-The counterpart to ../wasmem/run_ml_inference.py, measured the SAME way. Inference is a
-homogeneous W-wide predict fan of Faaslets across the cluster, all state through Redis:
+The counterpart to ../wasmem/run_ml_inference.py, measured the SAME way. Homogeneous
+W-wide predict fan of Faaslets across the cluster, state via Redis:
 
   1. (untimed) load model + test CSV on node 0 (infer_core), split into W disjoint shards.
   2. (timed) build the binary frame per shard (model replicated in + the shard's samples),
@@ -89,8 +89,6 @@ def main():
     _, F, Wt = core.load_model(args.model)
     N = X.shape[0]
     bounds = [(k * N // W, (k + 1) * N // W) for k in range(W)]
-    # numpy ground-truth checksum (sanity / default gate)
-    gt_correct, gt_total, gt_predsum = core.evaluate(X, y, Wt)
 
     new = not os.path.exists(args.csv)
     fcsv = open(args.csv, "a")
@@ -98,8 +96,7 @@ def main():
         fcsv.write("samples,workers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,"
                    "accuracy_pct,prediction_checksum,expect,success,reps\n")
 
-    print(f"[ml_inference] samples={N} workers={W} nodes={len(nodes)} reps={args.reps} "
-          f"(gt checksum={gt_predsum} acc={100.0*gt_correct/gt_total:.2f}%)")
+    print(f"[ml_inference] samples={N} workers={W} nodes={len(nodes)} reps={args.reps}")
     ms_list, job_list, cks_seen, acc_seen, ok_all = [], [], None, 0.0, True
     for rep in range(1, args.reps + 1):
         uid = uuid.uuid4().hex
