@@ -249,11 +249,19 @@ pub const RDMA_MR1_BUDGET: u64 = 512 * 1024 * 1024;
 /// transfer.
 pub const RDMA_MR2_REG_THRESHOLD: u64 = 256 * 1024 * 1024;
 
-/// Initial committed size of the RdmaPool backing file (512 MiB).
+/// Initial committed size of the RdmaPool backing file (2 GiB).
 /// Doubles on demand up to `RDMA_MR2_HARD_LIMIT`.  Typed as `u64`
 /// so it survives being compiled against the wasm32 guest (where
 /// `usize` is 32-bit) — host code casts to `usize` at use sites.
-pub const RDMA_MR2_INITIAL_SIZE: u64 = 512 * 1024 * 1024;
+///
+/// Bumped from 512 MiB → 2 GiB for the centralized-gather workloads
+/// (TeraSort): a single gatherer (node 0) reserves ALL N incoming
+/// transfers CONCURRENTLY in one MR2 bump region, so MR2 must hold the
+/// whole gathered dataset, not just one per-transfer chunk. At 512 MiB
+/// a ~1 GB gather (4 × ~256 MB) overflowed (`mr2_reserve: no room`).
+/// 2 GiB covers the full centralized gather up to the ~1.5 GiB SHM slot
+/// ceiling. Pins 2 GiB RAM/node when MR2 registers (ConnectX-3, no ODP).
+pub const RDMA_MR2_INITIAL_SIZE: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Hard upper bound on total RdmaPool committed size.  Also the
 /// size of the virtual address reservation (reserve-once, commit-

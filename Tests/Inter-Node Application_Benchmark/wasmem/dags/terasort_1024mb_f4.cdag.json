@@ -4,6 +4,17 @@
     "0": [
       {
         "deps": [],
+        "id": "rr_combine_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 403,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
         "id": "rr_combine_1_from_1",
         "kind": {
           "RemoteRecv": {
@@ -26,23 +37,15 @@
       },
       {
         "deps": [],
-        "id": "rr_combine_2_from_2",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 2,
-            "slot": 403,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
         "id": "load_0",
         "kind": {
           "Input": {
             "path": "TestData/terasort/records_1024mb.txt",
             "prefetch": true,
-            "replicate": true,
+            "slice": [
+              0.0,
+              0.25
+            ],
             "slot": 0
           }
         }
@@ -51,23 +54,11 @@
         "deps": [
           "load_0"
         ],
-        "id": "distribute_0",
-        "kind": {
-          "WasmVoid": {
-            "arg": 262154,
-            "func": "ts_distribute"
-          }
-        }
-      },
-      {
-        "deps": [
-          "distribute_0"
-        ],
         "id": "part_0",
         "kind": {
           "WasmVoid": {
-            "arg": 262154,
-            "func": "ts_partition"
+            "arg": 262144,
+            "func": "ts_partition_local"
           }
         }
       },
@@ -167,7 +158,10 @@
           "Input": {
             "path": "TestData/terasort/records_1024mb.txt",
             "prefetch": true,
-            "replicate": true,
+            "slice": [
+              0.25,
+              0.5
+            ],
             "slot": 0
           }
         }
@@ -176,23 +170,11 @@
         "deps": [
           "load_1"
         ],
-        "id": "distribute_1",
-        "kind": {
-          "WasmVoid": {
-            "arg": 262154,
-            "func": "ts_distribute"
-          }
-        }
-      },
-      {
-        "deps": [
-          "distribute_1"
-        ],
         "id": "part_1",
         "kind": {
           "WasmVoid": {
-            "arg": 262155,
-            "func": "ts_partition"
+            "arg": 262145,
+            "func": "ts_partition_local"
           }
         }
       },
@@ -235,7 +217,10 @@
           "Input": {
             "path": "TestData/terasort/records_1024mb.txt",
             "prefetch": true,
-            "replicate": true,
+            "slice": [
+              0.5,
+              0.75
+            ],
             "slot": 0
           }
         }
@@ -244,23 +229,11 @@
         "deps": [
           "load_2"
         ],
-        "id": "distribute_2",
-        "kind": {
-          "WasmVoid": {
-            "arg": 262154,
-            "func": "ts_distribute"
-          }
-        }
-      },
-      {
-        "deps": [
-          "distribute_2"
-        ],
         "id": "part_2",
         "kind": {
           "WasmVoid": {
-            "arg": 262156,
-            "func": "ts_partition"
+            "arg": 262146,
+            "func": "ts_partition_local"
           }
         }
       },
@@ -303,7 +276,10 @@
           "Input": {
             "path": "TestData/terasort/records_1024mb.txt",
             "prefetch": true,
-            "replicate": true,
+            "slice": [
+              0.75,
+              1.0
+            ],
             "slot": 0
           }
         }
@@ -312,23 +288,11 @@
         "deps": [
           "load_3"
         ],
-        "id": "distribute_3",
-        "kind": {
-          "WasmVoid": {
-            "arg": 262154,
-            "func": "ts_distribute"
-          }
-        }
-      },
-      {
-        "deps": [
-          "distribute_3"
-        ],
         "id": "part_3",
         "kind": {
           "WasmVoid": {
-            "arg": 262157,
-            "func": "ts_partition"
+            "arg": 262147,
+            "func": "ts_partition_local"
           }
         }
       },
