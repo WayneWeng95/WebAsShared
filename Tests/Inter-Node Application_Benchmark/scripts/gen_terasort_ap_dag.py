@@ -63,7 +63,8 @@ def packed(lo, hi):
 
 def build_dag(n, part_nodes=None, owner_nodes=None,
               records_path="TestData/terasort/records_1m.txt",
-              out_prefix="TestOutput/terasort_ap_result"):
+              out_prefix="TestOutput/terasort_ap_result",
+              shard_input=False):
     """Return the TeraSort auto-placement SymbolicDag for `n` partition workers and
     `n` range-owners.
 
@@ -72,6 +73,16 @@ def build_dag(n, part_nodes=None, owner_nodes=None,
     call-compatibility with gen_variants.py but not used for placement. Both the
     single-node GT (all on node 0) and the distributed run use this same structure,
     so their gates match exactly.
+
+    `shard_input` (cluster scale): when True, the input is SLICED across the P nodes
+    instead of REPLICATED — each node loads only its 1/P shard (no `replicate`, no
+    `ts_distribute`), and worker i reads its node-local slice directly via
+    `ts_partition_local` (explicit worker index). This caps the per-node SHM
+    footprint at ~1/P of the dataset (vs the whole file under replicate), lifting the
+    ~512 MB replicate ceiling toward the centralized-gather limit (~1.3 GB). Requires
+    one partition worker per node (the N==P square layout); the node-0 gather is still
+    centralized, so >~1.3 GB still needs the true distributed all-to-all. Default
+    False keeps the proven replicate path for small inputs / N>P.
     """
     if part_nodes is None:
         part_nodes = [0] * n
@@ -81,27 +92,41 @@ def build_dag(n, part_nodes=None, owner_nodes=None,
     # IMPORTANT — packed args go in `wasm_arg`, NOT `arg` (see slot.rs::collect_slots:
     # a packed value in `arg` poisons the recv-slot allocator and deadlocks the
     # gather). `arg` stays a small REAL slot the partitioner can account for.
-    nodes = [
+    part_ids = []
+    if shard_input:
+        # SLICED input: the partitioner splits slot 0 across nodes (like WordCount's
+        # corpus), so each node holds only its 1/P shard. Worker i reads that slice
+        # DIRECTLY (slot 0) — no full-file replica, no contiguous re-split.
+        nodes = [
+            {"id": "load", "placement": "all", "deps": [],
+             "kind": {"Input": {"path": records_path, "slot": 0, "prefetch": True}}},
+        ]
+        for i in range(n):
+            pid = f"part_{i}"
+            part_ids.append(pid)
+            nodes.append({"id": pid, "node_id": part_nodes[i], "deps": ["load"],
+                          "kind": {"Func": {"func": "ts_partition_local",
+                                            "arg": 0, "wasm_arg": packed(i, n)}}})
+    else:
         # Replicated input + zero-copy split: every node splits its FULL local copy
         # into N shards; partition worker i reads its same-machine shard 10+i. The
         # split is cheap (no parse); the routing happens in the placed ts_partition.
-        {"id": "load", "placement": "all", "deps": [],
-         "kind": {"Input": {"path": records_path, "slot": 0,
-                            "prefetch": True, "replicate": True}}},
-        {"id": "distribute", "placement": "all", "deps": ["load"],
-         "kind": {"Func": {"func": "ts_distribute", "arg": TS_DIST_BASE,
-                           "wasm_arg": packed(TS_DIST_BASE, n)}}},
-    ]
-
-    # ── partition workers (placed per policy) ────────────────────────────────────
-    # Worker i routes its shard's records into owner sub-slots 100 + i*N + j.
-    part_ids = []
-    for i in range(n):
-        pid = f"part_{i}"
-        part_ids.append(pid)
-        nodes.append({"id": pid, "node_id": part_nodes[i], "deps": ["distribute"],
-                      "kind": {"Func": {"func": "ts_partition", "arg": TS_DIST_BASE + i,
-                                        "wasm_arg": packed(TS_DIST_BASE + i, n)}}})
+        nodes = [
+            {"id": "load", "placement": "all", "deps": [],
+             "kind": {"Input": {"path": records_path, "slot": 0,
+                                "prefetch": True, "replicate": True}}},
+            {"id": "distribute", "placement": "all", "deps": ["load"],
+             "kind": {"Func": {"func": "ts_distribute", "arg": TS_DIST_BASE,
+                               "wasm_arg": packed(TS_DIST_BASE, n)}}},
+        ]
+        # ── partition workers (placed per policy) ────────────────────────────────
+        # Worker i routes its shard's records into owner sub-slots 100 + i*N + j.
+        for i in range(n):
+            pid = f"part_{i}"
+            part_ids.append(pid)
+            nodes.append({"id": pid, "node_id": part_nodes[i], "deps": ["distribute"],
+                          "kind": {"Func": {"func": "ts_partition", "arg": TS_DIST_BASE + i,
+                                            "wasm_arg": packed(TS_DIST_BASE + i, n)}}})
 
     # ── centralized gather (all-to-ONE) → sort on node 0 ─────────────────────────
     # WHY CENTRALIZED (not a true all-to-all transpose): the executor's blocking RDMA

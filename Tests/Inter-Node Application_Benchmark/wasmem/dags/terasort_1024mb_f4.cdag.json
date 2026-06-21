@@ -15,17 +15,6 @@
       },
       {
         "deps": [],
-        "id": "rr_combine_2_from_2",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 2,
-            "slot": 403,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
         "id": "rr_combine_3_from_3",
         "kind": {
           "RemoteRecv": {
@@ -37,10 +26,21 @@
       },
       {
         "deps": [],
+        "id": "rr_combine_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 403,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
         "id": "load_0",
         "kind": {
           "Input": {
-            "path": "TestData/terasort/records_32mb.txt",
+            "path": "TestData/terasort/records_1024mb.txt",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -165,7 +165,7 @@
         "id": "load_1",
         "kind": {
           "Input": {
-            "path": "TestData/terasort/records_32mb.txt",
+            "path": "TestData/terasort/records_1024mb.txt",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -233,7 +233,7 @@
         "id": "load_2",
         "kind": {
           "Input": {
-            "path": "TestData/terasort/records_32mb.txt",
+            "path": "TestData/terasort/records_1024mb.txt",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -301,7 +301,7 @@
         "id": "load_3",
         "kind": {
           "Input": {
-            "path": "TestData/terasort/records_32mb.txt",
+            "path": "TestData/terasort/records_1024mb.txt",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -366,7 +366,7 @@
   },
   "shared_inputs": [
     {
-      "path": "TestData/terasort/records_32mb.txt",
+      "path": "TestData/terasort/records_1024mb.txt",
       "source_node": 0
     }
   ],

@@ -1,14 +1,6 @@
 [config] auto-detected node_id=0 (local IP = cluster.ips[0] = 10.10.1.2)
 Submitting job to coordinator at 10.10.1.2:9500...
-Job submitted: job_1781965973938
-Waiting for job completion...
+Error: connect to coordinator at 10.10.1.2:9500
 
-=== Job Result ===
-Job ID:  job_1781965973938
-Success: true
-Summary:
-node 0 (local): 1751ms
-node 2 (worker): 1108ms
-node 1 (worker): 1111ms
-node 3 (worker): 1164ms
-total wall time: 1903ms
+Caused by:
+    Connection refused (os error 111)

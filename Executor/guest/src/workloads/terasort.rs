@@ -102,6 +102,29 @@ pub extern "C" fn ts_partition(arg: u32) {
     });
 }
 
+/// Partition (SHARDED-INPUT cluster path): worker `i` reads its node-local input
+/// slice DIRECTLY from `INPUT_IO_SLOT` and routes every record to its range-owner's
+/// sub-slot `TS_PART_BASE + i*N + owner`.
+///
+/// Unlike `ts_partition`, this expects the host to have SLICED the input across the
+/// P nodes (no `replicate`, no `ts_distribute`): each node holds only its 1/P shard
+/// in slot 0, so the per-node SHM footprint is ~1/P of the dataset instead of the
+/// whole file. Because every node reads the SAME slot 0, the worker index can't be
+/// derived from the input slot — `arg` carries it EXPLICITLY: `i | (N << 16)`.
+/// Additive: `ts_partition`, `ts_distribute`, and the intra path are untouched.
+#[no_mangle]
+pub extern "C" fn ts_partition_local(arg: u32) {
+    let i = arg & 0xFFFF;
+    let n = arg >> 16;
+    if n == 0 { return; }
+    let out_base = TS_PART_BASE + i * n;
+    ShmApi::for_each_stream_record(common::INPUT_IO_SLOT, |_origin, rec| {
+        if rec.is_empty() { return; }
+        let owner = owner_of(rec[0], n);
+        ShmApi::append_stream_data(out_base + owner, rec);
+    });
+}
+
 /// Merge: owner `j` reads its gathered range (stream slot `in_slot`), sorts it by
 /// the 10-byte key, and emits a single summary record describing the range. The
 /// sorted bytes never leave SHM — for the benchmark we only need the correctness

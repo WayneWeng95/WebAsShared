@@ -1,0 +1,129 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_terasort_ap",
+  "log_level": "info",
+  "total_nodes": 1,
+  "transfer": true,
+  "placement_policy": "balanced",
+  "converge_on_coordinator": false,
+  "nodes": [
+    {
+      "id": "load",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/terasort/records_512mb.txt",
+          "slot": 0,
+          "prefetch": true,
+          "replicate": true
+        }
+      }
+    },
+    {
+      "id": "distribute",
+      "placement": "all",
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_distribute",
+          "arg": 10,
+          "wasm_arg": 65546
+        }
+      }
+    },
+    {
+      "id": "part_0",
+      "node_id": 0,
+      "deps": [
+        "distribute"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition",
+          "arg": 10,
+          "wasm_arg": 65546
+        }
+      }
+    },
+    {
+      "id": "combine_0",
+      "node_id": 0,
+      "deps": [
+        "part_0"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            100
+          ]
+        }
+      }
+    },
+    {
+      "id": "gather",
+      "node_id": 0,
+      "deps": [
+        "combine_0"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream_nodes": [
+            "combine_0"
+          ],
+          "downstream": 400
+        }
+      }
+    },
+    {
+      "id": "summary",
+      "node_id": 0,
+      "deps": [
+        "gather"
+      ],
+      "output_slot": 500,
+      "kind": {
+        "Func": {
+          "func": "ts_range_summary",
+          "arg": 400,
+          "wasm_arg": 32768400
+        }
+      }
+    },
+    {
+      "id": "summary_global",
+      "node_id": 0,
+      "deps": [
+        "summary"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "finalize",
+      "node_id": 0,
+      "deps": [
+        "summary_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_finalize"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "node_id": 0,
+      "deps": [
+        "finalize"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/terasort_ap_result.txt"
+        }
+      }
+    }
+  ]
+}

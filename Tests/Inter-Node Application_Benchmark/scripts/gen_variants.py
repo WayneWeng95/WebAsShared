@@ -144,7 +144,7 @@ def first_fit_weights(fanout: int, nodes: int, cap: int) -> list[int]:
 
 def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
           fanout: int | None = None, pack_cap: int | None = None,
-          matrix_n: int | None = None) -> dict:
+          matrix_n: int | None = None, shard_input: bool = False) -> dict:
     if workload not in FAN_PREFIX:
         sys.exit(f"unknown workload {workload!r}; expected one of {list(FAN_PREFIX)}")
     if policy not in POLICIES:
@@ -161,7 +161,8 @@ def build(workload: str, policy: str, nodes: int, input_path: str | None = None,
         part_nodes = _fan_placement(N, nodes, policy, pack_cap)
         owner_nodes = _fan_placement(N, nodes, policy, pack_cap)
         records = input_path or "TestData/terasort/records_32mb.txt"
-        d = gen_terasort_ap_dag.build_dag(N, part_nodes, owner_nodes, records)
+        d = gen_terasort_ap_dag.build_dag(N, part_nodes, owner_nodes, records,
+                                          shard_input=shard_input)
         d["total_nodes"] = nodes
         d["placement_policy"] = policy
         return d
@@ -483,11 +484,12 @@ def main() -> int:
     ap.add_argument("--fanout", type=int, default=None, help="override parallel-stage fanout (total workers across cluster)")
     ap.add_argument("--pack-cap", type=int, default=None, help="per-node worker cap for first-fit pack consolidation (e.g. 16 = cores/node)")
     ap.add_argument("--matrix-n", type=int, default=None, help="matrix only: the N×N dimension (must match the staged A/B inputs)")
+    ap.add_argument("--shard-input", action="store_true", help="terasort only: slice the input across nodes (1/P per node) instead of replicating it — lifts the ~512MB replicate SHM ceiling (needs the ts_partition_local guest fn; N==P)")
     ap.add_argument("--out", default=None, help="output path (default: stdout)")
     args = ap.parse_args()
 
     d = build(args.workload, args.policy, args.nodes, args.input, args.fanout,
-              args.pack_cap, args.matrix_n)
+              args.pack_cap, args.matrix_n, args.shard_input)
     text = json.dumps(d, indent=2)
     if args.out:
         with open(args.out, "w") as f:

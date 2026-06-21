@@ -1,0 +1,129 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "load_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort/records_512mb.txt",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_0"
+        ],
+        "id": "distribute_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65546,
+            "func": "ts_distribute"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "part_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65546,
+            "func": "ts_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_0"
+        ],
+        "id": "combine_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 2,
+            "upstream": [
+              100
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_0"
+        ],
+        "id": "gather",
+        "kind": {
+          "Aggregate": {
+            "downstream": 400,
+            "upstream": [
+              2
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "gather"
+        ],
+        "id": "summary",
+        "kind": {
+          "WasmVoid": {
+            "arg": 32768400,
+            "func": "ts_range_summary"
+          }
+        }
+      },
+      {
+        "deps": [
+          "summary"
+        ],
+        "id": "summary_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 401,
+            "upstream": [
+              500
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "summary_global"
+        ],
+        "id": "finalize",
+        "kind": {
+          "WasmVoid": {
+            "arg": 401,
+            "func": "ts_finalize"
+          }
+        }
+      },
+      {
+        "deps": [
+          "finalize"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/terasort_ap_result.txt",
+            "slot": 1
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/terasort/records_512mb.txt",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_terasort_ap",
+  "transfer": true
+}
