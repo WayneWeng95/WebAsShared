@@ -59,7 +59,7 @@ PY
 # 2. generate the ClusterDag (relative input/output paths → resolve per-node under executor_work_dir)
 log "gen_cluster_dag → $DAG"
 python3 "$HERE/gen_cluster_dag.py" "$WORKLOAD" --nodes "$NODES" --parts "$PARTS" --users "$USERS" \
-    --events-prefix "$DATADIR_REL/events_node" --out "$OUT_REL" > "$DAG"
+    --events-prefix "$DATADIR_REL/events_node" --out "$OUT_REL" --persist "${PERSIST:-none}" > "$DAG"
 
 # 3. submit from the coordinator
 log "submit: node-agent submit --config $CFG --dag $DAG"

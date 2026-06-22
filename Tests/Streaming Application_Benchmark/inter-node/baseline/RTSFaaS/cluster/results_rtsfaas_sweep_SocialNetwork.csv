@@ -1,0 +1,6 @@
+workload,number,throughput_req_s,avg_ms,p99_ms,status
+SocialNetwork,100,2847.96,986.42,1084.69,ok
+SocialNetwork,250,4829.19,1378.07,1609.97,ok
+SocialNetwork,500,5999.37,2256.12,2608.04,ok
+SocialNetwork,625,NA,NA,NA,DID_NOT_COMPLETE
+SocialNetwork,750,NA,NA,NA,DID_NOT_COMPLETE

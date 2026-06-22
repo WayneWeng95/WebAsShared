@@ -32,6 +32,12 @@ ap.add_argument("--events-prefix", default="TestData/stream_app/cluster/events_n
 ap.add_argument("--shm-prefix", default="/dev/shm/rdma_stream")
 ap.add_argument("--out", default="TestOutput/rdma_stream_result.txt",
                 help="gate output path on the MERGER node (last node)")
+ap.add_argument("--persist", choices=["none", "async", "sync"], default="none",
+                help="FT Persist offload PER NODE (snapshots that node's apply working set). "
+                     "async = background leaf joined at run end; "
+                     "sync = fsync barrier between apply and aggregate_local.")
+ap.add_argument("--persist-dir", default="TestOutput/persist",
+                help="per-node directory the Persist node writes its snapshot to")
 args = ap.parse_args()
 
 p = PREFIX[args.workload]
@@ -56,8 +62,27 @@ def node_dag(i):
         applies.append(aid)
         nodes.append({"id": aid, "deps": ["parse", "seed"],
                       "kind": {"Func": {"func": f"{p}_apply", "arg": BASE + j, "arg2": OUT + j}}})
-    nodes.append({"id": "aggregate_local", "deps": applies,
+    # FT Persist: per node, snapshot this node's apply working set (the parse
+    # partitions BASE.. that apply read + the apply outputs OUT..).
+    agg_local_deps = applies
+    if args.persist == "sync":
+        # synchronous: fsync barrier between apply and aggregate_local — the
+        # durable write must complete before this node's local aggregate starts.
+        barrier_slots = [BASE + j for j in range(n)] + [OUT + j for j in range(n)]
+        nodes.append({"id": "persist", "deps": applies,
+                      "kind": {"Persist": {"output_dir": f"{args.persist_dir}/node{i}",
+                                           "atomics": True, "stream_slots": barrier_slots,
+                                           "shared_state": True, "sync": True}}})
+        agg_local_deps = ["persist"]
+    nodes.append({"id": "aggregate_local", "deps": agg_local_deps,
                   "kind": {"Aggregate": {"upstream": [OUT + j for j in range(n)], "downstream": LOCAL_AGG}}})
+    if args.persist == "async":
+        # async: background offload of this node's working set as a leaf, joined at run end.
+        persist_slots = [0] + [BASE + j for j in range(n)] + [OUT + j for j in range(n)] + [LOCAL_AGG]
+        nodes.append({"id": "persist", "deps": ["aggregate_local"],
+                      "kind": {"Persist": {"output_dir": f"{args.persist_dir}/node{i}",
+                                           "atomics": True, "stream_slots": persist_slots,
+                                           "shared_state": True, "sync": False}}})
 
     if i != merger:
         # send this node's partial tally to the merger over RDMA

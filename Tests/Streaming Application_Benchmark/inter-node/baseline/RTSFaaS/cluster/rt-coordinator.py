@@ -69,13 +69,17 @@ def mean_std(xs):
 
 
 def _num_after(log, *keywords):
-    """First float on a line containing any keyword (case-insensitive)."""
+    """Float appearing AFTER the keyword on the first matching line (case-insensitive).
+    Must skip the leading "[06-22 HH:MM:SS]" timestamp, so we search the substring that
+    follows the keyword, not the whole line."""
     for line in log.splitlines():
         low = line.lower()
-        if any(k.lower() in low for k in keywords):
-            m = re.search(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", line)
-            if m:
-                return float(m.group())
+        for k in keywords:
+            idx = low.find(k.lower())
+            if idx >= 0:
+                m = re.search(r"[-+]?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", line[idx + len(k):])
+                if m:
+                    return float(m.group())
     return None
 
 
@@ -115,10 +119,11 @@ def one_run(app, env, coord, workers, port, rtdir, reps_idx, total, deadline_s=6
         except Exception as ex:
             worker_logs[wid] = f"(could not fetch: {ex})"
 
+    # headline = the client's end-to-end numbers (records/sec + ms), per single-node README
     res = {
-        "throughput_req_s": _num_after(client_log, "Throughput"),
-        "avg_ms": _num_after(driver_log, "average latency"),
-        "p99_ms": _num_after(driver_log, "99th latency"),
+        "throughput_req_s": _num_after(client_log, "Throughput:"),
+        "avg_ms": _num_after(client_log, "Average Latency:"),
+        "p99_ms": _num_after(client_log, "99th Percentile Latency:"),
     }
     for n in nodes:
         call(n, port, "/rm", {})

@@ -1,5 +1,5 @@
 {
-  "_comment": "ClusterDag: mediareview streaming across 4 nodes (data-parallel + RDMA partial-tally merge on node 3).",
+  "_comment": "ClusterDag: socialnetwork streaming across 4 nodes (data-parallel + RDMA partial-tally merge on node 3).",
   "shm_path_prefix": "/dev/shm/rdma_stream",
   "log_level": "info",
   "transfer": true,
@@ -39,7 +39,7 @@
         "deps": [],
         "kind": {
           "Func": {
-            "func": "mr_seed",
+            "func": "sn_seed",
             "arg": 0,
             "wasm_arg": 10000
           }
@@ -52,7 +52,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_parse",
+            "func": "sn_parse",
             "arg": 4,
             "arg2": 10
           }
@@ -66,7 +66,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 10,
             "arg2": 110
           }
@@ -80,7 +80,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 11,
             "arg2": 111
           }
@@ -94,7 +94,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 12,
             "arg2": 112
           }
@@ -108,7 +108,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 13,
             "arg2": 113
           }
@@ -189,7 +189,7 @@
         "deps": [],
         "kind": {
           "Func": {
-            "func": "mr_seed",
+            "func": "sn_seed",
             "arg": 0,
             "wasm_arg": 10000
           }
@@ -202,7 +202,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_parse",
+            "func": "sn_parse",
             "arg": 4,
             "arg2": 10
           }
@@ -216,7 +216,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 10,
             "arg2": 110
           }
@@ -230,7 +230,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 11,
             "arg2": 111
           }
@@ -244,7 +244,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 12,
             "arg2": 112
           }
@@ -258,7 +258,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 13,
             "arg2": 113
           }
@@ -339,7 +339,7 @@
         "deps": [],
         "kind": {
           "Func": {
-            "func": "mr_seed",
+            "func": "sn_seed",
             "arg": 0,
             "wasm_arg": 10000
           }
@@ -352,7 +352,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_parse",
+            "func": "sn_parse",
             "arg": 4,
             "arg2": 10
           }
@@ -366,7 +366,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 10,
             "arg2": 110
           }
@@ -380,7 +380,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 11,
             "arg2": 111
           }
@@ -394,7 +394,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 12,
             "arg2": 112
           }
@@ -408,7 +408,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 13,
             "arg2": 113
           }
@@ -489,7 +489,7 @@
         "deps": [],
         "kind": {
           "Func": {
-            "func": "mr_seed",
+            "func": "sn_seed",
             "arg": 0,
             "wasm_arg": 10000
           }
@@ -502,7 +502,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_parse",
+            "func": "sn_parse",
             "arg": 4,
             "arg2": 10
           }
@@ -516,7 +516,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 10,
             "arg2": 110
           }
@@ -530,7 +530,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 11,
             "arg2": 111
           }
@@ -544,7 +544,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 12,
             "arg2": 112
           }
@@ -558,7 +558,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_apply",
+            "func": "sn_apply",
             "arg": 13,
             "arg2": 113
           }
@@ -674,7 +674,7 @@
         ],
         "kind": {
           "Func": {
-            "func": "mr_summary",
+            "func": "sn_summary",
             "arg": 300
           }
         }
@@ -686,7 +686,7 @@
         ],
         "kind": {
           "Output": {
-            "path": "TestOutput/rdma_stream_mediareview.txt"
+            "path": "TestOutput/rdma_stream_socialnetwork.txt"
           }
         }
       }
