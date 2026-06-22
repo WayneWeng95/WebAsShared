@@ -92,11 +92,12 @@ def main():
     new = not os.path.exists(args.csv)
     fcsv = open(args.csv, "a")
     if new:
-        fcsv.write("trades,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,violations,expect,success,reps\n")
+        fcsv.write("trades,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,"
+                   "violations,expect,success,reps\n")
 
     print(f"[finra] trades={n_trades} fanout={args.fanout} shards/rule={S} workers={n_workers} "
           f"(5 stateless×{S} + 3 stateful) nodes={len(nodes)} reps={args.reps}")
-    ms_list, viol_seen, ok_all = [], None, True
+    ms_list, job_list, viol_seen, ok_all = [], [], None, True
     for rep in range(1, args.reps + 1):
         uid = uuid.uuid4().hex
         r.flushdb()                                  # cold Redis — no warm state across reps (untimed)
@@ -118,7 +119,7 @@ def main():
                           "cmd": ["python3", wrap, module, f"{uid}_trades",
                                   f"{uid}_count_{rule}_full", "--", str(rule)], "env": fenv})
 
-        _, ok, _ = fl.run_faaslets(specs, port, t0=t0)
+        _, ok, per = fl.run_faaslets(specs, port, t0=t0)
         total = 0                                    # sum every partial (stateless shards + stateful full)
         for rule in FINRA_STATELESS:
             for s in range(S):
@@ -126,20 +127,26 @@ def main():
         for rule in FINRA_STATEFUL:
             total += int((r.get(f"{uid}_count_{rule}_full") or b"0").strip() or 0)
         makespan = int((time.time() - t0) * 1000)    # clock stops after the aggregate (mirrors WasMem reduce)
+        job_ms = sum(per.values())                   # aggregate per-node Faaslet execution time (cluster compute)
 
         gate = args.expect if args.expect is not None else (viol_seen if viol_seen is not None else total)
         viol_seen = total
         success = ok and total == gate
         ok_all = ok_all and success
         ms_list.append(makespan)
-        print(f"[finra] rep {rep}: makespan={makespan}ms violations={total} gate={gate} ok={success}")
+        job_list.append(job_ms)
+        print(f"[finra] rep {rep}: makespan={makespan}ms total_job={job_ms}ms "
+              f"violations={total} gate={gate} ok={success}")
 
     mean_ms, std_ms = fl.mean_std(ms_list)
     mean_ms, std_ms = int(mean_ms), round(std_ms, 1)
+    job_mean = int(sum(job_list) / len(job_list))
     gate = args.expect if args.expect is not None else viol_seen
-    fcsv.write(f"{n_trades},{n_workers},{len(nodes)},{mean_ms},{std_ms},{viol_seen},{gate},{ok_all},{args.reps}\n")
+    fcsv.write(f"{n_trades},{n_workers},{len(nodes)},{mean_ms},{std_ms},{job_mean},"
+               f"{viol_seen},{gate},{ok_all},{args.reps}\n")
     fcsv.close()
-    print(f"[finra] mean makespan={mean_ms}±{std_ms}ms violations={viol_seen} success={ok_all} → {args.csv}")
+    print(f"[finra] mean makespan={mean_ms}±{std_ms}ms total_job={job_mean}ms "
+          f"violations={viol_seen} success={ok_all} → {args.csv}")
     print(f"RESULT viol={viol_seen} makespan_ms={mean_ms} std={std_ms} success={ok_all}")
     sys.exit(0 if ok_all else 1)
 

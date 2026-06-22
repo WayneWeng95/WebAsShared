@@ -12,9 +12,9 @@ makespan (end-to-end latency). An error bar (makespan_std) sits on the makespan
 base; the total-exec value is printed on top, the makespan value inside the base.
 
 The total-exec spread is ~12s..550s with a big empty gap (everything <= 52s
-except Faasm WordCount=550s and Matrix=383s), so instead of a log axis we use a
-two-level broken (split) linear y-axis: a lower band (0..70s) for the detail and
-an upper band (350..600s) for the two tall Faasm bars.
+except the three tall Faasm bars: WordCount=550s, Matrix=383s, Finra=183s), so
+instead of a log axis we use a two-level broken (split) linear y-axis: a lower
+band (0..70s) for the detail and an upper band (120..600s) for the tall bars.
 
 Reads ../wasmem/results_<wl>.csv and ../faasm/results_<wl>.csv, picks the
 LARGEST input size per workload (max reps on ties).
@@ -57,9 +57,9 @@ WORKLOADS = [
 ]
 
 # Two-level broken y-axis (seconds). Lower band holds all the detail; upper band
-# holds the two tall Faasm total-exec bars (WordCount 550, Matrix 383).
+# holds the tall Faasm total-exec bars (WordCount 550, Matrix 383, Finra 183).
 LOW_TOP = 70.0
-HIGH_BOT, HIGH_TOP = 350.0, 600.0
+HIGH_BOT, HIGH_TOP = 120.0, 660.0
 
 # font sizes matched to the intra-node bar grid (plot_bars_grid.py)
 TICK_SIZE = 16
@@ -125,7 +125,7 @@ def main():
                 continue
             x = gi + (j - (len(ORDER) - 1) / 2) * bar_w
             mk = (fnum(rec.get("makespan_mean_ms")) or 0.0) / 1000.0
-            te = fnum(rec.get("total_job_mean_ms"))   # may be absent (faasm finra)
+            te = fnum(rec.get("total_job_mean_ms"))   # total exec; None if a CSV lacks it
             te = te / 1000.0 if te is not None else None
             w = bar_w * 0.9
             base = SYS[sys]["color"]
