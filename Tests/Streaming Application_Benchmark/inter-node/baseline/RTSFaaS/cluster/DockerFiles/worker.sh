@@ -68,7 +68,7 @@ function ResetParameters() {
 }
 
 function runApplication() {
-  echo "-Xms2g -Xmx8g -Xss100M -XX:+PrintGCDetails -Xmn4g -XX:+UseG1GC -jar -d64 ${JAR} -Djava.library.path=${LIBDIR} \
+  echo "-Xms4g -Xmx16g -Xss100M -XX:+PrintGCDetails -Xmn4g -XX:+UseG1GC -jar -d64 ${JAR} -Djava.library.path=${LIBDIR} \
       --isDriver $isDriver \
       --isDatabase $isDatabase \
       --isClient $isClient \
@@ -129,7 +129,7 @@ function runApplication() {
       --CCOption $CCOption \
       --complexity $complexity \
             "
-  java -Xms2g -Xmx8g -Xss100M -XX:+PrintGCDetails -Xmn4g -XX:+UseG1GC -Djava.library.path=$LIBDIR -jar -d64 $JAR \
+  java -Xms4g -Xmx16g -Xss100M -XX:+PrintGCDetails -Xmn4g -XX:+UseG1GC -Djava.library.path=$LIBDIR -jar -d64 $JAR \
       --isDriver $isDriver \
       --isClient $isClient \
       --isDatabase $isDatabase \

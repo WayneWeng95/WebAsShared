@@ -47,6 +47,22 @@ else
   grep -q 'currentThread().join(); // keep JVM alive' "$RDMA" || die "patch did not apply — check $RDMA"
 fi
 
+# 1b. fix #8 (inter-node only) — bound the profiler's DescriptiveStatistics windows.
+# MeasureTools.WorkerRdmaRecvEndEventTime() is called on EVERY spout poll (incl. idle
+# polls where msg==null) and addValue()s into an unbounded DescriptiveStatistics, so a
+# multi-node run (heavy cross-worker RDMA + busy-poll) leaks heap until OOM. Bounding the
+# window to 10000 caps it (~150MB) while keeping valid recent latency percentiles. Single-
+# node never hit this (workerNum=1 => no remote recvs). Idempotent. Uncommitted => re-apply.
+METRICS="$RTSRC/morph-core/src/main/java/intellistream/morphstream/engine/txn/profiler/Metrics.java"
+[ -f "$METRICS" ] || die "$METRICS missing"
+if grep -q 'new DescriptiveStatistics()' "$METRICS"; then
+  log "applying fix #8 (bound profiler DescriptiveStatistics window)"
+  sed -i 's/new DescriptiveStatistics()/new DescriptiveStatistics(10000)/g' "$METRICS"
+  ! grep -q 'new DescriptiveStatistics()' "$METRICS" || die "fix #8 did not fully apply"
+else
+  log "fix #8 already applied"
+fi
+
 # 2. regenerate the gitignored jars
 JAR="$RTSRC/morph-clients/target/rtfaas-jar-with-dependencies.jar"
 if [ -f "$JAR" ] && [ "$FORCE" != "--force" ]; then
