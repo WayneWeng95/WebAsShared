@@ -50,21 +50,21 @@ LABEL = {
     "shm-copy":     "Faasm (Shared memory copy)",
     # "shm-zerocopy": "Roadrunner (Shared memory zero-copy)",
 }
-COLOR = {
-    "s3-disk":      "#8c1d40",   # dark red
-    "s3":           "#d1495b",   # red
-    "redis-remote": "#e8843c",   # orange
-    "redis-local":  "#edae49",   # amber
-    "shm-copy":     "#2a9d8f",   # teal
-    "shm-zerocopy": "#1d7a3e",   # green (ours)
+COLOR = {  # unified muted-wave palette (WasMem = saturated blue pop)
+    "s3-disk":      "#9d5a60",   # maroon
+    "s3":           "#c97b7b",   # muted red
+    "redis-remote": "#d69a60",   # muted orange
+    "redis-local":  "#e0be72",   # muted gold
+    "shm-copy":     "#6fa8a0",   # muted teal
+    "shm-zerocopy": "#3a5fc4",   # WasMem blue (ours, pop)
 }
 MARKER = {
-    "s3-disk": "o", 
-    "s3": "s", 
+    "s3-disk": "P",
+    "s3": "s",
     "redis-remote": "^",
-    "redis-local": "v", 
-    "shm-copy": "D", 
-    "shm-zerocopy": "*",
+    "redis-local": "v",
+    "shm-copy": "D",
+    "shm-zerocopy": "o",   # ours
 }
 
 
@@ -228,7 +228,7 @@ def main():
     ap = argparse.ArgumentParser(description="Plot StateSync benchmark results")
     ap.add_argument("--csv", default="results.csv")
     ap.add_argument("--outdir", default=os.path.normpath(os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", "Graph")))
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "Figures")))
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--readers", type=int, default=None,
                     help="which fan-out degree to plot (default: lowest in CSV)")

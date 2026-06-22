@@ -19,7 +19,7 @@ plt.rcParams.update({"xtick.labelsize": TICK, "ytick.labelsize": TICK,
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--csv", default=os.path.join(HERE, "results.csv"))
-    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Graph")))
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Figures")))
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     args = ap.parse_args()
 

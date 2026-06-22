@@ -22,11 +22,11 @@ ROOT = os.path.dirname(HERE)
 FIGS = os.path.join(HERE, "figs")
 os.makedirs(FIGS, exist_ok=True)
 
-STYLE = {
-    "ours":       dict(color="#5a82c2", label="WasMem"),      # muted engine blue
-    "faasm":      dict(color="#5aa9a0", label="Faasm"),       # muted teal
-    "rmmap":      dict(color="#5fa06f", label="RMMap"),       # muted green
-    "cloudburst": dict(color="#e2c16b", label="Cloudburst"),  # softer amber
+STYLE = {  # unified muted-wave palette (WasMem = saturated blue pop)
+    "ours":       dict(color="#3a5fc4", label="WasMem"),      # WasMem blue (pop)
+    "faasm":      dict(color="#6fa8a0", label="Faasm"),       # muted teal
+    "rmmap":      dict(color="#86b07d", label="RMMap"),       # muted sage
+    "cloudburst": dict(color="#e0be72", label="Cloudburst"),  # muted gold
 }
 ORDER = ["cloudburst", "rmmap", "faasm", "ours"]   # bar/legend order
 

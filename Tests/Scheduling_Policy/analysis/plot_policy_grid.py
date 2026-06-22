@@ -28,7 +28,7 @@ FIGS = os.path.join(HERE, "figs")
 os.makedirs(FIGS, exist_ok=True)
 
 # colour = policy: two tones of blue (green is reserved for a compared system)
-POLICY_COLOR = {"pack": "#2f5e9e", "balanced": "#86b4e0"}
+POLICY_COLOR = {"pack": "#8aa8f0", "balanced": "#3a5fc4"}  # light + WasMem blue (pop)
 
 # Single fan-out, pack vs balanced. The node count printed on each bar shows the
 # placement (pack -> 2 nodes, balanced -> 4).
@@ -69,6 +69,14 @@ def cell(rows, scol, size, policy, fanout):
     return None
 
 
+def lighten(hexc, f=0.62):
+    """Lighter tint of a hex color (toward white) for the total-execution-time
+    envelope, so the full bar reads as a pale halo around the saturated makespan
+    base (= the policy color)."""
+    r, g, b = (int(hexc[i:i + 2], 16) for i in (1, 3, 5))
+    return "#%02x%02x%02x" % tuple(int(c + (255 - c) * f) for c in (r, g, b))
+
+
 def main():
     nrows = len(WORKLOADS)
     fig, axes = plt.subplots(nrows, 1, figsize=(9, 6))
@@ -92,16 +100,20 @@ def main():
                 exec_ys.append(float(rec["total_exec_ms"]) / 1000.0)  # ms -> s
                 mk_ys.append(float(rec["makespan_ms"]) / 1000.0)
             w = bar_w * 0.92
-            # full bar = total exec time (translucent), shadow inside = makespan
-            ax.bar(xs, exec_ys, w, color=POLICY_COLOR[pol],
-                   alpha=OUTER_ALPHA, edgecolor="black", linewidth=0.4)
-            ax.bar(xs, mk_ys, w, color=POLICY_COLOR[pol], linewidth=0)
-            # value labels: total exec on top of the bar, makespan inside the shadow
+            # Opaque two-tone bar: full height = total execution time (LIGHTER tint
+            # of the policy color), saturated base = makespan (the policy color).
+            mk_color = POLICY_COLOR[pol]
+            mk_label = "white"   # white makespan labels on both policies
+            ax.bar(xs, exec_ys, w, color=lighten(mk_color),
+                   edgecolor="black", linewidth=0.4)
+            ax.bar(xs, mk_ys, w, color=mk_color,
+                   edgecolor="black", linewidth=0.4)
+            # value labels: total exec on top of the bar, makespan inside the base
             for x, te, mk in zip(xs, exec_ys, mk_ys):
                 ax.text(x, te, f"{te:.1f}", ha="center", va="bottom",
                         fontsize=VALUE_SIZE, color="#333", fontweight="bold")
                 ax.text(x, mk, f"{mk:.1f}", ha="center", va="top",
-                        fontsize=VALUE_SIZE, color="white", fontweight="bold")
+                        fontsize=VALUE_SIZE, color=mk_label, fontweight="bold")
         ax.set_xticks(range(nsz))
         ax.set_xticklabels([lbl for _, lbl in wl["sizes"]], fontsize=TICK_SIZE)
         ax.tick_params(axis="y", labelsize=TICK_SIZE)
@@ -112,15 +124,20 @@ def main():
         ax.text(0.5, -0.22, wl["name"], transform=ax.transAxes,
                 ha="center", va="top", fontsize=LABEL_SIZE, fontweight="bold")
 
-    # legend: policy colour only (full bar = total exec, inner shadow = makespan)
-    handles = [Patch(facecolor=POLICY_COLOR[p], edgecolor="black", linewidth=0.4,
-                     label=p) for p in ("pack", "balanced")]
-    fig.legend(handles=handles, loc="upper center", ncol=2, frameon=False,
-               fontsize=LEGEND_SIZE, bbox_to_anchor=(0.5, 1.0),
-               columnspacing=1.8, handletextpad=0.6)
-    fig.tight_layout(rect=[0, 0, 1, 0.96], h_pad=0.4)
+    # legend: policy colour only (pack/balanced); the shade encoding goes in the
+    # legend title so it isn't confused with mismatched grey swatches.
+    policy_h = [Patch(facecolor=POLICY_COLOR[p], edgecolor="black", linewidth=0.4,
+                      label=p) for p in ("pack", "balanced")]
+    # reserve a slim band ABOVE the plots for the legend (title = encoding
+    # explanation, row below = pack/balanced) so nothing sits inside the top panel.
+    fig.tight_layout(rect=[0, 0, 1, 0.93], h_pad=0.4)
+    leg = fig.legend(handles=policy_h, loc="upper center", ncol=2, frameon=False,
+                     fontsize=LEGEND_SIZE, bbox_to_anchor=(0.5, 1.02),
+                     columnspacing=1.8, handletextpad=0.6,
+                     title="full bar = total execution time   ·   saturated base = makespan")
+    leg.get_title().set_fontsize(LEGEND_SIZE - 1)
     out = os.path.join(FIGS, "policy_grid.pdf")
-    fig.savefig(out, bbox_inches="tight")
+    fig.savefig(out, bbox_inches="tight", pad_inches=0.02)
     print("wrote", out)
 
 

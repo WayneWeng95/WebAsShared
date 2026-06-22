@@ -6,10 +6,10 @@ renders a single figure: median wall time vs map fan-out. Non-numeric rows
 (e.g. a `CRASH` at low fan-out on a large corpus — wc_map OOMs the guest heap)
 are drawn as a red x marker on the baseline so the failure boundary is visible.
 
-Default output: PDF into Tests/Graph/.
+Default output: PDF into Tests/Figures/.
 
 Usage:
-  ./plot.py                                  # all results_*.csv -> Tests/Graph/fan_out_sweep.pdf
+  ./plot.py                                  # all results_*.csv -> Tests/Figures/fan_out_sweep.pdf
   ./plot.py --format png                     # PNG instead
   ./plot.py --outdir /some/dir --csv a.csv b.csv
 """
@@ -19,7 +19,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-GRAPH_DIR = os.path.normpath(os.path.join(HERE, "..", "Graph"))
+GRAPH_DIR = os.path.normpath(os.path.join(HERE, "..", "Figures"))
 
 TICK, LABEL, LEG = 15, 15, 14
 plt.rcParams.update({"xtick.labelsize": TICK, "ytick.labelsize": TICK,

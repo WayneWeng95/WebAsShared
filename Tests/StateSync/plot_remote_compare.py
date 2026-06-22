@@ -38,9 +38,10 @@ LABEL = {
     "rdma-shm":        "RTSFaaS (Shared memory + RDMA)",
     "rdma-shm-ours":   "WasMem (Shared memory + RDMA)",
 }
-COLOR = {"redis-remote": "#e8843c", "cloudburst-warm": "#edae49",
-         "rdma-shm": "#1d7a3e", "rdma-shm-ours": "#2057c7"}
-MARKER = {"redis-remote": "^", "cloudburst-warm": "v", "rdma-shm": "*", "rdma-shm-ours": "o"}
+COLOR = {"redis-remote": "#d69a60", "cloudburst-warm": "#e0be72",
+         "rdma-shm": "#b07ba6",        # RTSFaaS (shm + RDMA)
+         "rdma-shm-ours": "#3a5fc4"}   # WasMem (ours, pop)
+MARKER = {"redis-remote": "^", "cloudburst-warm": "v", "rdma-shm": "D", "rdma-shm-ours": "o"}
 
 # Series that sit in the upper band of the broken throughput axis (the RDMA
 # shared-memory rows that dwarf the store-based approaches).  Everyone else
@@ -111,7 +112,7 @@ def main():
                     help="committed remote results (redis-remote + reference rdma-shm)")
     ap.add_argument("--ours-csv", default=DEFAULT_OURS,
                     help="our measured rdma-shm (results_remote.csv)")
-    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Graph")))
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Figures")))
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--metric", choices=["mean", "p50"], default="mean")
     ap.add_argument("--figsize", default="9,3")

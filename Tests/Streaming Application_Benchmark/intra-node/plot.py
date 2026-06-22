@@ -40,10 +40,10 @@ WL_LABEL = {'mediareview': 'MediaReview', 'socialnetwork': 'SocialNetwork'}
 # StateSync palette: ours = #2057c7 (WasMem blue); sync barrier a lighter blue so
 # the two WasMem modes group visually; baselines reuse the teal/amber slots.
 SERIES = [
-    ('statefun',  'Flink StateFun',         '#e8843c'),   # orange
-    ('rtsfaas',   'RTSFaaS',                '#2a9d8f'),   # teal (matches latency_throughput_remote.pdf)
-    ('was_sync',  'WasMem (sync)',  '#7aa5e0'),
-    ('was_async', 'WasMem (async)', '#2057c7'),
+    ('statefun',  'Flink StateFun',  '#d69a60'),   # muted orange
+    ('rtsfaas',   'RTSFaaS',         '#b07ba6'),   # mauve (own hue, != Faasm teal)
+    ('was_sync',  'WasMem (sync)',   '#8aa8f0'),   # WasMem light blue
+    ('was_async', 'WasMem (async)',  '#3a5fc4'),   # WasMem blue (ours, pop)
 ]
 
 data = {k: {} for k, _, _ in SERIES}

@@ -83,7 +83,7 @@ def main():
     ap.add_argument("--csv", default=DEFAULT_SWEEP)
     ap.add_argument("--baseline-csv", default=DEFAULT_BASELINE)
     ap.add_argument("--size", type=int, default=128 * 1024 * 1024)
-    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Graph")))
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Figures")))
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--figsize", default="6.5,4")
     args = ap.parse_args()

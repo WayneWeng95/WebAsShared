@@ -11,7 +11,7 @@ Each `tag` is one topology run, e.g.:
     incast     1 link   each of A,C,D -> B     (sum across senders = ingress cap)
     pairs2     1 link   A->B and C->D at once  (disjoint pairs; aggregate scales)
 
-Renders (into ../../Graph):
+Renders (into ../../Figures):
     bandwidth_remote.<fmt>       aggregate GiB/s vs state size, one line per tag,
                                  with the 10 GbE per-port ceiling drawn for ref.
     bandwidth_per_link.<fmt>     per-link GiB/s vs size (shows fan-out's 1/N split)
@@ -106,7 +106,7 @@ def main():
     ap = argparse.ArgumentParser(description="Plot rdma_bw multi-node bandwidth")
     ap.add_argument("--csv", default="bw.csv")
     ap.add_argument("--outdir", default=os.path.normpath(os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", "Graph")))
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "Figures")))
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--figsize", default="9,3.2")
     args = ap.parse_args()

@@ -32,13 +32,14 @@ DEFAULT_BASELINE = os.path.join(HERE, "..", "Micro-Benchmarks", "StateSync-local
 # Page sizes we expect, in order, with styling.
 PAGES = [4096, 65536, 2097152]
 LABEL = {4096: "WasMem 4 KiB page", 65536: "WasMem 64 KiB page", 2097152: "WasMem 2 MiB page"}
-COLOR = {4096: "#2057c7", 65536: "#e8843c", 2097152: "#8c1d40"}
+# WasMem blue ramp: darkest = smallest page (4 KiB), lightest = largest (2 MiB)
+COLOR = {4096: "#1e3db0", 65536: "#4f74e8", 2097152: "#8aa8f0"}
 MARKER = {4096: "o", 65536: "o", 2097152: "o"}
 
 # Comparison group: the modelled /dev/shm zero-copy row from StateSync-local.
 COMP = "shm-zerocopy"
 COMP_LABEL = "RMMAP (Shared memory zero-copy)"
-COMP_COLOR = "#1d7a3e"
+COMP_COLOR = "#86b07d"   # muted sage (zero-copy baseline)
 COMP_MARKER = "*"
 
 TICK_SIZE, LABEL_SIZE, LEGEND_SIZE, YLABEL_SIZE = 16, 16, 16, 14
@@ -110,7 +111,7 @@ def main():
     ap.add_argument("--baseline-csv", default=DEFAULT_BASELINE)
     ap.add_argument("--no-baseline", action="store_true",
                     help="omit the modelled shared-memory zero-copy comparison line")
-    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Graph")))
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Figures")))
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--metric", choices=["p50", "mean"], default="mean")
     ap.add_argument("--row", choices=["copy", "zerocopy"], default="zerocopy",

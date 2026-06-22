@@ -43,12 +43,12 @@ LABEL = {
     "cloudburst-warm": "Cloudburst (Redis local)",
     "rdma-shm":        "RTSFaaS (RDMA shared memory)",
 }
-COLOR = {
-    "s3-disk": "#8c1d40", "s3": "#d1495b", 
-    "redis-remote": "#e8843c",
-    "cloudburst-cold": "#5b8fb9", 
-    "cloudburst-warm": "#edae49",
-    "rdma-shm": "#2a9d8f",
+COLOR = {  # unified muted-wave palette (rdma-shm = RTSFaaS, mauve)
+    "s3-disk": "#9d5a60", "s3": "#c97b7b",
+    "redis-remote": "#d69a60",
+    "cloudburst-cold": "#cbb78c",
+    "cloudburst-warm": "#e0be72",
+    "rdma-shm": "#b07ba6",   # RTSFaaS (RDMA shared memory)
 }
 # COLOR = {
 #     "s3-disk":      "#8c1d40",   # dark red
@@ -59,12 +59,12 @@ COLOR = {
 #     "shm-zerocopy": "#1d7a3e",   # green
 # }
 MARKER = {
-    "s3-disk": "o", 
-    "s3": "s", 
+    "s3-disk": "P",
+    "s3": "s",
     "redis-remote": "^",
-    "cloudburst-cold": "*", 
+    "cloudburst-cold": "X",
     "cloudburst-warm": "v",
-    "rdma-shm": "D",
+    "rdma-shm": "D",   # RTSFaaS
 }
 
 
@@ -319,7 +319,7 @@ def main():
     ap.add_argument("--csv", nargs="+", default=None,
                     help="result CSVs (default: *_results.csv in cwd)")
     ap.add_argument("--outdir", default=os.path.normpath(os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "..", "Graph")))
+        os.path.dirname(os.path.abspath(__file__)), "..", "..", "Figures")))
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--figsize", default="9,3")
     ap.add_argument("--metric", choices=["mean", "p50"], default="mean")

@@ -24,11 +24,11 @@ LEGEND_SIZE = 17
 YLABEL_SIZE = 17
 
 FRAMEWORKS = ["WasMem-AOT", "RMMap", "Faasm", "Cloudburst"]   # = CSV column names
-COLOR = {
-    "WasMem-AOT":  "#5a82c2",   # muted engine blue (ours, AOT only)
-    "RMMap":       "#5fa06f",   # muted green
-    "Faasm":       "#5aa9a0",   # muted teal
-    "Cloudburst":  "#e2c16b",   # softer amber
+COLOR = {  # unified muted-wave palette (WasMem = saturated blue pop)
+    "WasMem-AOT":  "#3a5fc4",   # WasMem blue (ours, pop)
+    "RMMap":       "#86b07d",   # muted sage
+    "Faasm":       "#6fa8a0",   # muted teal
+    "Cloudburst":  "#e0be72",   # muted gold
 }
 # Display labels for the figure (drop the -AOT suffix; it's just our system).
 DISPLAY = {"WasMem-AOT": "WasMem"}

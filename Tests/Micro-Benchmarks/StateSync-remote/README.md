@@ -222,7 +222,7 @@ BW=../../../Executor/target/release/examples/rdma_bw
 #   NODE C: $BW send 10.10.1.4 --tag pairs2 --csv bw.csv   # sum the two ≈ 2.2 GiB/s
 
 # plot (NODE A): aggregate + per-link GiB/s vs size, with the 10 GbE ceiling line
-./plot_bw.py --csv bw.csv     # -> ../../Graph/bandwidth_remote.pdf, bandwidth_per_link.pdf
+./plot_bw.py --csv bw.csv     # -> ../../Figures/bandwidth_remote.pdf, bandwidth_per_link.pdf
 ```
 
 The story the figures tell: **fan-out / incast are capped at one port** (≈1.1

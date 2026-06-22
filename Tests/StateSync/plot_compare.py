@@ -45,13 +45,13 @@ LABEL = {
     "shm-zerocopy":        "RMMap (Shared memory zero-copy)",
     "shm-zerocopy-engine": "WasMem (Zero-copy memory routing)",
 }
-COLOR = {
-    "s3":                  "#d1495b",    # red    (matches StateSync-local)
-    "redis-local":         "#edae49",   # amber  (matches StateSync-local)
-    "rr-embedded":         "#7b2cbf",    # purple (Roadrunner)
-    "shm-copy":            "#2a9d8f",   # teal   (matches StateSync-local)
-    "shm-zerocopy":        "#1d7a3e",   # green  (matches StateSync-local)
-    "shm-zerocopy-engine": "#2057c7",   # blue   (ours, real)
+COLOR = {  # unified muted-wave palette (WasMem = saturated blue pop)
+    "s3":                  "#c97b7b",   # muted red
+    "redis-local":         "#e0be72",   # muted gold
+    "rr-embedded":         "#a17a52",   # brown (Roadrunner, kept clear of RTSFaaS)
+    "shm-copy":            "#6fa8a0",   # muted teal
+    "shm-zerocopy":        "#86b07d",   # muted sage (zero-copy baseline)
+    "shm-zerocopy-engine": "#3a5fc4",   # WasMem blue (ours, pop)
 }
 MARKER = {"s3": "s", "redis-local": "v", "rr-embedded": "P",
           "shm-copy": "D", "shm-zerocopy": "*", "shm-zerocopy-engine": "o"}
@@ -199,7 +199,7 @@ def main():
     ap.add_argument("--baseline-csv", default=DEFAULT_BASELINE)
     ap.add_argument("--engine-csv", default=DEFAULT_ENGINE)
     ap.add_argument("--roadrunner-csv", default=DEFAULT_ROADRUNNER)
-    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Graph")))
+    ap.add_argument("--outdir", default=os.path.normpath(os.path.join(HERE, "..", "Figures")))
     ap.add_argument("--format", default="pdf", choices=["png", "pdf", "svg"])
     ap.add_argument("--readers", type=int, default=1)
     ap.add_argument("--metric", choices=["p50", "mean"], default="mean")
