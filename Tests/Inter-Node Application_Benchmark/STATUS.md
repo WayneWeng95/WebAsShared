@@ -262,6 +262,43 @@ regime from its data-movement wins (WordCount 4 GB, TeraSort). See [[ml-crossove
   source changes and rebuild/redeploy all nodes via `build.sh` + sync.
 - [ ] Consider a `--expect` (true-count) gate on every WasMem run — rep-consistency
   alone masked both the >2 GB drop and the FINRA stale-result-file.
+- [ ] **2 MB (huge) pages instead of 4 KB — already MEASURED (harness-only) in
+  `Tests/PageSize/`; not yet a real engine option (clarified 2026-06-21).**
+  The 2 MiB page was tested in the **intra-node StateSync read-write** experiment:
+  `Tests/PageSize/run.sh` sweeps page size {4 KiB, 64 KiB, **2 MiB**} × transfer
+  {16 KiB…128 MiB} through the `shm_statesync` harness's `--page-bytes N` flag
+  (`Executor/connect/examples/shm_statesync.rs`). **Findings** (`Tests/PageSize/results.csv`):
+  - **Page size is a PUT lever.** At 128 MiB, copy-PUT climbs **4.45 → 5.58 → 7.79 GiB/s**
+    for 4 KiB → 64 KiB → 2 MiB (toward the ~8.9 GiB/s flat-memcpy ceiling) — bigger pages =
+    fewer, larger `memcpy` spans hitting prefetch / non-temporal-store sweet spots.
+  - **GET is page-insensitive** in this probe: zero-copy splice GET is flat ~0.2 µs (pointer
+    move); copy GET is bound by the materialize bandwidth regardless of page size. NB this
+    probe is a *single bulk* GET, **not** the per-record `for_each_stream_record` walk — so
+    it does **not** by itself settle whether bigger pages help the ML-≥3M / Matrix per-record
+    page-chain-walk cost ([[ml-crossover-compute-bound]]); that walk's per-page Acquire-load
+    count would still drop with fewer/larger pages, but it's unmeasured here.
+
+  **But this is harness-only — the real engine is NOT modified.** `common::PAGE_SIZE` is
+  still a hard-coded compile-time `const = 4 * KIB` (`Executor/common/src/lib.rs:82`); no
+  runtime flag, no `agent.toml` setting, no feature gate; the SHM file (`Executor/host/src/shm.rs`)
+  is mmap'd plain `MAP_SHARED` (no `MAP_HUGETLB`/THP). The README explicitly keeps 4 KiB as
+  the engine default because enlarging it coarsens allocation/splice granularity and wastes
+  memory on small records (a "jumbo span" fast-path for large single records is the noted
+  future direction). **To make 2 MiB real in the engine, two routes:**
+  1. **THP-back the SHM (4 KB logical pages unchanged) — cheap, additive, separate from the
+     PageSize lever.** `madvise(addr, size, MADV_HUGEPAGE)` after each `map_into_memory`/
+     `expand_mapping` in `shm.rs` (or `MAP_HUGETLB | MAP_HUGE_2MB` via a `hugetlbfs` mount).
+     Page-chain ABI + guest code untouched; only the OS backing uses 2 MiB frames, cutting
+     TLB pressure on the hot walk. The PageSize PUT result is about *logical* chunk size, so
+     this is a complementary (TLB) lever, not the same one.
+  2. **Resize the logical page to 2 MiB — invasive, matches the PageSize-measured PUT win but
+     hits its small-record memory cost.** `Page` is `#[repr(C, align(4096))]` + a
+     `size_of::<Page>() == PAGE_SIZE` static assert (`lib.rs:324,339`); literal `4096`s in
+     `Executor/guest/src/api/shared_area.rs` (150/169/230/283) bypass `PAGE_SIZE`;
+     `BUCKET_COUNT = PAGE_SIZE/PAGE_ID_SIZE` balloons; every slot/chain-node consumes ≥2 MiB
+     even for tiny payloads (2048 stream slots × 2 MiB; wasm32 1.5 GiB window → ~768 pages).
+     **Not** a drop-in toggle. The PageSize numbers quantify its upside; the README's
+     small-record waste is its downside.
 
 ## Operational notes (cluster)
 

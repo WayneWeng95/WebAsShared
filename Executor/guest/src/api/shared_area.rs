@@ -147,7 +147,7 @@ impl ShmApi {
             (*header).registry_index = reg_idx;
             (*header).next_payload_page = 0;
 
-            let head_capacity = 4096 - core::mem::size_of::<ChainNodeHeader>();
+            let head_capacity = PAGE_SIZE as usize - core::mem::size_of::<ChainNodeHeader>();
             let write_len = core::cmp::min(total_len, head_capacity);
             core::ptr::copy_nonoverlapping(data.as_ptr(), head_ptr.add(core::mem::size_of::<ChainNodeHeader>()), write_len);
             data_written += write_len;
@@ -166,7 +166,7 @@ impl ShmApi {
                 let overflow_header = next_ptr as *mut PageId;
                 *overflow_header = 0;
 
-                let overflow_capacity = 4096 - core::mem::size_of::<PageId>();
+                let overflow_capacity = PAGE_SIZE as usize - core::mem::size_of::<PageId>();
                 let remain = total_len - data_written;
                 let write_len = core::cmp::min(remain, overflow_capacity);
                 core::ptr::copy_nonoverlapping(data.as_ptr().add(data_written), next_ptr.add(core::mem::size_of::<PageId>()), write_len);
@@ -227,7 +227,7 @@ impl ShmApi {
                 (core::mem::size_of::<PageId>(), next as ShmOffset)
             };
 
-            let read_len = core::cmp::min(total_len - bytes_read, 4096 - header_size);
+            let read_len = core::cmp::min(total_len - bytes_read, PAGE_SIZE as usize - header_size);
             unsafe {
                 core::ptr::copy_nonoverlapping(
                     page_ptr.add(header_size),
@@ -280,7 +280,7 @@ impl ShmApi {
                 (core::mem::size_of::<PageId>(), next as ShmOffset)
             };
 
-            let page_capacity = 4096 - header_size;
+            let page_capacity = PAGE_SIZE as usize - header_size;
             let page_logical_end = page_logical_start + page_capacity;
 
             // Copy the overlap between this page's logical range and [offset, end).

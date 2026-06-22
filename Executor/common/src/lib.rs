@@ -79,7 +79,31 @@ pub const MIB: ShmOffset = 1024 * 1024;
 
 pub const INITIAL_SHM_SIZE: ShmOffset = 64 * MIB;
 
-pub const PAGE_SIZE: ShmOffset = 4 * KIB;
+/// **Engine page size — the single tunable knob for the page-chain granularity.**
+///
+/// Every derived constant (`PAGE_DATA_SIZE`, `SUPERBLOCK_SIZE`, `BUCKET_COUNT`,
+/// `RDMA_SCRATCH_SIZE`, …) and every page-arithmetic site (guest allocator +
+/// `stream_area`/`shared_area`, host extended pool, RDMA data plane in
+/// `remote/{shm,rdma,receiver_initiated}.rs` + `mesh/staging.rs`, `rdma_pool`,
+/// `resolution_buffer`) computes off this value, so changing it here re-sizes
+/// the whole page chain. Must be a **power of two** and **kept in sync with the
+/// `align(...)` on [`Page`]** — the `size_of::<Page>() == PAGE_SIZE` static assert
+/// below fails the build if they diverge.
+///
+/// **Trade-offs (see `Tests/PageSize/` + Inter-Node `STATUS.md`):** larger pages
+/// raise PUT/RDMA bandwidth (fewer, larger `memcpy`/WR spans → ~4.45→7.79 GiB/s at
+/// 128 MiB for 4 KiB→2 MiB) and shorten the per-record page-chain walk, at the cost
+/// of internal fragmentation — each slot/chain wastes up to one page in its tail,
+/// and the ~1.5 GiB wasm32 direct window holds only `CAPACITY_HARD_LIMIT/PAGE_SIZE`
+/// pages (≈740 at 2 MiB). Good for the **large-dataset inter-node** regime;
+/// pathological for many tiny independent records.
+///
+/// 2 MiB matches the host THP/hugepage frame, so the SHM backing can also be
+/// promoted to huge pages without straddling frames.
+pub const PAGE_SIZE: ShmOffset = 2 * MIB;   // was 4 * KIB — enlarged for large-dataset inter-node
+
+// PAGE_SIZE must be a power of two (page-id ⇄ slot-index math relies on it).
+const _: () = assert!(PAGE_SIZE.is_power_of_two());
 
 // Number of independent stream slots (upstream producers + downstream routing targets).
 // Increase this to support more concurrent actors; SUPERBLOCK_SIZE adjusts automatically.
@@ -152,7 +176,7 @@ pub const BARRIER_COUNT: usize = 64;
 pub const PAGE_HEADER_SIZE: usize = PAGE_ID_SIZE + SHM_OFFSET_SIZE;
 
 /// Usable data bytes per page (PAGE_SIZE minus header).
-/// wasm32 direct mode: 4096 - 12 = 4084 bytes per page.
+/// = PAGE_SIZE − PAGE_HEADER_SIZE (e.g. 4096−12=4084 at 4 KiB; 2097152−12 at 2 MiB).
 pub const PAGE_DATA_SIZE: usize = PAGE_SIZE as usize - PAGE_HEADER_SIZE;
 
 // ─── Capacity guards ─────────────────────────────────────────────────────────
@@ -321,7 +345,7 @@ pub struct Superblock {
     pub barriers: [AtomicU32; BARRIER_COUNT],
 }
 
-#[repr(C, align(4096))]
+#[repr(C, align(2097152))] // 2 MiB — must equal PAGE_SIZE (experiment branch)
 pub struct Page {
     /// PageId of the next page in this chain.  Widened to 8 bytes so that
     /// pages in the host-side extended pool can be referenced by id.  In the
@@ -338,7 +362,7 @@ pub struct Page {
 // header layout must be { next_offset: u64 @ 0, cursor: u32 @ 8, data @ 12 }.
 const _: () = assert!(core::mem::size_of::<Page>() == PAGE_SIZE as usize);
 const _: () = assert!(PAGE_HEADER_SIZE == 12);
-const _: () = assert!(PAGE_DATA_SIZE == 4084);
+const _: () = assert!(PAGE_DATA_SIZE == PAGE_SIZE as usize - PAGE_HEADER_SIZE);
 
 // Compile-time assertions for the Superblock layout after widening slot
 // atomics to AtomicPageId (u64).  These offsets are mirrored by the Python

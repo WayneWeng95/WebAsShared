@@ -1,8 +1,13 @@
 # Inter-Node Application Benchmark — design & progress tracker
 
-**Status: DESIGN / SCAFFOLDING (started 2026-06-18).** Nothing run yet. This file
-is the single source of truth for *what we are building, why, and how far along we
-are*. Update the checkboxes in [§9](#9-progress-tracker) as work lands.
+**Status: 4-NODE SHAKEOUT — WasMem-vs-Faasm head-to-heads DONE for all 6 workloads
+(updated 2026-06-21).** Live results + methodology live in `STATUS.md` (the running
+log); this file stays the design/rationale source of truth. **Scope pivot to record:**
+the 4-node bring-up ran the **Faasm baseline only** — the RMMap-on-Knative and
+Cloudburst-on-k8s baselines (flagged HIGH-risk in §8) were **not stood up**, and the
+dedicated 5th Redis box was **not** used (Faasm Redis runs on node 0). The 9-node
+scale-out (Phase 5) is **not** started. Update the checkboxes in
+[§9](#9-progress-tracker) as work lands.
 
 ---
 
@@ -355,36 +360,41 @@ Re-generate every figure + the headline table from the 9-node CSVs.
 
 Tick as work lands; keep one line per item.
 
+> Legend: `[x]` done · `[~]` partial (annotation says what's left) · `[ ]` not started.
+
 ### Infra
 - [x] Confirm inter/intra split; rename old folder → `Intra-Node Application_Benchmark`; fix cross-refs.
 - [x] Create this folder + design/plan doc.
-- [ ] Cluster stood up, RDMA verified, build deployed to all 4 nodes.
-- [ ] Dedicated Redis machine (5th box) up; every baseline `REDIS_HOST` points at it.
-- [ ] Baseline frameworks up: Knative (RMMap) + Kubernetes (Cloudburst) across 4 nodes.
-- [ ] Per-node Faasm local agent built + deployed on all 4 nodes.
-- [ ] Datasets staged; specs recorded (compute nodes, Redis box, RDMA fabric).
-- [ ] `README.md` (short pointer + status table) written.
+- [x] Cluster stood up, RDMA verified, build deployed to all 4 nodes (RoCE `mlx4_0`; 4-node runs live).
+- [~] ~~Dedicated Redis machine (5th box)~~ — **not used**; Faasm Redis runs on **node 0** (`FLUSHDB`/rep). Acceptable for the 4-node Faasm-only shakeout; the dedicated box matters once RMMap/Cloudburst land.
+- [ ] Baseline frameworks up: Knative (RMMap) + Kubernetes (Cloudburst) across 4 nodes. **Deferred** — only the Faasm baseline was stood up (see scope pivot in the banner).
+- [x] Per-node Faasm local agent built + deployed on all 4 nodes (per-node agents + `deploy.sh distribute`/`/stage`).
+- [~] Datasets staged (WordCount/FINRA/ML/Matrix/TeraSort corpora staged per run); specs partly recorded (compute nodes + RDMA fabric in STATUS §Operational; Redis box n/a).
+- [ ] `README.md` (short pointer + status table) — **STATUS.md serves this role**; a thin README pointer still TODO.
 
 ### WasMem driver (Scheduling-Policy-style)
-- [ ] Generalize the sweep script (gen_variants → partition → submit → results.csv) into this folder's `run.sh` shape (cross-system columns, not policy-axis).
-- [ ] Fix the per-workload placement choice; document it.
+- [x] Generalize the sweep script into per-workload drivers (`wasmem/run_*.py`, gen_variants → partition → submit → results_*.csv, cross-system columns).
+- [x] Fix the per-workload placement choice; document it (balanced for fan-out workloads, pack/N==P where a distributing policy deadlocks — see STATUS).
 
-### Per-workload (ours + 3 baselines + gate + 3 figs)
-- [ ] **WordCount** — ours cluster sweep; RMMap-on-Knative / Cloudburst-on-k8s / Faasm-per-node-agent; occurrence gate; figs.
-- [ ] **FINRA** — ours; baselines on frameworks (Redis state); violations=1952 gate; figs.
-- [ ] **ML training** — ours; baselines on frameworks; SGD checksum gate; figs.
-- [ ] **Matrix** — author `matrix_auto_placement.json`; ours; baselines; checksum gate; figs.
-- [ ] **ML inference** — author `ml_inference_auto_placement.json`; ours; baselines; accuracy/checksum gate; figs.
-- [ ] **TeraSort (#7, new)** — write `terasort.rs` + `terasort_auto_placement.json`; WordCount-shaped baseline ports; sorted+multiset checksum gate; figs. *(PageRank = parked backup.)*
+### Per-workload (ours + Faasm baseline + gate; **RMMap/Cloudburst + figs deferred**)
+- [~] **WordCount** — ours + Faasm @ 4 GB/60, 15 reps; occurrence gate matches (WasMem 1.14×). RMMap/Cloudburst + figs pending.
+- [~] **FINRA** — ours + Faasm @ 5M/60 hybrid-shard, 15 reps; violations gate matches (WasMem 1.28×; OOMs at 10M). RMMap/Cloudburst + figs pending.
+- [~] **ML training** — ours + Faasm @ 600k–6M; SGD checksum gate matches (WasMem 1.41× @600k, Faasm wins ≥3M — crossover). RMMap/Cloudburst + figs pending.
+- [~] **Matrix** — `matrix_auto_placement.json` authored (8×8); ours + Faasm @ N4096/64; checksum matches (Faasm 1.19×, compute-bound). RMMap/Cloudburst + figs pending.
+- [~] **ML inference** — `ml_inference_auto_placement.json` authored; ours + Faasm @ 600k–6M; checksum/accuracy match (WasMem 1.45× @600k, crossover). RMMap/Cloudburst + figs pending.
+- [~] **TeraSort (#7, new)** — `terasort.rs` + `terasort_auto_placement.json` written; ours + Faasm @ 1.2 GiB/N==P=4, 15 reps; sorted+multiset gate matches (WasMem 1.39×; cap ~1.2 GiB). RMMap/Cloudburst + figs pending. *(PageRank = parked backup.)*
 
 ### Analysis
-- [ ] Cross-workload bars grid + headline inter-node table (RDMA vs network-KV, gap-vs-size).
+- [~] Headline inter-node table exists in STATUS.md (per-workload, gap-vs-size). Cross-workload **bars grid figures** not yet generated.
 - [ ] Memory footprint (unified private-RSS-+-shared-once).
 
 ### Scale-out
-- [ ] **4-node shakeout complete** (all 5 workloads + 3 baselines validated at N=4).
+- [~] **4-node shakeout** — complete for **WasMem vs Faasm** on all 6 workloads; NOT complete for the 3-baseline plan (RMMap/Cloudburst absent).
 - [ ] Cluster + frameworks + Faasm-agent extended to **9 nodes**.
 - [ ] Full sweeps re-run at `--nodes 9`; figures + headline table regenerated.
+
+### Framework levers investigated
+- [~] **2 MB (huge) pages instead of 4 KB** — the 2 MiB page was already **measured (harness-only)** in `../PageSize/` (the intra-node StateSync read-write probe: `shm_statesync --page-bytes`), which found page size is a **PUT lever** (128 MiB PUT 4.45→7.79 GiB/s, 4 KiB→2 MiB) and GET page-insensitive for a *bulk* transfer. But the **real engine is unchanged** — `common::PAGE_SIZE` is still a hard-coded compile-time `const = 4*KIB`, no runtime knob / flag / hugepage backing. See STATUS §Known issues for the two routes to make it real (THP-back the SHM vs resize the logical page) and the open question of whether it helps the per-record [[ml-crossover-compute-bound]] walk (unmeasured by the bulk PageSize probe).
 
 ---
 
