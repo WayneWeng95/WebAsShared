@@ -4,17 +4,6 @@
     "0": [
       {
         "deps": [],
-        "id": "rr_aggregate_predict_local_3_from_3",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 3,
-            "slot": 1204,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
         "id": "rr_aggregate_predict_local_2_from_2",
         "kind": {
           "RemoteRecv": {
@@ -31,6 +20,17 @@
           "RemoteRecv": {
             "peer": 1,
             "slot": 1202,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_predict_local_3_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 1204,
             "slot_kind": "Stream"
           }
         }

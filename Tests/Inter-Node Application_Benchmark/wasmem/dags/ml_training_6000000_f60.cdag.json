@@ -4,11 +4,11 @@
     "0": [
       {
         "deps": [],
-        "id": "rr_aggregate_train_local_2_from_2",
+        "id": "rr_aggregate_train_local_1_from_1",
         "kind": {
           "RemoteRecv": {
-            "peer": 2,
-            "slot": 1203,
+            "peer": 1,
+            "slot": 1202,
             "slot_kind": "Stream"
           }
         }
@@ -26,11 +26,11 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_train_local_1_from_1",
+        "id": "rr_aggregate_train_local_2_from_2",
         "kind": {
           "RemoteRecv": {
-            "peer": 1,
-            "slot": 1202,
+            "peer": 2,
+            "slot": 1203,
             "slot_kind": "Stream"
           }
         }

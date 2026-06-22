@@ -1,3 +1,4 @@
 samples,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,accuracy_pct,weight_checksum,expect,success,reps
 600000,60,4,846,129.8,2570,74.26,1232,1232,True,15
 6000000,60,4,5336,100.4,16696,74.32,1232,1232,True,3
+6000000,60,4,5258,50.8,16386,74.32,1232,1232,True,15
