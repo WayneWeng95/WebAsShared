@@ -15,11 +15,16 @@ do" list. Lift from the done single-machine version in [`../intra-node/`](../int
 - [ ] Run `stream_bench.py batch` (events/s) for both workloads from a producer pod; gate passes.
 - [ ] FT stance per plan §5 (checkpointing off + heap backend, or labeled handicap).
 
-## 2. RTSFaaS on the cluster (its real 5-node design point)
-- [ ] `Env/Cluster.env`: real driver + N worker hosts (cluster RoCE names).
-- [ ] `Env/Database.env`: `isRemoteDB=1, isTiKV=1`; point at the TiKV cluster.
-- [ ] Deploy 4 roles over ssh via `scripts/FaaS/run-application.sh` (reuse the built `rtfaas:1.0` image + the single-node fixes; drop the in-memory `database` role when using TiKV).
-- [ ] Run both workloads at scale; record client req/s + p50/p99.
+## 2. RTSFaaS on the cluster (in-memory RDMA store — NO TiKV; see [[inter-node-streaming-rtsfaas]])
+Decision (2026-06-22): WasMem vs RTSFaaS only; in-memory RDMA store (TiKV not installed
++ breaks FT-off parity); dedicated RTSFaaS agent/coordinator (NOT faasm's, NOT RTSFaaS's
+scp+ssh run-application.sh). All under `baseline/RTSFaaS/cluster/`.
+- [x] `Env/Cluster.env`: 4 workers as RoCE reverse-DNS names in workerId order (`.2/.1/.3/.4` → node-0/1/3/2-link-0, non-sequential).
+- [x] `Env/Database.env`: `isRemoteDB=1, isTiKV=0` (in-memory RDMA store, run `database` role) — lifted from single_node.
+- [x] Dedicated `rt-agent.py` (per-node role launcher) + `rt-coordinator.py` (placement + delays + throughput/latency scrape + mean±std CSV) + `deploy.sh`. Syntax-checked; config loads.
+- [ ] **Build + distribute `rtfaas:1.0`** — NOT present on any node. `./deploy.sh image` (build w/ the 7 single-node fixes, scp+load to all). **← gating prerequisite to run.**
+- [ ] `sudo modprobe rdma_ucm` + passwordless `sudo docker` on all nodes.
+- [ ] `./deploy.sh start` → `./rt-coordinator.py --both --reps 15`; record client req/s + p50/p99.
 
 ## 3. WasMem on the cluster
 ### 3a. First version — data-parallel + RDMA merge (READY to run)
