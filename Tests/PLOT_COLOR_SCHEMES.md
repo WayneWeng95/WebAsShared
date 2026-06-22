@@ -1,6 +1,6 @@
 # Plot Label & Color Schemes — Unified Palette
 
-The single source of truth for colors, labels, and markers across the **9 paper
+The single source of truth for colors, labels, and markers across the **10 paper
 figures** under `Tests/`. Design goal: **mute the baselines into one harmonious
 low-saturation "wave," and give the hero (WasMem) the only high-saturation color
 so it pops.** Markers are aligned by role across every line chart.
@@ -39,7 +39,7 @@ redis-local / cloudburst-warm = `v`, cloudburst-cold = `X`, RTSFaaS = `D`.
 
 ---
 
-## Per-figure mapping (the 9 PDFs)
+## Per-figure mapping (the 10 PDFs)
 
 ### 1. `latency_put_get.pdf` — `Micro-Benchmarks/StateSync-local/plot.py`
 Line panels (Read|Write). `shm-zerocopy` is *ours* here.
@@ -131,6 +131,18 @@ Broken-axis grouped bars. RTSFaaS is mauve (distinct from Faasm's teal).
 | WasMem (sync) | `#8aa8f0` |
 | **WasMem (async)** | `#3a5fc4` |
 
+### 10. `inter_node_bars.pdf` — `Inter-Node Application_Benchmark/analysis/plot_inter_bars.py`
+Single panel, two-level broken linear y-axis (lower `0–70 s`, upper `350–600 s`).
+Six workload groups, two two-tone bars each: full bar = total execution time
+(lighter `lighten()` tint), saturated base = makespan. Largest input per workload;
+the size sits under each group (bold workload name + normal-weight size line, like
+`mem_largest_load.pdf`). Faasm/Finra shows a makespan-only bar (no `total_job`
+column in `faasm/results_finra.csv` yet).
+| Label | Color |
+|---|---|
+| Faasm | `#6fa8a0` |
+| **WasMem (ours)** | `#3a5fc4` |
+
 ---
 
 ## Output locations
@@ -145,8 +157,9 @@ scripts write to their own local `figs/` and a copy is collected in `Tests/Figur
 | policy_grid | `Scheduling_Policy/analysis/figs/` → copied to `Tests/Figures/` |
 | all_workloads_bars / mem_largest_load | `Intra-Node .../analysis/figs/` → copied to `Tests/Figures/` |
 | streaming_overlay | `Streaming .../intra-node/figs/` → copied to `Tests/Figures/` |
+| inter_node_bars | `Inter-Node .../analysis/figs/` → copied to `Tests/Figures/` |
 
-Regenerate all 9 with their plot scripts (most default to `--format pdf`).
+Regenerate all 10 with their plot scripts (most default to `--format pdf`).
 
 ---
 
