@@ -90,17 +90,19 @@ pub const INITIAL_SHM_SIZE: ShmOffset = 64 * MIB;
 /// `align(...)` on [`Page`]** — the `size_of::<Page>() == PAGE_SIZE` static assert
 /// below fails the build if they diverge.
 ///
-/// **Trade-offs (see `Tests/PageSize/` + Inter-Node `STATUS.md`):** larger pages
-/// raise PUT/RDMA bandwidth (fewer, larger `memcpy`/WR spans → ~4.45→7.79 GiB/s at
-/// 128 MiB for 4 KiB→2 MiB) and shorten the per-record page-chain walk, at the cost
-/// of internal fragmentation — each slot/chain wastes up to one page in its tail,
-/// and the ~1.5 GiB wasm32 direct window holds only `CAPACITY_HARD_LIMIT/PAGE_SIZE`
-/// pages (≈740 at 2 MiB). Good for the **large-dataset inter-node** regime;
-/// pathological for many tiny independent records.
-///
-/// 2 MiB matches the host THP/hugepage frame, so the SHM backing can also be
-/// promoted to huge pages without straddling frames.
-pub const PAGE_SIZE: ShmOffset = 2 * MIB;   // was 4 * KIB — enlarged for large-dataset inter-node
+/// **Trade-offs (measured — see `Tests/PageSize/` + Inter-Node `STATUS.md`):** in a
+/// raw PUT/RDMA microbenchmark larger pages raise bandwidth (fewer, larger `memcpy`/WR
+/// spans → ~4.45→7.79 GiB/s at 128 MiB for 4 KiB→2 MiB), but on real workloads the win
+/// did **not** materialize: intra-node WordCount (50/500 MB) is a wash across 4 KiB /
+/// 64 KiB / 2 MiB, and inter-node ML at 6M *regressed* at 2 MiB (inference +5%, training
+/// +12%) because those workloads are compute-bound with a small cross-node payload. The
+/// cost side is real: internal fragmentation (each slot/chain wastes up to one page in
+/// its tail) and the ~1.5 GiB wasm32 direct window holds only `CAPACITY_HARD_LIMIT/PAGE_SIZE`
+/// pages (≈740 at 2 MiB, vs ≈393k at 4 KiB). **4 KiB is therefore the default.** A larger
+/// page is only expected to help bulk-shuffle workloads (WordCount 4 GB, TeraSort) whose
+/// whole dataset crosses the network — untested as of 2026-06-21; re-tune here and rebuild
+/// every node if revisiting. 2 MiB additionally matches the host THP frame.
+pub const PAGE_SIZE: ShmOffset = 4 * KIB;   // default; tunable — see trade-offs above
 
 // PAGE_SIZE must be a power of two (page-id ⇄ slot-index math relies on it).
 const _: () = assert!(PAGE_SIZE.is_power_of_two());
@@ -345,7 +347,7 @@ pub struct Superblock {
     pub barriers: [AtomicU32; BARRIER_COUNT],
 }
 
-#[repr(C, align(2097152))] // 2 MiB — must equal PAGE_SIZE (experiment branch)
+#[repr(C, align(4096))] // must equal PAGE_SIZE (4 KiB default)
 pub struct Page {
     /// PageId of the next page in this chain.  Widened to 8 bytes so that
     /// pages in the host-side extended pool can be referenced by id.  In the

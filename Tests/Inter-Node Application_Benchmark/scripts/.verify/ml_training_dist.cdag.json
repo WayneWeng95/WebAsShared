@@ -4,18 +4,7 @@
     "0": [
       {
         "deps": [],
-        "id": "rr_aggregate_predict_local_1_from_1",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 1,
-            "slot": 1202,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_predict_local_3_from_3",
+        "id": "rr_aggregate_train_local_3_from_3",
         "kind": {
           "RemoteRecv": {
             "peer": 3,
@@ -26,7 +15,7 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_predict_local_2_from_2",
+        "id": "rr_aggregate_train_local_2_from_2",
         "kind": {
           "RemoteRecv": {
             "peer": 2,
@@ -37,34 +26,21 @@
       },
       {
         "deps": [],
-        "id": "load_model_0",
+        "id": "rr_aggregate_train_local_1_from_1",
         "kind": {
-          "Input": {
-            "path": "TestData/ml/infer_model.txt",
-            "prefetch": true,
-            "replicate": true,
-            "slot": 5
-          }
-        }
-      },
-      {
-        "deps": [
-          "load_model_0"
-        ],
-        "id": "setup_model_0",
-        "kind": {
-          "WasmVoid": {
-            "arg": 5,
-            "func": "infer_setup_model"
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 1202,
+            "slot_kind": "Stream"
           }
         }
       },
       {
         "deps": [],
-        "id": "load_data_0",
+        "id": "load_0",
         "kind": {
           "Input": {
-            "path": "TestData/ml/test_50000.csv",
+            "path": "TestData/ml/sgd_100000.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -73,50 +49,72 @@
       },
       {
         "deps": [
-          "load_data_0"
+          "load_0"
         ],
         "id": "partition_0",
         "kind": {
           "WasmVoid": {
             "arg": 524298,
-            "func": "infer_partition"
+            "func": "sgd_partition"
           }
         }
       },
       {
         "deps": [
-          "partition_0",
-          "setup_model_0"
+          "partition_0"
         ],
-        "id": "predict_0",
+        "id": "encode_0",
         "kind": {
           "WasmVoid": {
-            "arg": 19660810,
-            "func": "infer_predict"
+            "arg": 6553610,
+            "func": "sgd_encode"
           }
         }
       },
       {
         "deps": [
-          "partition_0",
-          "setup_model_0"
+          "partition_0"
         ],
-        "id": "predict_4",
+        "id": "encode_4",
         "kind": {
           "WasmVoid": {
-            "arg": 19922958,
-            "func": "infer_predict"
+            "arg": 6815758,
+            "func": "sgd_encode"
           }
         }
       },
       {
         "deps": [
-          "aggregate_predict_local_0",
-          "rr_aggregate_predict_local_1_from_1",
-          "rr_aggregate_predict_local_2_from_2",
-          "rr_aggregate_predict_local_3_from_3"
+          "encode_0"
         ],
-        "id": "aggregate_predict",
+        "id": "train_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19660900,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_4"
+        ],
+        "id": "train_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19923048,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_0",
+          "rr_aggregate_train_local_1_from_1",
+          "rr_aggregate_train_local_2_from_2",
+          "rr_aggregate_train_local_3_from_3"
+        ],
+        "id": "aggregate_train",
         "kind": {
           "Aggregate": {
             "downstream": 1200,
@@ -131,7 +129,7 @@
       },
       {
         "deps": [
-          "aggregate_predict"
+          "aggregate_train"
         ],
         "id": "aggregate_global",
         "kind": {
@@ -147,32 +145,44 @@
         "deps": [
           "aggregate_global"
         ],
-        "id": "reduce",
+        "id": "update",
         "kind": {
           "WasmVoid": {
             "arg": 1201,
-            "func": "infer_reduce"
+            "func": "sgd_update"
           }
         }
       },
       {
         "deps": [
-          "reduce"
+          "update"
+        ],
+        "id": "validate",
+        "kind": {
+          "WasmVoid": {
+            "arg": 524388,
+            "func": "sgd_validate"
+          }
+        }
+      },
+      {
+        "deps": [
+          "validate"
         ],
         "id": "save",
         "kind": {
           "Output": {
-            "path": "TestOutput/ml_inference_ap_result.txt",
+            "path": "TestOutput/ml_training_ap_result.txt",
             "slot": 1
           }
         }
       },
       {
         "deps": [
-          "predict_0",
-          "predict_4"
+          "train_0",
+          "train_4"
         ],
-        "id": "aggregate_predict_local_0",
+        "id": "aggregate_train_local_0",
         "kind": {
           "Aggregate": {
             "downstream": 2,
@@ -187,34 +197,10 @@
     "1": [
       {
         "deps": [],
-        "id": "load_model_1",
+        "id": "load_1",
         "kind": {
           "Input": {
-            "path": "TestData/ml/infer_model.txt",
-            "prefetch": true,
-            "replicate": true,
-            "slot": 5
-          }
-        }
-      },
-      {
-        "deps": [
-          "load_model_1"
-        ],
-        "id": "setup_model_1",
-        "kind": {
-          "WasmVoid": {
-            "arg": 5,
-            "func": "infer_setup_model"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "load_data_1",
-        "kind": {
-          "Input": {
-            "path": "TestData/ml/test_50000.csv",
+            "path": "TestData/ml/sgd_100000.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -223,48 +209,70 @@
       },
       {
         "deps": [
-          "load_data_1"
+          "load_1"
         ],
         "id": "partition_1",
         "kind": {
           "WasmVoid": {
             "arg": 524298,
-            "func": "infer_partition"
+            "func": "sgd_partition"
           }
         }
       },
       {
         "deps": [
-          "partition_1",
-          "setup_model_1"
+          "partition_1"
         ],
-        "id": "predict_1",
+        "id": "encode_1",
         "kind": {
           "WasmVoid": {
-            "arg": 19726347,
-            "func": "infer_predict"
+            "arg": 6619147,
+            "func": "sgd_encode"
           }
         }
       },
       {
         "deps": [
-          "partition_1",
-          "setup_model_1"
+          "partition_1"
         ],
-        "id": "predict_5",
+        "id": "encode_5",
         "kind": {
           "WasmVoid": {
-            "arg": 19988495,
-            "func": "infer_predict"
+            "arg": 6881295,
+            "func": "sgd_encode"
           }
         }
       },
       {
         "deps": [
-          "predict_1",
-          "predict_5"
+          "encode_1"
         ],
-        "id": "aggregate_predict_local_1",
+        "id": "train_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19726437,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_5"
+        ],
+        "id": "train_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19988585,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_1",
+          "train_5"
+        ],
+        "id": "aggregate_train_local_1",
         "kind": {
           "Aggregate": {
             "downstream": 3,
@@ -277,9 +285,9 @@
       },
       {
         "deps": [
-          "aggregate_predict_local_1"
+          "aggregate_train_local_1"
         ],
-        "id": "rs_aggregate_predict_local_1_to_0",
+        "id": "rs_aggregate_train_local_1_to_0",
         "kind": {
           "RemoteSend": {
             "peer": 0,
@@ -292,34 +300,10 @@
     "2": [
       {
         "deps": [],
-        "id": "load_model_2",
+        "id": "load_2",
         "kind": {
           "Input": {
-            "path": "TestData/ml/infer_model.txt",
-            "prefetch": true,
-            "replicate": true,
-            "slot": 5
-          }
-        }
-      },
-      {
-        "deps": [
-          "load_model_2"
-        ],
-        "id": "setup_model_2",
-        "kind": {
-          "WasmVoid": {
-            "arg": 5,
-            "func": "infer_setup_model"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "load_data_2",
-        "kind": {
-          "Input": {
-            "path": "TestData/ml/test_50000.csv",
+            "path": "TestData/ml/sgd_100000.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -328,48 +312,70 @@
       },
       {
         "deps": [
-          "load_data_2"
+          "load_2"
         ],
         "id": "partition_2",
         "kind": {
           "WasmVoid": {
             "arg": 524298,
-            "func": "infer_partition"
+            "func": "sgd_partition"
           }
         }
       },
       {
         "deps": [
-          "partition_2",
-          "setup_model_2"
+          "partition_2"
         ],
-        "id": "predict_2",
+        "id": "encode_2",
         "kind": {
           "WasmVoid": {
-            "arg": 19791884,
-            "func": "infer_predict"
+            "arg": 6684684,
+            "func": "sgd_encode"
           }
         }
       },
       {
         "deps": [
-          "partition_2",
-          "setup_model_2"
+          "partition_2"
         ],
-        "id": "predict_6",
+        "id": "encode_6",
         "kind": {
           "WasmVoid": {
-            "arg": 20054032,
-            "func": "infer_predict"
+            "arg": 6946832,
+            "func": "sgd_encode"
           }
         }
       },
       {
         "deps": [
-          "predict_2",
-          "predict_6"
+          "encode_2"
         ],
-        "id": "aggregate_predict_local_2",
+        "id": "train_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19791974,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_6"
+        ],
+        "id": "train_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20054122,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_2",
+          "train_6"
+        ],
+        "id": "aggregate_train_local_2",
         "kind": {
           "Aggregate": {
             "downstream": 4,
@@ -382,9 +388,9 @@
       },
       {
         "deps": [
-          "aggregate_predict_local_2"
+          "aggregate_train_local_2"
         ],
-        "id": "rs_aggregate_predict_local_2_to_0",
+        "id": "rs_aggregate_train_local_2_to_0",
         "kind": {
           "RemoteSend": {
             "peer": 0,
@@ -397,34 +403,10 @@
     "3": [
       {
         "deps": [],
-        "id": "load_model_3",
+        "id": "load_3",
         "kind": {
           "Input": {
-            "path": "TestData/ml/infer_model.txt",
-            "prefetch": true,
-            "replicate": true,
-            "slot": 5
-          }
-        }
-      },
-      {
-        "deps": [
-          "load_model_3"
-        ],
-        "id": "setup_model_3",
-        "kind": {
-          "WasmVoid": {
-            "arg": 5,
-            "func": "infer_setup_model"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "load_data_3",
-        "kind": {
-          "Input": {
-            "path": "TestData/ml/test_50000.csv",
+            "path": "TestData/ml/sgd_100000.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -433,48 +415,70 @@
       },
       {
         "deps": [
-          "load_data_3"
+          "load_3"
         ],
         "id": "partition_3",
         "kind": {
           "WasmVoid": {
             "arg": 524298,
-            "func": "infer_partition"
+            "func": "sgd_partition"
           }
         }
       },
       {
         "deps": [
-          "partition_3",
-          "setup_model_3"
+          "partition_3"
         ],
-        "id": "predict_3",
+        "id": "encode_3",
         "kind": {
           "WasmVoid": {
-            "arg": 19857421,
-            "func": "infer_predict"
+            "arg": 6750221,
+            "func": "sgd_encode"
           }
         }
       },
       {
         "deps": [
-          "partition_3",
-          "setup_model_3"
+          "partition_3"
         ],
-        "id": "predict_7",
+        "id": "encode_7",
         "kind": {
           "WasmVoid": {
-            "arg": 20119569,
-            "func": "infer_predict"
+            "arg": 7012369,
+            "func": "sgd_encode"
           }
         }
       },
       {
         "deps": [
-          "predict_3",
-          "predict_7"
+          "encode_3"
         ],
-        "id": "aggregate_predict_local_3",
+        "id": "train_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19857511,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_7"
+        ],
+        "id": "train_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20119659,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_3",
+          "train_7"
+        ],
+        "id": "aggregate_train_local_3",
         "kind": {
           "Aggregate": {
             "downstream": 5,
@@ -487,9 +491,9 @@
       },
       {
         "deps": [
-          "aggregate_predict_local_3"
+          "aggregate_train_local_3"
         ],
-        "id": "rs_aggregate_predict_local_3_to_0",
+        "id": "rs_aggregate_train_local_3_to_0",
         "kind": {
           "RemoteSend": {
             "peer": 0,
@@ -502,14 +506,10 @@
   },
   "shared_inputs": [
     {
-      "path": "TestData/ml/infer_model.txt",
-      "source_node": 0
-    },
-    {
-      "path": "TestData/ml/test_50000.csv",
+      "path": "TestData/ml/sgd_100000.csv",
       "source_node": 0
     }
   ],
-  "shm_path_prefix": "/dev/shm/rdma_mnist_ap",
+  "shm_path_prefix": "/dev/shm/rdma_sgd_ap",
   "transfer": true
 }
