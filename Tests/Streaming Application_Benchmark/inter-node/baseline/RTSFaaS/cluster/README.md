@@ -25,9 +25,14 @@ RTSFaaS-specific (it knows the four roles and the privileged infiniband containe
 
 ## Prerequisites
 
-1. **`rtfaas:1.0` image on every node.** Not currently present. Build with the 7
-   single-node fixes applied (`../../../intra-node/baseline/RTSFaaS/single_node/README.md`),
-   then distribute:  `./deploy.sh image`  (build on node 0 + scp/load to the rest).
+1. **`rtfaas:1.0` image on every node.** The image's jar is too large to
+   git-distribute and is gitignored, so **build it on each node** from the
+   git-synced source:  `./build-image.sh`  (re-applies the uncommitted fix #1
+   patch, runs `mvn package` to regenerate the jars, then `docker build`). Needs
+   `maven` + JDK 8 + docker on the node. (fixes #2–#7 are env/script-level and come
+   from our mounted `Env/`+`DockerFiles/` at run time, not the image.) `deploy.sh
+   image` (build-once + scp/load a tar) is the alternative if a node lacks the
+   toolchain.
 2. `sudo modprobe rdma_ucm` on every node (RDMA CM device).
 3. Passwordless `sudo docker` (privileged containers) on every node, or edit
    `DOCKER=` in `cluster.env`.
