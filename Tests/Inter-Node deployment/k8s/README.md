@@ -33,6 +33,11 @@ This covers every **k8s-based** framework: **Cloudburst** (k8s) · **RMMap** (Kn
 · **Flink StateFun** (Strimzi/Kafka), plus the shared **Redis**. (Faasm uses a per-node
 agent and RTSFaaS uses ssh+TiKV — separate, not k8s.)
 
+> **Knative autoscaling (warm instances & keep-alive):** the installer leaves
+> `config-autoscaler` at Knative defaults (scale-to-zero, `min-scale=0`); RMMap's
+> Services pin `min-scale=1` (1 warm pod per stage, no idle teardown). Full breakdown
+> + how to change it in [`AUTOSCALING.md`](AUTOSCALING.md).
+
 ## One-command deploy (recommended)
 
 ```bash

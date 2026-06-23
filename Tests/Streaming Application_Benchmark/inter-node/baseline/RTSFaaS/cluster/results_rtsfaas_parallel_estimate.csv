@@ -1,0 +1,3 @@
+workload,nodes,per_node_mean_req_s,parallel_estimate_req_s,note
+mediareview,4,5020.8,20082.9,embarrassingly-parallel upper bound (4x independent single-node via rt-parallel-estimate.py); coordinated multi-node HANGS
+socialnetwork,4,5761.6,23046.5,embarrassingly-parallel upper bound (4x independent single-node via rt-parallel-estimate.py); coordinated multi-node = 5867 (~1x)

@@ -91,9 +91,16 @@ for i, fw in enumerate(BASELINES):
 
 ax.set_ylabel("Memory saved by WasMem (%)", fontsize=YLABEL_SIZE)
 ax.set_xticks(x)
-# Slightly smaller x-tick font so the two-line workload labels (e.g. ML training
-# / ML inference) don't overlap now that there are six groups.
-ax.set_xticklabels(labels, fontsize=14)
+# Two-line x labels: BOLD workload type (tick label) + normal-weight size on a
+# second line below it (same technique as plot_inter_bars.py). Slightly smaller
+# font so the six groups don't overlap.
+names = [lab.split("\n")[0] for lab in labels]
+sizes = [lab.split("\n")[1] for lab in labels]
+ax.set_xticklabels(names, fontsize=12, fontweight="bold")
+for xi, sz in zip(x, sizes):
+    ax.annotate(sz, xy=(xi, 0), xycoords=("data", "axes fraction"),
+                xytext=(0, -25), textcoords="offset points",
+                ha="center", va="top", fontsize=14)
 ax.tick_params(axis="y", labelsize=TICK_SIZE)
 ax.grid(axis="y", alpha=0.3)
 allv = [s for fw in BASELINES for s in saving[fw] if not np.isnan(s)]

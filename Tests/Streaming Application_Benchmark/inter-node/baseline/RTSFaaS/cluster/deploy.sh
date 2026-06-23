@@ -20,6 +20,25 @@ am_coord() { ip -o addr show 2>/dev/null | awk '{print $4}' | cut -d/ -f1 | grep
 health() { curl -s --max-time 4 "http://$1:$AGENT_PORT/health" 2>/dev/null; }
 ALL_IPS="$(printf '%s\n' "$COORD_IP" $WORKER_IPS | sort -u)"
 
+# ── no-ssh fallback: drive a remote node through its Faasm agent ──────────────
+# ssh between nodes is publickey-blocked here, but the Faasm per-node agent
+# (../../../../../Inter-Node deployment/faasm/agent.py) is already running on every
+# node and its /launch runs any command. So when ssh is down we start/stop this
+# node's rt-agent THROUGH that agent — same trick the RTSFaaS roles use. The faasm
+# agent (9600) and rt-agent (9700) are distinct ports, so they coexist.
+FAASM_PORT="${FAASM_PORT:-9600}"
+faasm_up()  { curl -s --max-time 5 "http://$1:$FAASM_PORT/health" >/dev/null 2>&1; }
+faasm_run() {   # faasm_run <ip> <shell-command> — run `bash -lc <cmd>` on <ip> via its faasm agent
+  local ip="$1" inner="$2" json
+  json=$(printf '{"cmd":["bash","-lc","%s"],"tag":"rt-agent"}' "$inner")
+  curl -s --max-time 10 -X POST "http://$ip:$FAASM_PORT/launch" \
+       -H 'Content-Type: application/json' -d "$json" >/dev/null 2>&1
+}
+remote_start() {   # start rt-agent on <ip> via faasm agent (backgrounded; survives the launch)
+  faasm_run "$1" "cd '$HERE' && AGENT_PORT=$AGENT_PORT DOCKER='$DOCKER' nohup python3 rt-agent.py >/tmp/rt_agent.log 2>&1 & echo started"
+}
+remote_stop()  { faasm_run "$1" "pkill -f rt-agent.py >/dev/null 2>&1; echo stopped"; }
+
 start_local() {
   if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     log "rt-agent already running (pid $(cat "$PIDFILE"))"; return; fi
@@ -40,15 +59,22 @@ case "$MODE" in
         if ssh_ok "$ip"; then
           log "ssh $ip: starting rt-agent"
           ssh "$ip" "cd '$HERE' && ./deploy.sh start" || log "WARN: start failed on $ip"
+        elif faasm_up "$ip"; then
+          log "ssh down → starting rt-agent on $ip via its faasm agent ($ip:$FAASM_PORT)"
+          remote_start "$ip"
+          for i in $(seq 1 20); do health "$ip" >/dev/null && { log "$ip: healthy"; break; }; sleep 0.4; done
+          health "$ip" >/dev/null || log "WARN: rt-agent on $ip not healthy yet — see /tmp/rt_agent.log there"
         else
-          log "ssh to $ip unavailable — run on $ip:  cd '$HERE' && ./deploy.sh start"
+          log "no ssh & no faasm agent on $ip — run on $ip:  cd '$HERE' && ./deploy.sh start"
         fi
       done
     fi ;;
   stop)
     stop_local
     if am_coord; then for ip in $ALL_IPS; do [ "$ip" = "$COORD_IP" ] && continue
-      ssh_ok "$ip" && ssh "$ip" "cd '$HERE' && ./deploy.sh stop" || true; done; fi ;;
+      if ssh_ok "$ip"; then ssh "$ip" "cd '$HERE' && ./deploy.sh stop" || true
+      elif faasm_up "$ip"; then log "stopping rt-agent on $ip via faasm agent"; remote_stop "$ip"; fi
+    done; fi ;;
   status)
     for ip in $ALL_IPS; do printf '%s: ' "$ip"; health "$ip" || echo "DOWN"; echo; done ;;
   image)

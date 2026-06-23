@@ -85,6 +85,16 @@ One k8s cluster spanning the 4 (→9) compute nodes serves **Cloudburst** (app) 
       stage code. State via Redis (ES protocol). **No MITOSIS kernel module**
       without explicit authorization — use the Redis path.
 
+> ⚠️ **Warm-reuse vs. pure cold-start — measure BOTH, label every result.** The
+> default RMMap manifest pins `min-scale=1` (1 warm pod per stage → warm-reuse, no
+> startup cost). We also run a **strict cold-start** case (`min-scale=0` +
+> scale-to-zero, 0 pods before each measured request) to capture pod
+> scheduling + container + app init latency. These are different numbers — never mix
+> them in one table; tag series `*-warm` / `*-cold`. Exact config + procedure:
+> [`k8s/AUTOSCALING.md`](k8s/AUTOSCALING.md) §5. (Cold-start is cluster-wide for
+> Knative; for the non-Knative baselines define what "cold" means per framework,
+> since only Knative natively scales to zero.)
+
 ## 5. Track (D) — the per-node Python agent (todo point #2)
 
 For systems with **no orchestration framework** (Faasm is clean-slate) — and as a
