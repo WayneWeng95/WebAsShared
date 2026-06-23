@@ -1,0 +1,24 @@
+diff --git a/cloudburst/server/benchmarks/server.py b/cloudburst/server/benchmarks/server.py
+index 1fd0b0e..d8cc68b 100755
+--- a/cloudburst/server/benchmarks/server.py
++++ b/cloudburst/server/benchmarks/server.py
+@@ -25,7 +25,8 @@ from cloudburst.server.benchmarks import (
+     mobilenet,
+     predserving,
+     scaling,
+-    utils
++    utils,
++    wordcount
+ )
+ import cloudburst.server.utils as sutils
+ 
+@@ -82,6 +83,9 @@ def run_bench(bname, num_requests, cloudburst, kvs, sckt, create=False):
+     elif bname == 'scaling':
+         total, scheduler, kvs, retries = scaling.run(cloudburst, num_requests,
+                                                      sckt, create)
++    elif bname == 'wordcount':
++        total, scheduler, kvs, retries = wordcount.run(cloudburst, num_requests,
++                                                       sckt)
+     else:
+         logging.info('Unknown benchmark type: %s!' % (bname))
+         sckt.send(b'END')

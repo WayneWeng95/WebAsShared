@@ -1,0 +1,12 @@
+diff --git a/func/CMakeLists.txt b/func/CMakeLists.txt
+index 05f85f2a..a4592d69 100644
+--- a/func/CMakeLists.txt
++++ b/func/CMakeLists.txt
+@@ -116,6 +116,7 @@ add_subdirectory(polybench)
+ add_subdirectory(python)
+ add_subdirectory(sgd)
+ add_subdirectory(tf)
++add_subdirectory(wordcount)
+ 
+ if(FAASM_SGX_SUPPORT)
+     add_subdirectory(sgx)

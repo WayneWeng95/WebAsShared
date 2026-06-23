@@ -1,0 +1,155 @@
+diff --git a/morph-clients/src/main/java/benchmark/rdma/RDMABenchmark.java b/morph-clients/src/main/java/benchmark/rdma/RDMABenchmark.java
+index aefc0c8a..63b23979 100644
+--- a/morph-clients/src/main/java/benchmark/rdma/RDMABenchmark.java
++++ b/morph-clients/src/main/java/benchmark/rdma/RDMABenchmark.java
+@@ -29,6 +29,7 @@ public class RDMABenchmark {
+                 morphStreamDatabase.start();
+                 long end = System.currentTimeMillis();
+                 LOG.info("Database started in " + (end - start - 1) + " ms");
++                Thread.currentThread().join(); // keep JVM alive to serve RDMA (single-node baseline)
+             } else {
+                 MorphStreamWorker morphStreamWorker = new MorphStreamWorker();
+                 morphStreamWorker.initialize();
+diff --git a/morph-core/src/main/java/intellistream/morphstream/engine/txn/profiler/Metrics.java b/morph-core/src/main/java/intellistream/morphstream/engine/txn/profiler/Metrics.java
+index 448e2c57..6f106d16 100644
+--- a/morph-core/src/main/java/intellistream/morphstream/engine/txn/profiler/Metrics.java
++++ b/morph-core/src/main/java/intellistream/morphstream/engine/txn/profiler/Metrics.java
+@@ -21,16 +21,16 @@ public class Metrics {
+             for (int i = 0; i < kMaxThreadNum; i++) {
+                 prepareStartTime[i] = 0;
+                 prepareEndTime[i] = 0;
+-                prepareTimeStatistics[i] = new DescriptiveStatistics();
++                prepareTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 rdmaStartSendEventTime[i] = 0;
+                 rdmaEndSendEventTime[i] = 0;
+-                rdmaSendTimeStatistics[i] = new DescriptiveStatistics();
++                rdmaSendTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 rdmaStartRecvEventTime[i] = 0;
+                 rdmaEndRecvEventTime[i] = 0;
+-                rdmaRecvTimeStatistics[i] = new DescriptiveStatistics();
++                rdmaRecvTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 finishStartTime[i] = 0;
+                 finishEndTime[i] = 0;
+-                finishTimeStatistics[i] = new DescriptiveStatistics();
++                finishTimeStatistics[i] = new DescriptiveStatistics(10000);
+             }
+         }
+ 
+@@ -53,17 +53,17 @@ public class Metrics {
+             for (int i = 0; i < kMaxThreadNum; i++) {
+                 rdmaRecvStartEventTime[i] = 0;
+                 rdmaRecvEndEventTime[i] = 0;
+-                rdmaRecvTimeStatistics[i] = new DescriptiveStatistics();
++                rdmaRecvTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 prepareStartTime[i] = 0;
+                 prepareEndTime[i] = 0;
+-                prepareTimeStatistics[i] = new DescriptiveStatistics();
++                prepareTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 finishStartTime[i] = 0;
+                 finishEndTime[i] = 0;
+-                finishTimeStatistics[i] = new DescriptiveStatistics();
++                finishTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 rdmaSendResultStartTime[i] = 0;
+                 rdmaSendResultEndTime[i] = 0;
+-                rdmaSendResultTimeStatistics[i] = new DescriptiveStatistics();
+-                rdmaRounds[i] = new DescriptiveStatistics();
++                rdmaSendResultTimeStatistics[i] = new DescriptiveStatistics(10000);
++                rdmaRounds[i] = new DescriptiveStatistics(10000);
+             }
+         }
+     }
+@@ -97,29 +97,29 @@ public class Metrics {
+             for (int i = 0; i < kMaxThreadNum; i++) {
+                 rdmaRecvStartOwnershipTableTime[i] = 0;
+                 rdmaRecvEndOwnershipTableTime[i] = 0;
+-                rdmaRecvOwnershipTableTimeStatistics[i] = new DescriptiveStatistics();
++                rdmaRecvOwnershipTableTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 prepareCacheStartTime[i] = 0;
+                 prepareCacheEndTime[i] = 0;
+-                prepareCacheTimeStatistics[i] = new DescriptiveStatistics();
++                prepareCacheTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 rdmaStartRemoteOperationTime[i] = 0;
+                 rdmaEndRemoteOperationTime[i] = 0;
+-                rdmaRemoteOperationTimeStatistics[i] = new DescriptiveStatistics();
++                rdmaRemoteOperationTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 setupDependenciesStartTime[i] = 0;
+                 setupDependenciesEndTime[i] = 0;
+-                setupDependenciesTimeStatistics[i] = new DescriptiveStatistics();
++                setupDependenciesTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 exploreStartTime[i] = 0;
+                 exploreEndTime[i] = 0;
+-                exploreTimeStatistics[i] = new DescriptiveStatistics();
++                exploreTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 executeStartTime[i] = 0;
+                 executeEndTime[i] = 0;
+-                executeTimeStatistics[i] = new DescriptiveStatistics();
++                executeTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 rdmaAccessStartEventTime[i] = 0;
+                 rdmaAccessEndEventTime[i] = 0;
+-                rdmaAccessTimeStatistics[i] = new DescriptiveStatistics();
+-                rdmaRounds[i] = new DescriptiveStatistics();
++                rdmaAccessTimeStatistics[i] = new DescriptiveStatistics(10000);
++                rdmaRounds[i] = new DescriptiveStatistics(10000);
+                 commitStartTime[i] = 0;
+                 commitEndTime[i] = 0;
+-                commitTimeStatistics[i] = new DescriptiveStatistics();
++                commitTimeStatistics[i] = new DescriptiveStatistics(10000);
+             }
+         }
+     }
+@@ -144,20 +144,20 @@ public class Metrics {
+             for (int i = 0; i < kMaxThreadNum; i++) {
+                 lockStartTime[i] = 0;
+                 lockEndTime[i] = 0;
+-                lockTimeStatistics[i] = new DescriptiveStatistics();
++                lockTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 rmaAndExecutionStartTime[i] = 0;
+                 rmaAndExecutionEndTime[i] = 0;
+-                rmaAndExecutionTimeStatistics[i] = new DescriptiveStatistics();
++                rmaAndExecutionTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 executeStartTime[i] = 0;
+                 executeEndTime[i] = 0;
+                 executeACCTime[i] = 0;
+-                executeTimeStatistics[i] = new DescriptiveStatistics();
++                executeTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 commitStartTime[i] = 0;
+                 commitEndTime[i] = 0;
+-                commitTimeStatistics[i] = new DescriptiveStatistics();
++                commitTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 unlockStartTime[i] = 0;
+                 unlockEndTime[i] = 0;
+-                unlockTimeStatistics[i] = new DescriptiveStatistics();
++                unlockTimeStatistics[i] = new DescriptiveStatistics(10000);
+             }
+         }
+     }
+@@ -185,23 +185,23 @@ public class Metrics {
+             for (int i = 0; i < kMaxThreadNum; i++) {
+                 rmaAndExecutionStartTime[i] = 0;
+                 rmaAndExecutionEndTime[i] = 0;
+-                rmaAndExecutionTimeStatistics[i] = new DescriptiveStatistics();
++                rmaAndExecutionTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 executeStartTime[i] = 0;
+                 executeEndTime[i] = 0;
+                 executionACCTime[i] = 0;
+-                executeTimeStatistics[i] = new DescriptiveStatistics();
++                executeTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 validateStartTime[i] = 0;
+                 validateEndTime[i] = 0;
+-                validateTimeStatistics[i] = new DescriptiveStatistics();
++                validateTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 redoStartTime[i] = 0;
+                 redoEndTime[i] = 0;
+-                redoTimeStatistics[i] = new DescriptiveStatistics();
++                redoTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 commitStartTime[i] = 0;
+                 commitEndTime[i] = 0;
+-                commitTimeStatistics[i] = new DescriptiveStatistics();
++                commitTimeStatistics[i] = new DescriptiveStatistics(10000);
+                 unlockStartTime[i] = 0;
+                 unlockEndTime[i] = 0;
+-                unlockTimeStatistics[i] = new DescriptiveStatistics();
++                unlockTimeStatistics[i] = new DescriptiveStatistics(10000);
+             }
+         }
+     }
