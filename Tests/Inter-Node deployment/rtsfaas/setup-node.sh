@@ -24,11 +24,14 @@ sudo modprobe rdma_ucm 2>/dev/null || true
 need_pkg=0
 java -version 2>&1 | grep -q '"1\.8' || need_pkg=1
 command -v mvn >/dev/null 2>&1 || need_pkg=1
+command -v docker >/dev/null 2>&1 || need_pkg=1
 if [ "$need_pkg" = 1 ]; then
-  log "apt-get install openjdk-8-jdk maven"
-  sudo apt-get update -qq && sudo apt-get install -y -qq openjdk-8-jdk maven || die "apt install failed"
+  log "apt-get install openjdk-8-jdk maven docker.io"
+  sudo apt-get update -qq && sudo apt-get install -y -qq openjdk-8-jdk maven docker.io || die "apt install failed"
 fi
-command -v docker >/dev/null 2>&1 || die "docker not installed on this node"
+command -v docker >/dev/null 2>&1 || die "docker still unavailable after install"
+# Ensure the daemon is up (we use `sudo docker`, so docker-group membership isn't required).
+sudo systemctl enable --now docker 2>/dev/null || true
 
 # 3. DB-role patch: keep the database JVM alive so it serves RDMA (idempotent)
 RB="$RTFAAS_DIR/morph-clients/src/main/java/benchmark/rdma/RDMABenchmark.java"

@@ -21,16 +21,20 @@ else
 fi
 
 # 2. wasm build target (only needed if you (re)compile Faaslet modules on this node)
-if command -v rustc >/dev/null 2>&1; then
+# Guard on rustup (not rustc): init-node.sh installs Rust, but rustup may not be on
+# this shell's PATH. Either way it's optional — the .cwasm modules ship prebuilt.
+if command -v rustup >/dev/null 2>&1; then
   rustup target list --installed 2>/dev/null | grep -qx wasm32-wasip1 \
     || { log "rustup target add wasm32-wasip1"; rustup target add wasm32-wasip1 || true; }
 else
-  log "NOTE: rustc absent — fine if Faaslet .cwasm modules are staged prebuilt (they are)"
+  log "NOTE: rustup absent — fine if Faaslet .cwasm modules are staged prebuilt (they are)"
 fi
 
 # 3. python3 (agent.py is stdlib-only) + redis client (for any python Faaslet wrapper)
+# --break-system-packages: distro Python is PEP 668 externally-managed (same as init-node.sh).
 command -v python3 >/dev/null 2>&1 || die "python3 required"
-python3 -c "import redis" 2>/dev/null || { log "pip install redis"; python3 -m pip install --quiet redis || true; }
+python3 -c "import redis" 2>/dev/null \
+  || { log "pip install redis"; python3 -m pip install --quiet --break-system-packages redis || true; }
 
 # 4. stage dir + Redis reachability hint
 mkdir -p "${STAGE_DIR:-/tmp/faasm_stage}"

@@ -15,10 +15,16 @@ command -v kubectl >/dev/null 2>&1 || alias kubectl="k3s kubectl"
 kubectl get nodes >/dev/null 2>&1 || die "cluster unreachable — run 01 first"
 
 log "1/3 install Strimzi operator $STRIMZI_VERSION (watching ns '$KAFKA_NS')"
-# strimzi.io/install/<ver>?namespace=<ns> renders the operator to watch that ns.
-kubectl create -f "https://strimzi.io/install/${STRIMZI_VERSION}?namespace=${KAFKA_NS}" -n "$KAFKA_NS" 2>/dev/null \
-  || kubectl apply -f "https://strimzi.io/install/${STRIMZI_VERSION}?namespace=${KAFKA_NS}" -n "$KAFKA_NS" \
-  || die "Strimzi operator install failed (offline? mirror the install YAML — see README)"
+# The old strimzi.io/install/<ver>?namespace=<ns> redirector is dead (404 for version
+# numbers; 'latest' now points at a 1.0.x asset). Pull the canonical GitHub release YAML
+# and do the namespace rewrite ourselves (what the redirector used to do): every
+# `namespace: myproject` → our ns, so the operator watches $KAFKA_NS.
+STRIMZI_YAML="https://github.com/strimzi/strimzi-kafka-operator/releases/download/${STRIMZI_VERSION}/strimzi-cluster-operator-${STRIMZI_VERSION}.yaml"
+strimzi_manifest="$(curl -fsSL "$STRIMZI_YAML" | sed "s/namespace: .*/namespace: ${KAFKA_NS}/")" \
+  || die "Strimzi YAML fetch failed ($STRIMZI_YAML) — offline? mirror it (see README)"
+printf '%s\n' "$strimzi_manifest" | kubectl create -n "$KAFKA_NS" -f - 2>/dev/null \
+  || printf '%s\n' "$strimzi_manifest" | kubectl apply -n "$KAFKA_NS" -f - \
+  || die "Strimzi operator install failed"
 kubectl -n "$KAFKA_NS" rollout status deploy/strimzi-cluster-operator --timeout=180s || die "operator not ready"
 
 log "2/3 apply Kafka cluster + topics (statefun/statefun-kafka.yaml)"

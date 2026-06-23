@@ -26,6 +26,12 @@ echo ""
 info "Pulling latest code..."
 git pull
 
+# ── Step 1b: Local working dirs ─────────────────────────────
+# TestData/ (inputs) and TestOutput/ (results) are git-ignored, so a fresh
+# clone won't have them — the executor needs both to exist before any run.
+info "Creating local TestData/ and TestOutput/ directories..."
+mkdir -p "$ROOT/TestData" "$ROOT/TestOutput"
+
 # ── Step 2: Install RDMA / InfiniBand packages ─────────────
 info "Installing system packages (RDMA, InfiniBand, perftest)..."
 sudo apt-get update -qq || true
