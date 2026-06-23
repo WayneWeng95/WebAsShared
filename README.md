@@ -165,13 +165,42 @@ WebAsShared/
 
 ### New Node Setup
 
-Run the one-shot init script to set up a fresh node (pulls code, installs packages, builds everything):
+A fresh node is deployed in two halves — **our framework (WasMem)** and the **baseline
+comparison systems**. Run the scripts in this order; the only hard dependency is that
+`git_download.sh` must precede `init-baselines.sh` (the baseline agents assume
+`/opt/myapp/compare_system` already exists — they build/start, they do not clone it).
 
 ```bash
+# 0. Bootstrap (no script does this — clone the repo onto the node first)
+git clone https://github.com/WayneWeng95/WebAsShared.git /opt/myapp/WebAsShared
+cd /opt/myapp/WebAsShared
+
+# 1. Our framework: packages, Rust, wasmtime, build all binaries
 chmod +x init-node.sh && ./init-node.sh
+
+# 2. Baseline repos + our ports → /opt/myapp/compare_system  (REQUIRED before step 3)
+./git_download.sh
+
+# 3. Baseline agents (faasm :9600, RTSFaaS rt-agent :9700, k8s)
+./init-baselines.sh
+
+# 4. Ongoing: refresh our framework after code changes (pull → rebuild → restart agent)
+./node_update.sh
 ```
 
-This runs: `git pull` → RDMA packages → Rust env (`scripts/start.sh`) → wasmtime (`scripts/install_wasmtime.sh`) → Claude Code (`scripts/claude-code-setup.sh`) → `build.sh`.
+| Step | Script | Sets up | Notes |
+|------|--------|---------|-------|
+| 1 | `init-node.sh` | WasMem framework | `git pull` → RDMA packages → Rust env (`Scripts/rust.sh`) → wasmtime (`Scripts/install_wasmtime.sh`) → Claude Code (`Scripts/claude-code-setup.sh`) → `build.sh`. Independent of the baselines. |
+| 2 | `git_download.sh` | `compare_system` repos | Clones the 6 baseline repos (pinned commits; faasm at `v0.2.4`, **no** submodule recursion) and re-applies our ports from `Tests/Inter-Node deployment/{patches,port_files}/`. Idempotent. |
+| 3 | `init-baselines.sh` | Baseline agents | Builds/starts faasm + RTSFaaS (+ optional k8s). **Hard-depends on step 2** — without it the RTSFaaS track dies and you get a *silently incomplete* RTSFaaS port (the `Metrics.java` bound lives only in step 2's patch). |
+| 4 | `node_update.sh` | (ongoing) | Run on every node after a code change — `/opt/myapp` is node-local, so each node must rebuild to avoid mismatched binaries. |
+
+> **Order is the only constraint — capability-wise the scripts are complete.** Skipping
+> step 2 leaves the baseline half broken (no `compare_system`); steps 1 and 4 concern only
+> our framework and are independent of the baselines. See
+> [`Tests/Inter-Node deployment/compare_system_change.md`](Tests/Inter-Node%20deployment/compare_system_change.md)
+> for the full baseline-port record and the per-repo rebuild steps (RMMap pyx, RTSFaaS jars,
+> faasm Docker toolchain, roadrunner payloads).
 
 ### Building
 
