@@ -69,11 +69,12 @@ clone_repo() {
     git -C "$dir" fetch --quiet --tags origin || note "(fetch failed; using local objects)"
   else
     note "cloning $url"
-    if [ "$name" = "faasm" ]; then
-      git clone --recurse-submodules "$url" "$dir" || { err "$name: clone failed"; return 1; }
-    else
-      git clone "$url" "$dir" || { err "$name: clone failed"; return 1; }
-    fi
+    # NB: plain clone for every repo — including faasm. The reference node has
+    # NO faasm submodules initialized (third-party/* are all uninitialised); faasm
+    # functions build via the faasm Docker toolchain, not local submodules. A
+    # recursive init pulls GBs (llvm/tensorflow/cpython) AND dies on dead mirrors
+    # (Shillaker/eigen-git-mirror, faasm-demo-c → 404). So: do not recurse.
+    git clone "$url" "$dir" || { err "$name: clone failed"; return 1; }
   fi
   if git -C "$dir" checkout --quiet "$pin"; then
     ok "checked out $pin"
@@ -81,8 +82,8 @@ clone_repo() {
     err "$name: checkout $pin failed"; return 1
   fi
   if [ "$name" = "faasm" ]; then
-    note "syncing submodules (faasm is submodule-heavy)"
-    git -C "$dir" submodule update --init --recursive || err "faasm: submodule update failed"
+    note "faasm submodules intentionally NOT initialised (matches reference node;"
+    note "build the WordCount Faaslet via the faasm Docker toolchain, not local submodules)"
   fi
 }
 

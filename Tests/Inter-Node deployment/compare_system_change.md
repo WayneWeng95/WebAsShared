@@ -40,12 +40,18 @@ All repos are frozen at these commits; **do not** advance them — the ports ass
 > `experiment-*` repos. (The in-tree `VERSION` file reads `0.2.3`, lagging the tag by one; the tag
 > `v0.2.4` is authoritative.)
 >
-> Re-clone exactly:
+> Re-clone exactly (plain clone — **do NOT init submodules**):
 > ```sh
-> git clone --recurse-submodules https://github.com/faasm/faasm.git
-> cd faasm && git checkout v0.2.4 && git submodule update --init --recursive
+> git clone https://github.com/faasm/faasm.git
+> cd faasm && git checkout v0.2.4
 > ```
-> faasm is submodule-heavy — the `--recurse-submodules` / `submodule update` step is required.
+> **Do not run `git submodule update --init --recursive`.** The reference node has
+> **none** of faasm's `third-party/*` submodules initialised (`git submodule status`
+> shows a leading `-` on all 15). faasm builds its WASM functions via the **faasm Docker
+> toolchain** (`faasm/cli` / `faasm/cpp` containers), not by locally building llvm-project,
+> tensorflow, cpython, etc. A recursive init also **cannot complete from upstream** anyway —
+> two v0.2.4-era submodule mirrors are dead (`https://github.com/Shillaker/eigen-git-mirror`
+> and `.../faasm-demo-c` → HTTP 404). So: plain clone, checkout `v0.2.4`, build via Docker.
 
 ---
 
@@ -116,8 +122,8 @@ in several repos but are **regenerated on build** — not recorded here.
 
 ## 4. Clean-deployment checklist (new machine)
 
-1. Clone each repo to the pin in §1 (`git clone <url> && git -C <repo> checkout <HEAD>`;
-   add `--recurse-submodules` for faasm).
+1. Clone each repo to the pin in §1 (`git clone <url> && git -C <repo> checkout <HEAD>`).
+   **Plain clone for faasm too — do NOT recurse submodules** (see the faasm note in §1).
 2. Re-apply tracked edits: `git apply patches/<repo>_*.patch` from each repo root.
 3. Restore untracked port files from `port_files/` (paths in §3).
 4. Regenerate build artifacts / payloads (RMMap pyx, RTSFaaS jars, faasm wasm, roadrunner payloads).
