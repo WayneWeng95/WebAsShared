@@ -44,50 +44,54 @@ spec:
 ---
 # Topics (10, 10 partitions each) — same names the StateFun functions subscribe to:
 # MediaReview (mr_*), SocialNetwork (sn_*), and the shared `responses` egress.
+# NB: a KafkaTopic's metadata.name is a Kubernetes resource name → RFC 1123 (no
+# underscores). The underscore topic names the app actually produces/consumes are
+# preserved via `spec.topicName`, so the resource is e.g. `mr-seed` but the real
+# Kafka topic stays `mr_seed`.
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
-metadata: { name: mr_seed,     labels: { strimzi.io/cluster: kafka-cluster } }
-spec: { partitions: 10, replicas: 1 }
+metadata: { name: mr-seed,     labels: { strimzi.io/cluster: kafka-cluster } }
+spec: { topicName: mr_seed,     partitions: 10, replicas: 1 }
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
-metadata: { name: mr_login,    labels: { strimzi.io/cluster: kafka-cluster } }
-spec: { partitions: 10, replicas: 1 }
+metadata: { name: mr-login,    labels: { strimzi.io/cluster: kafka-cluster } }
+spec: { topicName: mr_login,    partitions: 10, replicas: 1 }
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
-metadata: { name: mr_rate,     labels: { strimzi.io/cluster: kafka-cluster } }
-spec: { partitions: 10, replicas: 1 }
+metadata: { name: mr-rate,     labels: { strimzi.io/cluster: kafka-cluster } }
+spec: { topicName: mr_rate,     partitions: 10, replicas: 1 }
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
-metadata: { name: mr_review,   labels: { strimzi.io/cluster: kafka-cluster } }
-spec: { partitions: 10, replicas: 1 }
+metadata: { name: mr-review,   labels: { strimzi.io/cluster: kafka-cluster } }
+spec: { topicName: mr_review,   partitions: 10, replicas: 1 }
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
-metadata: { name: sn_seed,     labels: { strimzi.io/cluster: kafka-cluster } }
-spec: { partitions: 10, replicas: 1 }
+metadata: { name: sn-seed,     labels: { strimzi.io/cluster: kafka-cluster } }
+spec: { topicName: sn_seed,     partitions: 10, replicas: 1 }
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
-metadata: { name: sn_login,    labels: { strimzi.io/cluster: kafka-cluster } }
-spec: { partitions: 10, replicas: 1 }
+metadata: { name: sn-login,    labels: { strimzi.io/cluster: kafka-cluster } }
+spec: { topicName: sn_login,    partitions: 10, replicas: 1 }
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
-metadata: { name: sn_profile,  labels: { strimzi.io/cluster: kafka-cluster } }
-spec: { partitions: 10, replicas: 1 }
+metadata: { name: sn-profile,  labels: { strimzi.io/cluster: kafka-cluster } }
+spec: { topicName: sn_profile,  partitions: 10, replicas: 1 }
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
-metadata: { name: sn_timeline, labels: { strimzi.io/cluster: kafka-cluster } }
-spec: { partitions: 10, replicas: 1 }
+metadata: { name: sn-timeline, labels: { strimzi.io/cluster: kafka-cluster } }
+spec: { topicName: sn_timeline, partitions: 10, replicas: 1 }
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
-metadata: { name: sn_post,     labels: { strimzi.io/cluster: kafka-cluster } }
-spec: { partitions: 10, replicas: 1 }
+metadata: { name: sn-post,     labels: { strimzi.io/cluster: kafka-cluster } }
+spec: { topicName: sn_post,     partitions: 10, replicas: 1 }
 ---
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaTopic
