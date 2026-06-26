@@ -229,7 +229,18 @@ From the intra-node runbook §5 (still binding) plus cross-node additions:
    CPU/RAM (nor pollutes the per-node memory sampler). The contrast is purely
    *serialized-network-KV (to the Redis box) vs RDMA-zero-copy (node-to-node)*, not
    topology asymmetry. Record the Redis box + RDMA fabric (`mlx4_0` RoCE) specs once.
-9. **Measurement boundary = data-path only (DECIDED 2026-06-18).** Even though
+9. **Two experiment modes — warm-reuse and full cold-start — must never be mixed.**
+   Every result row must be tagged with its mode:
+   - **Normal (warm-reuse):** pods/roles/Faaslets stay alive after a run and are
+     reused. Measures steady-state throughput/latency with no startup cost.
+   - **Full cold-start:** after each run, terminate all pods/roles/Faaslets; confirm
+     zero running before timing the next invocation. Measures end-to-end latency
+     including scheduling + container/process + app-init cost.
+   Per-framework procedures (what "terminate all" means per system) are in
+   `../Inter-Node deployment/EXPERIMENT_PLAN.md` §4 → Cross-system warm/cold
+   definitions. Tag series `*-warm` / `*-cold` in every CSV and figure.
+
+10. **Measurement boundary = data-path only (DECIDED 2026-06-18).** Even though
    RMMap/Cloudburst run on their real frameworks (Knative/k8s), the measured
    `makespan` covers **function compute + state transfer only** — the framework's
    control-plane (scheduler, HTTP/CloudEvent envelope, pod/cold-start) is

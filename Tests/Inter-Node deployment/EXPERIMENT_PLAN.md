@@ -91,9 +91,27 @@ One k8s cluster spanning the 4 (→9) compute nodes serves **Cloudburst** (app) 
 > scale-to-zero, 0 pods before each measured request) to capture pod
 > scheduling + container + app init latency. These are different numbers — never mix
 > them in one table; tag series `*-warm` / `*-cold`. Exact config + procedure:
-> [`k8s/AUTOSCALING.md`](k8s/AUTOSCALING.md) §5. (Cold-start is cluster-wide for
-> Knative; for the non-Knative baselines define what "cold" means per framework,
-> since only Knative natively scales to zero.)
+> [`k8s/AUTOSCALING.md`](k8s/AUTOSCALING.md) §5.
+
+### Cross-system warm/cold definitions
+
+Two named experiment modes apply to **every** baseline. Tag every result row with its mode.
+
+| Mode | Description | Trigger between runs |
+|------|-------------|----------------------|
+| **Normal (warm-reuse)** | Pods/roles/Faaslets stay alive after a run and are reused by the next. Each framework's own keep-warm timeout governs teardown. Measures steady-state throughput/latency with **no startup cost**. | Do nothing — let the framework manage lifecycle. |
+| **Full cold-start** | After each run, **terminate all pods/roles/Faaslets** before the next invocation. Measures end-to-end latency **including** scheduling + container/process + app-init cost. | Actively kill all roles; confirm zero before timing the next request. |
+
+Per-baseline "cold" procedure:
+
+| System | Normal (warm) | Full cold-start |
+|--------|---------------|-----------------|
+| **RMMap (Knative)** | `min-scale=1` keeps 1 pod/stage alive indefinitely. | Set `min-scale=0`, wait for scale-to-zero (~90 s) or delete pods manually; confirm 0 pods before each run. See `k8s/AUTOSCALING.md` §5. |
+| **Cloudburst (k8s)** | Executor + scheduler pods stay scheduled; k8s restarts if they crash. | `kubectl delete pods -l app=cloudburst-executor` after each run; wait for pod count → 0 before next submit. |
+| **Faasm (per-node agent)** | Faaslet processes stay in the agent's process pool between runs (the agent itself stays up). | After each run, send `POST /stop` for every Faaslet handle and confirm all handles show exited; the agent daemon stays up but no Faaslets are running before the next invocation. |
+| **RTSFaaS** | Role containers (driver/database/worker/client) stay up following RTSFaaS's internal keep-warm timeout. | Kill all role containers on every node (`sudo docker rm -f $(sudo docker ps -q)` or the agent's `/stop`); confirm 0 role containers before starting the next run. |
+| **Flink StateFun (k8s)** | StateFun master + worker pods stay scheduled. | Scale `statefun-worker` deployment to 0, wait, then scale back up before the next run. |
+| **WasMem (node-agent)** | `node-agent` stays running; WASM modules are submitted per-job (AOT pre-loaded, JIT compiles on first invocation). Keep-warm is not applicable — the agent is always up. | For a cold-module baseline: unload module cache between runs (if supported) or compare JIT-first-invocation vs. AOT-pre-loaded. Otherwise cold-start is not meaningful for WasMem (no container/pod scheduling overhead). |
 
 ## 5. Track (D) — the per-node Python agent (todo point #2)
 
@@ -138,12 +156,15 @@ RTSFaaS ships its own multi-node path; reuse it rather than re-wrapping.
 - [ ] Deploy the 4 roles via `scripts/FaaS/run-application.sh` (ssh). Reuse the
       built `rtfaas:1.0` image + the single-node fixes documented in
       `../Streaming Application_Benchmark/intra-node/baseline/RTSFaaS/single_node/README.md`.
-- [ ] Needs passwordless ssh between nodes for this account (the streaming run
+- [x] Needs passwordless ssh between nodes for this account (the streaming run
       hit `Permission denied (publickey)` to node1 — set up keys first).
+      **Done:** RSA key `wasmem-node0-rsa` (`~/.ssh/id_rsa`) generated on node-0
+      and added to the CloudLab profile; Emulab propagates it to all nodes.
+      Use `ssh node-1` … `ssh node-8` from node-0 (hostnames resolved via `/etc/hosts`).
 
 ## 7. Phase plan (deploy order = lowest risk first)
 
-0. **Cluster prep (shared):** RDMA `rdma_ucm` all nodes; passwordless ssh; record
+0. **Cluster prep (shared):** RDMA `rdma_ucm` all nodes; passwordless ssh ✅ (`~/.ssh/id_rsa`, RSA key added to CloudLab profile — `ssh node-1` … `ssh node-8` works from node-0); record
    IP/hostname map + services-box IP. Stand up the **dedicated Redis box**.
 1. **WasMem** — already running; lock in the run recipe + `results.csv` shape both benchmarks. ✅
 2. **k8s cluster (track B)** — control-plane + workers; smoke test.

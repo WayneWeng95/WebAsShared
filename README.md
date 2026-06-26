@@ -852,6 +852,29 @@ pkill -9 -f 'release/host'; pkill -f 'node-agent'
 > `SO_REUSEADDR` on the mesh listeners in `Executor/connect/src/rdma/exchange.rs`,
 > and have the worker reap its Executor child when a job fails/times out.
 
+## Future Work
+
+### Branch Node Support
+
+The current routing layer supports unconditional fan-out and merging (`Shuffle`, `Broadcast`, `Aggregate`, `Bridge`), but has no primitive for **conditional routing** — sending data to one of several downstream paths based on a predicate evaluated at runtime.
+
+A **branch node** would allow DAGs to express if-else control flow:
+
+```
+[WasmFunc: classify]
+        |
+   [Branch: cond]
+    /           \
+[path_a]     [path_b]    ← only one arm executes per record
+```
+
+Planned semantics:
+- The branch node reads a condition value from a designated slot (written by the upstream WASM function) and routes each record to exactly one downstream slot based on the result — no data is duplicated.
+- Unlike `Shuffle` (which partitions across all downstreams), a branch selects a **single** arm per record and leaves the other arms empty for that wave.
+- Cross-node branches would inject a conditional `RemoteSend` that only transfers when the branch condition selects that peer, avoiding unnecessary RDMA traffic on the idle arm.
+
+This is the last major routing primitive absent from the system. The primary use cases are multi-class ML inference pipelines (route each sample to its specialist worker), tiered workloads (fast path vs. slow path), and early-exit DAGs where a lightweight pre-filter decides whether to invoke the expensive downstream stage.
+
 ## LeftOver
   1. the newly transferred ml_training, finra, img_pipeline workloads are not finally tweaked, need additional test and debug.
   2. The corpus 1GB file will lead to allocation bug where the memory is not properly loaded, causing the crash, need to do bug fix
