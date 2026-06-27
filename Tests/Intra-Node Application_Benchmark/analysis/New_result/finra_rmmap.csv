@@ -1,0 +1,2 @@
+trades,fanout,nodes_used,variant,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,violations,expect,success,reps
+1000000,18,1,rdma,5133,86.9,45806,456574,456574,True,3

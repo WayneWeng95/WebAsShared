@@ -1,0 +1,28 @@
+# RMMap mapper — WARM (steady-state reuse). min-scale=60 pre-warms the full fan so
+# the 60 concurrent mapper invocations all hit already-running pods — the apples-to-
+# apples analogue of Cloudburst's 60 static executor pods (no startup cost in the
+# measured window). containerConcurrency=1 keeps it strictly 1 request per pod.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: wc-mapper
+  namespace: baselines
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/min-scale: "60"
+        autoscaling.knative.dev/max-scale: "60"
+        autoscaling.knative.dev/target: "1"
+    spec:
+      containerConcurrency: 1
+      timeoutSeconds: 600
+      containers:
+        - image: dev.local/wc-mapper:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: REDIS_HOST, value: redis.baselines.svc.cluster.local }
+            - { name: REDIS_PORT, value: "6379" }
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { memory: "1Gi" }

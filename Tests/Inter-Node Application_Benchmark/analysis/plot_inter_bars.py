@@ -37,12 +37,23 @@ FIGS = os.path.join(HERE, "figs")
 FIGURES = os.path.join(TESTS, "Figures")
 os.makedirs(FIGS, exist_ok=True)
 
-# unified palette (PLOT_COLOR_SCHEMES.md): WasMem = saturated blue pop, Faasm = teal
+# unified palette (PLOT_COLOR_SCHEMES.md): WasMem = saturated blue pop, Faasm = teal,
+# Cloudburst = muted orange, RMMap = mauve (same hues as the streaming figures).
 SYS = {
-    "faasm":  dict(color="#6fa8a0", label="Faasm"),   # muted teal
-    "wasmem": dict(color="#3a5fc4", label="WasMem"),  # saturated blue (ours, pop)
+    "faasm":      dict(color="#6fa8a0", label="Faasm"),          # muted teal
+    "wasmem":     dict(color="#3a5fc4", label="WasMem"),         # saturated blue (ours, pop)
+    "cloudburst": dict(color="#d69a60", label="Cloudburst"),     # muted orange
+    "rmmap":      dict(color="#b07ba6", label="RMMap"),          # mauve
 }
-ORDER = ["faasm", "wasmem"]   # bar order within each group
+ORDER = ["cloudburst", "rmmap", "faasm", "wasmem"]   # bar order within each group
+
+# Each bar series -> (results-CSV system dir, variant filter). RMMap plots the faithful
+# user-space RDMA one-sided-read variant (the MITOSIS kmod won't build here); the
+# serialize-through-Redis ES rows stay in rmmap/results_*.csv but are not plotted.
+SERIES = {
+    "faasm": ("faasm", None), "wasmem": ("wasmem", None),
+    "cloudburst": ("cloudburst", None), "rmmap": ("rmmap", "rdma"),
+}
 
 # Per-workload config: display name + size column + the largest-load size label
 # shown under the group (like mem_largest_load.pdf).
@@ -57,9 +68,10 @@ WORKLOADS = [
 ]
 
 # Two-level broken y-axis (seconds). Lower band holds all the detail; upper band
-# holds the tall Faasm total-exec bars (WordCount 550, Matrix 383, Finra 183).
+# holds the tall total-exec bars — now topped by the KVS-routed baselines on
+# WordCount (RMMap warm 1158, Cloudburst 682, Faasm 550), so HIGH_TOP clears 1158.
 LOW_TOP = 70.0
-HIGH_BOT, HIGH_TOP = 120.0, 660.0
+HIGH_BOT, HIGH_TOP = 120.0, 1250.0
 
 # font sizes matched to the intra-node bar grid (plot_bars_grid.py)
 TICK_SIZE = 16
@@ -118,8 +130,11 @@ def main():
 
     for gi, wl in enumerate(WORKLOADS):
         for j, sys in enumerate(ORDER):
-            rec = pick_largest(load(os.path.join(ROOT, sys, "results_%s.csv" % wl["file"])),
-                               wl["scol"])
+            sysdir, variant = SERIES[sys]
+            rows = load(os.path.join(ROOT, sysdir, "results_%s.csv" % wl["file"]))
+            if variant:
+                rows = [r for r in rows if r.get("variant") == variant]
+            rec = pick_largest(rows, wl["scol"])
             if not rec:
                 print("  ! missing %s/%s" % (sys, wl["file"]))
                 continue
@@ -179,7 +194,7 @@ def main():
     # legend: system colours + the shade encoding in the title, snug above top band
     handles = [Patch(facecolor=SYS[s]["color"], edgecolor="black", linewidth=0.4,
                      label=SYS[s]["label"]) for s in ORDER]
-    leg = fig.legend(handles=handles, ncol=2, loc="lower center",
+    leg = fig.legend(handles=handles, ncol=4, loc="lower center",
                      bbox_to_anchor=(0.5, 0.98), bbox_transform=ax_hi.transAxes,
                      frameon=False, fontsize=LEGEND_SIZE, columnspacing=1.8,
                      handletextpad=0.6, labelspacing=0.3, borderpad=0.2,

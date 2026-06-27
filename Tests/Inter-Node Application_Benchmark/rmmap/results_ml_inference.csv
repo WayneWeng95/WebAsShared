@@ -1,0 +1,2 @@
+samples,workers,nodes_used,variant,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,accuracy_pct,prediction_checksum,expect,success,reps
+6000000,60,4,rdma,1983,147.4,47388,74.35,18633154,18633154,True,15

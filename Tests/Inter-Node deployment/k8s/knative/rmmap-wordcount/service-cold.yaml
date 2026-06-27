@@ -1,0 +1,30 @@
+# RMMap mapper — COLD (strict cold-start). min-scale=0 + scale-to-zero so that with
+# the pool drained to 0 before a rep, the fan-out pays the real serverless cost: pod
+# scheduling + container pull/start + app init for up to 60 pods. The driver's
+# --ensure-zero waits for 0 pods before each measured rep; Knative's activator buffers
+# the 60 requests and releases them as pods come up, so makespan captures the cold tax.
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: wc-mapper
+  namespace: baselines
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/min-scale: "0"
+        autoscaling.knative.dev/max-scale: "60"
+        autoscaling.knative.dev/target: "1"
+        autoscaling.knative.dev/scale-to-zero-pod-retention-period: "0s"
+    spec:
+      containerConcurrency: 1
+      timeoutSeconds: 600
+      containers:
+        - image: dev.local/wc-mapper:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: REDIS_HOST, value: redis.baselines.svc.cluster.local }
+            - { name: REDIS_PORT, value: "6379" }
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { memory: "1Gi" }

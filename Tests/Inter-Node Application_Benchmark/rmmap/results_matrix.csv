@@ -1,0 +1,2 @@
+matrix_n,workers,nodes_used,variant,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,gflops,checksum,expect,success,reps
+4096,64,4,rdma,6509,68.0,312371,21.115,1391095867672,1391095867672,True,15

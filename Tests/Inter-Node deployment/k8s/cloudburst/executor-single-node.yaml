@@ -1,0 +1,31 @@
+# Single-node Cloudburst executor pool — 16 pods ALL pinned to node-0 (nodeSelector), a
+# separate work queue (cb:tasks:single) so it never races the 4-node pool's cb:tasks.
+# Used for the single-node 16-parallel intra-size comparison (results → Tests/Intra-Node
+# Application_Benchmark/analysis/New_result/). Same image (all stage ops + numpy).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudburst-executor-single
+  namespace: baselines
+  labels: { app: cloudburst-executor-single }
+spec:
+  replicas: 16
+  selector:
+    matchLabels: { app: cloudburst-executor-single }
+  template:
+    metadata:
+      labels: { app: cloudburst-executor-single }
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: node-0.wasmsched.sched-serv-pg0.utah.cloudlab.us
+      containers:
+        - name: executor
+          image: cloudburst-executor:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: REDIS_HOST, value: redis.baselines.svc.cluster.local }
+            - { name: REDIS_PORT, value: "6379" }
+            - { name: CB_TASK_QUEUE, value: "cb:tasks:single" }
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { memory: "4Gi" }

@@ -1,0 +1,41 @@
+# Cloudburst executor pool — `replicas` worker pods, evenly spread across the 4
+# nodes (topologySpread maxSkew 1), each pulling wc_mapper tasks off the shared
+# Redis queue. fanout 60 → 60 replicas = 15/node (1 executor per mapper, matching
+# the wasmem/faasm fan width). imagePullPolicy IfNotPresent — image is imported into
+# every node's containerd (07-load-images-style ctr import), not pulled from a registry.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudburst-executor
+  namespace: baselines
+  labels: { app: cloudburst-executor }
+spec:
+  replicas: 60
+  selector:
+    matchLabels: { app: cloudburst-executor }
+  template:
+    metadata:
+      labels: { app: cloudburst-executor }
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: { app: cloudburst-executor }
+      containers:
+        - name: executor
+          image: cloudburst-executor:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            - { name: REDIS_HOST, value: redis.baselines.svc.cluster.local }
+            - { name: REDIS_PORT, value: "6379" }
+            - { name: CB_TASK_QUEUE, value: "cb:tasks" }
+          # 1Gi was enough for WordCount (67 MB chunks at fanout 60). TeraSort runs at
+          # fanout 4, so a partition task loads a ~322 MB chunk and builds its record
+          # lists + N joined bucket blobs — peak ~1.3 GB, which OOM-killed 1Gi pods (the
+          # tasks vanished mid-flight, never producing buckets). 4Gi gives headroom for
+          # both the partition and the merge (gather+sort) waves. Nodes have 64 GB.
+          resources:
+            requests: { cpu: "200m", memory: "256Mi" }
+            limits: { memory: "4Gi" }

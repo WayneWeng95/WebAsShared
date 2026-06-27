@@ -42,9 +42,11 @@ YLABEL_SIZE = 17
 WORKLOADS = ['mediareview', 'socialnetwork']
 WL_LABEL = {'mediareview': 'MediaReview', 'socialnetwork': 'SocialNetwork'}
 
-# Same palette as intra-node/plot.py. RTSFaaS keeps its mauve; WasMem sync/async the
-# light/dark blue pair. (No Flink StateFun bar — not run inter-node.)
+# Same palette as intra-node/plot.py. Flink StateFun reuses the muted orange; RTSFaaS
+# keeps its mauve; WasMem sync/async the light/dark blue pair. (StateFun is now run
+# inter-node too — peak over the 4-node throughput ramps, see load().)
 SERIES = [
+    ('statefun',  'Flink StateFun',  '#d69a60'),   # muted orange (same as intra-node)
     ('rtsfaas',   'RTSFaaS*',        '#b07ba6'),   # mauve — the * = parallel estimate
     ('was_sync',  'WasMem (sync)',   '#8aa8f0'),   # WasMem light blue
     ('was_async', 'WasMem (async)',  '#3a5fc4'),   # WasMem blue (ours, pop)
@@ -72,6 +74,15 @@ def load():
     with open(os.path.join(HERE, 'baseline/RTSFaaS/cluster/results_rtsfaas_parallel_estimate.csv')) as f:
         for r in csv.DictReader(f):
             data['rtsfaas'][r['workload']] = float(r['parallel_estimate_req_s'])
+    # Flink StateFun: peak achieved events/s over the 4-node throughput ramps — the
+    # base 24x1 (parallelism 24) and scaled 3x16 (parallelism 48) runs, from
+    # baseline/FlinkStateFun/results_throughput_statefun*.csv.
+    for name in ('results_throughput_statefun.csv', 'results_throughput_statefun_scaled.csv'):
+        with open(os.path.join(HERE, 'baseline/FlinkStateFun', name)) as f:
+            for r in csv.DictReader(f):
+                w = r['workload']
+                data['statefun'][w] = max(data['statefun'].get(w, 0.0),
+                                          float(r['achieved_ev_s']))
 
 
 # Two-level broken y-axis, in k requests/sec. Upper band holds the WasMem bars

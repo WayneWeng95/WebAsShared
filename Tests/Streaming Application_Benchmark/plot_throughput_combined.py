@@ -8,9 +8,9 @@
 # need different lower-band zooms, so the columns share the UNIT (k req/s) but not
 # the scale — which is fine, they're different throughput regimes anyway.
 #
-# Bars: Flink StateFun, RTSFaaS, WasMem (sync), WasMem (async). StateFun is single-
-# node only (not run inter-node). The cluster RTSFaaS bars are the embarrassingly-
-# parallel ESTIMATE and carry a '*' (caption explains it).
+# Bars: Flink StateFun, RTSFaaS, WasMem (sync), WasMem (async). StateFun is now run
+# on both (single node + 4-node cluster). The cluster RTSFaaS bars are the
+# embarrassingly-parallel ESTIMATE and carry a '*' (caption explains it).
 #
 # Writes figs/throughput_combined.{png,pdf}; copies the PDF to Tests/Figures/.
 import csv
@@ -67,7 +67,14 @@ def load_inter():
     with open(os.path.join(HERE, 'inter-node', 'baseline/RTSFaaS/cluster/results_rtsfaas_parallel_estimate.csv')) as f:
         for r in csv.DictReader(f):
             d['rtsfaas'][r['workload']] = float(r['parallel_estimate_req_s'])
-    return d                                  # no statefun inter-node
+    # Flink StateFun: peak achieved events/s over the 4-node throughput ramps
+    # (base 24x1 + scaled 3x16), from inter-node/baseline/FlinkStateFun/.
+    for name in ('results_throughput_statefun.csv', 'results_throughput_statefun_scaled.csv'):
+        with open(os.path.join(HERE, 'inter-node', 'baseline/FlinkStateFun', name)) as f:
+            for r in csv.DictReader(f):
+                w = r['workload']
+                d['statefun'][w] = max(d['statefun'].get(w, 0.0), float(r['achieved_ev_s']))
+    return d
 
 
 def draw_panel(ax_hi, ax_lo, data, series, bands, title, star_keys=()):
@@ -118,7 +125,7 @@ def main():
     # bands = (lower-top, upper-bottom, upper-top)
     draw_panel(a_hi, a_lo, intra, ['statefun', 'rtsfaas', 'was_sync', 'was_async'],
                (8.0, 30.0, 95.0), '(a) Single node')
-    draw_panel(b_hi, b_lo, inter, ['rtsfaas', 'was_sync', 'was_async'],
+    draw_panel(b_hi, b_lo, inter, ['statefun', 'rtsfaas', 'was_sync', 'was_async'],
                (30.0, 80.0, 140.0), '(b) 4-node cluster', star_keys={'rtsfaas'})
 
     fig.supylabel('Throughput (k requests / sec)', fontsize=YLABEL_SIZE, x=0.040)
