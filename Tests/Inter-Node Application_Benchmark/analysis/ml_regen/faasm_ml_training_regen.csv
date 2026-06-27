@@ -1,3 +1,2 @@
 samples,workers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,accuracy_pct,weight_checksum,expect,success,reps
-600000,60,4,1189,45.0,27730,74.37,1232,1232,True,15
 6000000,60,4,5016,16.9,52746,74.35,1232,1232,True,3

@@ -64,7 +64,7 @@ AGG_DOWN = 1200      # aggregate_predict gather slot
 # "label,f0..f15" per line). The model is keyed to the same per-class prototypes
 # as the data, so argmax(Σ w·x) is a meaningful classifier and the prediction
 # checksum is exact + fan-out-invariant.
-DEFAULT_MODEL = "TestData/ml/infer_model.txt"
+DEFAULT_MODEL = "TestData/ml_inference_model.csv"   # regenerated model (original infer_model.txt was emptied)
 DEFAULT_DATA = "TestData/ml/test_50000.csv"
 
 

@@ -4,11 +4,11 @@
     "0": [
       {
         "deps": [],
-        "id": "rr_aggregate_train_local_1_from_1",
+        "id": "rr_aggregate_train_local_2_from_2",
         "kind": {
           "RemoteRecv": {
-            "peer": 1,
-            "slot": 1202,
+            "peer": 2,
+            "slot": 1203,
             "slot_kind": "Stream"
           }
         }
@@ -26,11 +26,11 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_train_local_2_from_2",
+        "id": "rr_aggregate_train_local_1_from_1",
         "kind": {
           "RemoteRecv": {
-            "peer": 2,
-            "slot": 1203,
+            "peer": 1,
+            "slot": 1202,
             "slot_kind": "Stream"
           }
         }
@@ -40,7 +40,7 @@
         "id": "load_0",
         "kind": {
           "Input": {
-            "path": "TestData/ml/sgd_6000000.csv",
+            "path": "/opt/myapp/WebAsShared/TestData/ml_training_6m.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -538,7 +538,7 @@
         "id": "load_1",
         "kind": {
           "Input": {
-            "path": "TestData/ml/sgd_6000000.csv",
+            "path": "/opt/myapp/WebAsShared/TestData/ml_training_6m.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -979,7 +979,7 @@
         "id": "load_2",
         "kind": {
           "Input": {
-            "path": "TestData/ml/sgd_6000000.csv",
+            "path": "/opt/myapp/WebAsShared/TestData/ml_training_6m.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -1420,7 +1420,7 @@
         "id": "load_3",
         "kind": {
           "Input": {
-            "path": "TestData/ml/sgd_6000000.csv",
+            "path": "/opt/myapp/WebAsShared/TestData/ml_training_6m.csv",
             "prefetch": true,
             "replicate": true,
             "slot": 0
@@ -1858,7 +1858,7 @@
   },
   "shared_inputs": [
     {
-      "path": "TestData/ml/sgd_6000000.csv",
+      "path": "/opt/myapp/WebAsShared/TestData/ml_training_6m.csv",
       "source_node": 0
     }
   ],

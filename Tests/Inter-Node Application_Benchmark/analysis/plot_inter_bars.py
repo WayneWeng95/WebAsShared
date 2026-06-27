@@ -123,6 +123,17 @@ def main():
     n = len(WORKLOADS)
     bar_w = 0.74 / len(ORDER)
 
+    # Cold-start times (Cloudburst/RMMap, Matrix/ML) from the cold_start experiment — stacked
+    # on the makespan base as a HATCHED segment to show the scale-from-zero cost (Cloudburst =
+    # pod spin-up 0→60; RMMap = a fresh RDMA publish). COLD[(workload_file, system)] = seconds.
+    COLD = {}
+    cs_csv = os.path.join(HERE, "cold_start", "results_cold_start.csv")
+    if os.path.exists(cs_csv):
+        for r in load(cs_csv):
+            c = fnum(r.get("cold_start_mean_ms"))
+            if c is not None:
+                COLD[(r["workload"], r["system"])] = c / 1000.0
+
     # Two stacked axes sharing x; lower band gets more height (carries the detail).
     fig, (ax_hi, ax_lo) = plt.subplots(
         2, 1, sharex=True, figsize=(18, 4.5),
@@ -151,6 +162,16 @@ def main():
                            linewidth=0.4, zorder=2)
                 ax.bar(x, mk, w, color=base, edgecolor="black", linewidth=0.4,
                        zorder=3)
+            # cold start (if measured for this system+workload): a hatched segment stacked
+            # on top of the makespan base → the saturated region becomes makespan + cold start.
+            cold = COLD.get((wl["file"], sys))
+            if cold:
+                for ax in (ax_hi, ax_lo):
+                    ax.bar(x, cold, w, bottom=mk, color=base, edgecolor="white",
+                           linewidth=0.5, hatch="////", zorder=4)
+                ax_lo.text(x, mk + cold, "+%.1f" % cold, ha="center", va="bottom",
+                           fontsize=VALUE_SIZE - 2, color="#444", fontstyle="italic",
+                           fontweight="bold", zorder=6)
             # value labels: total-exec on top (on whichever band holds it),
             # makespan inside the base (always in the lower band).
             if te is not None:
@@ -194,7 +215,9 @@ def main():
     # legend: system colours + the shade encoding in the title, snug above top band
     handles = [Patch(facecolor=SYS[s]["color"], edgecolor="black", linewidth=0.4,
                      label=SYS[s]["label"]) for s in ORDER]
-    leg = fig.legend(handles=handles, ncol=4, loc="lower center",
+    handles.append(Patch(facecolor="#cfcfcf", edgecolor="white", linewidth=0.5,
+                         hatch="////", label="cold start (+s)"))
+    leg = fig.legend(handles=handles, ncol=5, loc="lower center",
                      bbox_to_anchor=(0.5, 0.98), bbox_transform=ax_hi.transAxes,
                      frameon=False, fontsize=LEGEND_SIZE, columnspacing=1.8,
                      handletextpad=0.6, labelspacing=0.3, borderpad=0.2,

@@ -11,7 +11,7 @@
       "deps": [],
       "kind": {
         "Input": {
-          "path": "TestData/ml/sgd_6000000.csv",
+          "path": "/opt/myapp/WebAsShared/TestData/ml_training_6m.csv",
           "prefetch": true,
           "replicate": true
         }

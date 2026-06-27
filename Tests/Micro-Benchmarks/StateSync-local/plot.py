@@ -27,6 +27,7 @@ from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")            # headless: write files, no display
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
 # ── Font sizes ────────────────────────────────────────────────────────────────
 TICK_SIZE   = 16
@@ -121,37 +122,75 @@ def style(a):
                 label=LABEL.get(a, a), linewidth=1.8, markersize=8 if a == "shm-zerocopy" else 6)
 
 
-# ── Combined PUT|GET latency panel, one shared legend, no titles ──────────────
-# X is categorical (equal spacing between size groups); Y is log.
+# ── Panel: LEFT = Read+Write latency (merged), RIGHT = Read+Write throughput ──
+# X is categorical (equal spacing between size groups); Y is log. Within an approach
+# (= colour), Read is a solid line + filled marker, Write is a dashed line + open marker.
+# Throughput broken-axis bands (linear GiB/s): a low band for the latency-bound KVS/S3
+# lines (≤0.6) and a high band for Faasm's shm-copy (~1–11), with a clean gap between.
+THR_LO_TOP = 0.6
+THR_HI_BOT, THR_HI_TOP = 1.0, 11.0
+
+
 def plot_latency_panel(data, outpath, figsize, metric="mean"):
     all_sizes = sorted({s for a in data for s, _ in data[a]})
     idx = {s: i for i, s in enumerate(all_sizes)}
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
-    op_label = {"get": "Read", "put": "Write"}
-    for ax, op in zip(axes, ("get", "put")):       # read (GET) left, write (PUT) right
+    fig = plt.figure(figsize=figsize)
+    # left = latency (spans both rows); right = throughput split into hi/lo bands.
+    gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1],
+                          hspace=0.05, wspace=0.30, top=1.0, bottom=0.14)
+    ax_lat = fig.add_subplot(gs[:, 0])
+    ax_thi = fig.add_subplot(gs[0, 1])
+    ax_tlo = fig.add_subplot(gs[1, 1], sharex=ax_thi)
+
+    # ONE line per approach: the mean over the two directions (Read=get, Write=put).
+    def draw(ax, col_suffix):
         for a in approaches_in(data):
             xs = [idx[s] for s, _ in data[a]]
-            val = [float(r[f"{op}_{metric}_us"]) for _, r in data[a]]
-            ax.plot(xs, val, **style(a))
-        stat = "Mean" if metric == "mean" else "Median"
-        ax.set_yscale("log")
-        ax.set_xticks(range(len(all_sizes)))
-        ax.set_xticklabels([fmt_size(s) for s in all_sizes], fontsize=TICK_SIZE)
-        ax.set_xlabel("state size")
-        ax.set_ylabel(f"{stat} {op_label[op]} latency (µs, log)", fontsize=YLABEL_SIZE)
+            ys = [(float(r[f"get_{col_suffix}"]) + float(r[f"put_{col_suffix}"])) / 2.0
+                  for _, r in data[a]]
+            st = style(a)
+            st.pop("label", None)                  # custom legend below
+            ax.plot(xs, ys, **st)
         ax.grid(True, which="both", ls=":", alpha=0.4)
-    # Lay out the panels, then place one shared legend entirely ABOVE them
-    # (its bottom edge anchored at the figure top) so it can't overlap the axes.
-    # bbox_inches="tight" expands the saved canvas to include it.
-    fig.tight_layout()
-    handles, labels = axes[0].get_legend_handles_labels()
-    # Reorder into a column-major 2-col grid:  AWS | SONIC (top row),
-    #                                          Cloudburst | Faasm (bottom row).
-    legend_order = ["s3", "redis-local", "redis-remote", "shm-copy"]
-    rank = {LABEL[a]: i for i, a in enumerate(legend_order) if a in LABEL}
-    keys = sorted(range(len(labels)), key=lambda k: rank.get(labels[k], len(rank)))
-    handles, labels = [handles[k] for k in keys], [labels[k] for k in keys]
-    fig.legend(handles, labels, loc="lower center", ncol=2, fontsize=LEGEND_SIZE,
+
+    stat = "Mean" if metric == "mean" else "Median"
+    # LEFT — Mean latency = average of Read+Write (log y: spans ~1µs..1e6µs)
+    draw(ax_lat, f"{metric}_us")
+    ax_lat.set_yscale("log")
+    ax_lat.set_xticks(range(len(all_sizes)))
+    ax_lat.set_xticklabels([fmt_size(s) for s in all_sizes], fontsize=TICK_SIZE)
+    ax_lat.set_xlabel("state size")
+    ax_lat.set_ylabel(f"{stat} latency (µs, log)", fontsize=YLABEL_SIZE)
+
+    # RIGHT — throughput = average of Read+Write (GiB/s), one line per approach.
+    # LINEAR, BROKEN y-axis (low band = latency-bound KVS/S3, high band = shm-copy).
+    for ax in (ax_thi, ax_tlo):
+        draw(ax, "gibps")
+    ax_thi.set_ylim(THR_HI_BOT, THR_HI_TOP)
+    ax_tlo.set_ylim(0, THR_LO_TOP)
+    # hide the spines at the break + draw diagonal break marks
+    ax_thi.spines["bottom"].set_visible(False)
+    ax_tlo.spines["top"].set_visible(False)
+    ax_thi.tick_params(axis="x", bottom=False, labelbottom=False)
+    ax_tlo.set_xticks(range(len(all_sizes)))
+    ax_tlo.set_xticklabels([fmt_size(s) for s in all_sizes], fontsize=TICK_SIZE)
+    ax_tlo.set_xlabel("state size")
+    d = 0.5
+    bkw = dict(marker=[(-1, -d), (1, d)], markersize=8, linestyle="none",
+               color="k", mec="k", mew=1, clip_on=False)
+    ax_thi.plot([0, 1], [0, 0], transform=ax_thi.transAxes, **bkw)
+    ax_tlo.plot([0, 1], [1, 1], transform=ax_tlo.transAxes, **bkw)
+    # one y-label centered across the two throughput bands
+    ax_tlo.set_ylabel("Throughput (GiB/s)", fontsize=YLABEL_SIZE)
+    ax_tlo.yaxis.set_label_coords(-0.16, 1.05)
+
+    # Shared legend ABOVE the panels: the approach colours (one line per approach).
+    ah = {a: Line2D([0], [0], color=COLOR[a], marker=MARKER.get(a, "o"),
+                    linewidth=1.8, markersize=7, label=LABEL[a])
+          for a in approaches_in(data)}
+    # column-major fill: col1 = AWS/Cloudburst, col2 = SONIC/Faasm.
+    handles = [ah[a] for a in ["s3", "redis-local", "redis-remote", "shm-copy"] if a in ah]
+    fig.legend(handles=handles, loc="lower center", ncol=2, fontsize=LEGEND_SIZE,
                frameon=False, bbox_to_anchor=(0.5, 1.0))
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close(fig)

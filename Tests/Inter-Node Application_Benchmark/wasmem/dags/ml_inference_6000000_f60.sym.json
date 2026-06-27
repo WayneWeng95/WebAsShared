@@ -11,7 +11,7 @@
       "deps": [],
       "kind": {
         "Input": {
-          "path": "TestData/ml/infer_model.txt",
+          "path": "TestData/ml_inference_model.csv",
           "slot": 5,
           "prefetch": true,
           "replicate": true
@@ -37,7 +37,7 @@
       "deps": [],
       "kind": {
         "Input": {
-          "path": "TestData/ml/test_6000000.csv",
+          "path": "/opt/myapp/WebAsShared/TestData/ml_inference_6m.csv",
           "slot": 0,
           "prefetch": true,
           "replicate": true
