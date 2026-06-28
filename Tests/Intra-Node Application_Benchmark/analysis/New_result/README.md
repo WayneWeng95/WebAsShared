@@ -70,6 +70,49 @@ are 1000 MB — 2× the data — so compare new-vs-ours at ~1 GB.)
   bottleneck on the naive kernel). Remaining TeraSort/Finra gaps = the Python compute floor
   (WasMem runs the WASM kernel).
 
+## Small intra-node sizes — Cloudburst warm **and** cold start (2026-06-27)
+
+A second single-node 16-parallel Cloudburst sweep at the **smallest** intra-node input of each
+workload, run **both warm and cold** so the FaaS pod cold-start penalty is visible. Same
+`cloudburst-executor-single` pool (16 pods on node-0, queue `cb:tasks:single`), same drivers
+(`Tests/Inter-Node deployment/k8s/cloudburst/driver_{finra,matrix,ml_inference}.py`), 3 reps each.
+
+- **warm** = the 16 pods are already running and warmed (one warm-up rep discarded), then 3 timed reps.
+- **cold** = per the cross-system definition in `Tests/Inter-Node deployment/EXPERIMENT_PLAN.md`
+  §"warm/cold" (Cloudburst row): before **each** rep the pool is scaled to **0** (pods confirmed
+  gone) then back to **16**, and the driver dispatches immediately — so the makespan includes pod
+  scheduling + container + python-import cold-start. 3 such reps, mean ± pstdev.
+
+Result files (one row per variant; `nodes_used` corrected to 1 — the shared driver hard-codes 4):
+`finra_10k_cloudburst.csv`, `matrix_512_cloudburst.csv`, `ml_inference_cloudburst.csv` (100k + 300k).
+
+| workload | input | variant | makespan (ms) | total_job (ms) | gate |
+|----------|-------|---------|--------------:|---------------:|------|
+| Finra        | 10k trades | warm | 129 ± 12  | 796  | viol 6,183 |
+| Finra        | 10k trades | **cold** | **2509 ± 42** | 700 | viol 6,183 |
+| Matrix       | 512²       | warm | 155 ± 6   | 590 (1.73 GFLOP/s) | 2,722,562,338 |
+| Matrix       | 512²       | **cold** | **1986 ± 67** | 348 | 2,722,562,338 |
+| ML-inference | 100k       | warm | 169 ± 5   | 1514 | predsum 310,304 |
+| ML-inference | 100k       | **cold** | **2328 ± 172** | 1451 | predsum 310,304 |
+| ML-inference | 300k       | warm | 409 ± 22  | 4514 | predsum 930,379 |
+| ML-inference | 300k       | **cold** | **2784 ± 57** | 4687 | predsum 930,379 |
+
+- **Cold adds a flat ~1.8–2.4 s pod cold-start** to every workload (scheduling + container +
+  `import numpy`/redis connect before the first task drains). It dominates the small-size makespan
+  (warm runs finish in 0.1–0.4 s), so cold/warm differ by **6–20×** here — the headline serverless
+  cold-start cost. `total_job` (Σ pod busy time) is ~unchanged warm-vs-cold (same compute floor).
+  The cold `gflops` figure is computed over the full cold-start-inclusive makespan, so it is not
+  comparable to the warm GFLOP/s.
+- **Gates match the intra-node values:** Finra **6,183** and Matrix **2,722,562,338** equal the
+  intra wasm/cloudburst gates exactly (deterministic integer audit / int-entry product). ML-inference
+  predsums (310,304 / 930,379) use the **regenerated** `ml_inference_model.csv` — self-consistent
+  across reps (the same regenerated-model offset as the 6M inter-node gate 18,633,154), not the
+  original-model wasm value.
+
+Datasets generated for these (default seeds, in `TestData/`): `finra_10k.csv` (gen_trades, seed 42),
+`matrix_a_512.bin`/`matrix_b_512.bin` (gen_matrix, seed 12345), `ml_inference_{100k,300k}.csv`
+(first 100k/300k rows of `ml_inference_6m.csv`, shared `ml_inference_model.csv`).
+
 ## Datasets (intra-node sizes, in `TestData/`)
 `corpus_1000mb.txt` (tiled seed), `terasort_500mb.txt` (seed 1234), `finra_1m.csv`,
 `matrix_a_2048.bin`/`matrix_b_2048.bin` (seed 12345).

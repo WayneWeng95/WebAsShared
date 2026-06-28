@@ -211,6 +211,15 @@ def plot_panel(data, outpath, figsize, metric, yscale="log", ceiling=PORT_CEILIN
         axL.plot(xs_of(a), [float(r[f"lat_{metric}_us"]) for _, r in data[a]], **style(a))
     axL.set_yscale(yscale)
     _xaxis(axL, all_sizes)
+    # Clear everything first (grid(False) alone only clears the major lines,
+    # leaving the log scale's many minor horizontal dashes — the dense lines that
+    # cluttered the panel), then show dotted gridlines at the MAJOR ticks only:
+    # the vertical (size) lines and the y lines at the labeled tick numbers.
+    axL.grid(False, which="both")
+    axL.xaxis.grid(True, which="major", ls=":", alpha=0.4)
+    axL.yaxis.grid(True, which="major", ls=":", alpha=0.4)
+    axL.yaxis.grid(False, which="minor")
+    axL.tick_params(axis="y", which="minor", left=False)
     unit = "µs, log" if yscale == "log" else "µs"
     axL.set_ylabel(f"{stat} latency ({unit})", fontsize=YLABEL_SIZE)
 
@@ -268,9 +277,10 @@ def plot_panel(data, outpath, figsize, metric, yscale="log", ceiling=PORT_CEILIN
                      transform=axR.get_yaxis_transform())
 
     fig.tight_layout()
+    fig.subplots_adjust(top=0.97)          # pull the panels up toward the legend
     handles, labels = axL.get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=2,
-               fontsize=LEGEND_SIZE, frameon=False, bbox_to_anchor=(0.5, 1.0))
+               fontsize=LEGEND_SIZE, frameon=False, bbox_to_anchor=(0.5, 0.99))
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close(fig)
     print(f"[plot] wrote {outpath}")

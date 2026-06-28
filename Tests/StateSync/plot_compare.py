@@ -28,8 +28,6 @@ from collections import defaultdict
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-from matplotlib.lines import Line2D
-from matplotlib.ticker import FuncFormatter
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_BASELINE = os.path.join(HERE, "..", "Micro-Benchmarks", "StateSync-local", "results.csv")
@@ -64,7 +62,7 @@ OP_LABEL = {"put": "Write", "get": "Read"}
 # Font sizes — adopted from StateSync-local/plot.py so the figures match.
 TICK_SIZE   = 16
 LABEL_SIZE  = 16
-LEGEND_SIZE = 15
+LEGEND_SIZE = 17
 YLABEL_SIZE = 14          # y-axis labels are longer — a touch smaller than LABEL_SIZE
 plt.rcParams.update({
     "xtick.labelsize": TICK_SIZE,
@@ -150,73 +148,29 @@ def line_plot(data, col, ylabel, outpath, figsize, logy=True):
     print(f"[plot] wrote {outpath}")
 
 
-# Throughput broken-axis bands (LINEAR GiB/s). The break splits the KVS/copy baselines
-# (low band) from the zero-copy engines (high band); the gap 11..13 is empty.
-THR_LO = (0.0, 11.0)          # s3, redis, rr-embedded, shm-copy
-THR_HI = (13.0, 155000.0)     # shm-zerocopy, shm-zerocopy-engine (ours)
-
-
 def panel_plot(data, metric, outpath, figsize):
-    """LEFT = Mean latency (average of Read+Write, log). RIGHT = throughput (average of
-    Read+Write, one line per approach) on a BROKEN LOG y-axis. One shared legend above."""
+    """Combined Read|Write latency panel with one shared legend above, mirroring
+    StateSync-local/plot.py's latency_put_get figure. Read (GET) is on the left,
+    Write (PUT) on the right."""
     sizes = all_sizes(data)
     idx = {s: i for i, s in enumerate(sizes)}
     stat = "Mean" if metric == "mean" else "Median"
-    fig = plt.figure(figsize=figsize)
-    gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1],
-                          hspace=0.05, wspace=0.38, top=1.0, bottom=0.14)
-    ax_lat = fig.add_subplot(gs[:, 0])
-    ax_thi = fig.add_subplot(gs[0, 1])
-    ax_tlo = fig.add_subplot(gs[1, 1], sharex=ax_thi)
-
-    # ONE line per approach: the mean over the two directions (Read=get, Write=put).
-    def draw(ax, col_suffix):
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+    for ax, op in zip(axes, ("get", "put")):
         for a in present(data):
-            ss = sorted(data[a])
-            xs = [idx[s] for s in ss]
-            ys = [(float(data[a][s][f"get_{col_suffix}"]) +
-                   float(data[a][s][f"put_{col_suffix}"])) / 2.0 for s in ss]
-            st = style(a)
-            st.pop("label", None)
-            ax.plot(xs, ys, **st)
+            xs = [idx[s] for s in sorted(data[a])]
+            ys = [float(data[a][s][f"{op}_{metric}_us"]) for s in sorted(data[a])]
+            ax.plot(xs, ys, **style(a))
+        ax.set_yscale("log")
+        ax.set_xticks(range(len(sizes)))
+        ax.set_xticklabels([fmt_size(s) for s in sizes], fontsize=TICK_SIZE)
+        ax.set_xlabel("state size")
+        ax.set_ylabel(f"{stat} {OP_LABEL[op]} latency (µs, log)", fontsize=YLABEL_SIZE)
         ax.grid(True, which="both", ls=":", alpha=0.4)
-
-    # LEFT — Mean latency = average of Read+Write (log)
-    draw(ax_lat, f"{metric}_us")
-    ax_lat.set_yscale("log")
-    ax_lat.set_xticks(range(len(sizes)))
-    ax_lat.set_xticklabels([fmt_size(s) for s in sizes], fontsize=TICK_SIZE)
-    ax_lat.set_xlabel("state size")
-    ax_lat.set_ylabel(f"{stat} latency (µs, log)", fontsize=YLABEL_SIZE)
-
-    # RIGHT — throughput = average of Read+Write, BROKEN LINEAR y-axis
-    for ax in (ax_thi, ax_tlo):
-        draw(ax, "gibps")
-    ax_thi.set_ylim(*THR_HI)
-    ax_tlo.set_ylim(*THR_LO)
-    # compact high-band ticks (50k/100k/150k) so they don't crowd the y-label
-    ax_thi.set_yticks([50000, 100000, 150000])
-    ax_thi.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x/1000:.0f}k"))
-    ax_thi.spines["bottom"].set_visible(False)
-    ax_tlo.spines["top"].set_visible(False)
-    ax_thi.tick_params(axis="x", bottom=False, labelbottom=False)
-    ax_tlo.set_xticks(range(len(sizes)))
-    ax_tlo.set_xticklabels([fmt_size(s) for s in sizes], fontsize=TICK_SIZE)
-    ax_tlo.set_xlabel("state size")
-    d = 0.5
-    bkw = dict(marker=[(-1, -d), (1, d)], markersize=8, linestyle="none",
-               color="k", mec="k", mew=1, clip_on=False)
-    ax_thi.plot([0, 1], [0, 0], transform=ax_thi.transAxes, **bkw)
-    ax_tlo.plot([0, 1], [1, 1], transform=ax_tlo.transAxes, **bkw)
-    ax_tlo.set_ylabel("Throughput (GiB/s)", fontsize=YLABEL_SIZE)
-    ax_tlo.yaxis.set_label_coords(-0.18, 1.05)
-
-    # One shared legend above the panels — one entry per approach (column-major: slow
-    # baselines in col 1, fast shared-memory in col 2).
-    handles = [Line2D([0], [0], color=COLOR[a], marker=MARKER[a], linewidth=1.8,
-                      markersize=8 if a == "shm-zerocopy-engine" else 7, label=LABEL[a])
-               for a in present(data)]
-    fig.legend(handles=handles, loc="lower center", ncol=2, fontsize=LEGEND_SIZE,
+    # One shared legend anchored entirely above the panels (can't overlap axes).
+    fig.tight_layout()
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=2, fontsize=LEGEND_SIZE,
                frameon=False, bbox_to_anchor=(0.5, 1.0))
     fig.savefig(outpath, dpi=150, bbox_inches="tight")
     plt.close(fig)

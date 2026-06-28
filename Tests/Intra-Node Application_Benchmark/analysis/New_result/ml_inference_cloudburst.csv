@@ -1,0 +1,5 @@
+samples,workers,nodes_used,variant,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,accuracy_pct,prediction_checksum,expect,success,reps
+100000,16,1,warm,169,5.4,1514,74.48,310304,310304,True,3
+100000,16,1,cold,2328,171.9,1451,74.48,310304,310304,True,3
+300000,16,1,warm,409,22.2,4514,74.43,930379,930379,True,3
+300000,16,1,cold,2784,57.1,4687,74.43,930379,930379,True,3

@@ -1,0 +1,3 @@
+trades,workers,nodes_used,variant,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,violations,expect,success,reps
+10000,18,1,warm,129,12.2,796,6183,6183,True,3
+10000,18,1,cold,2509,41.6,700,6183,6183,True,3

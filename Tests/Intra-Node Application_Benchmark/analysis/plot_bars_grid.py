@@ -72,6 +72,28 @@ PATHS = {
     "faasm":      os.path.join("baseline", "faasm", "demo", "results.csv"),
 }
 
+# Cloudburst cells overridden with the single-node 16-parallel **warm** makespan
+# (New_result/, the inter-node-harness-on-one-node runs) instead of the old
+# intra-node single-process best-of-sweep. Keyed by (workload name, panel size).
+NEW_CB_DIR = os.path.join(HERE, "New_result")
+NEW_CB = {
+    ("Matrix", 512):       ("matrix_512_cloudburst.csv", "matrix_n", 512),
+    ("ML inference", 3.2): ("ml_inference_cloudburst.csv", "samples", 100000),
+    ("ML inference", 9.7): ("ml_inference_cloudburst.csv", "samples", 300000),
+}
+
+
+def new_cb_warm_s(wl_name, size):
+    """Warm makespan (s) for an overridden Cloudburst cell, or None."""
+    spec = NEW_CB.get((wl_name, size))
+    if not spec:
+        return None
+    fname, col, val = spec
+    for r in load(os.path.join(NEW_CB_DIR, fname)):
+        if r.get("variant") == "warm" and fnum(r.get(col)) == val:
+            return fnum(r["makespan_mean_ms"]) / 1000.0
+    return None
+
 
 def fnum(x):
     try:
@@ -116,6 +138,11 @@ def main():
             size, slabel = wl["sizes"][rrow]
             ys = []
             for k in ORDER:
+                if k == "cloudburst":
+                    ov = new_cb_warm_s(wl["name"], size)
+                    if ov is not None:
+                        ys.append(ov)
+                        continue
                 ys.append(best_latency_s(rows_by[wl["name"]][k], wl["scol"],
                                          size, wl["tol"], wl["lat"][k]) or 0.0)
             bars = ax.bar(range(len(ORDER)), ys,
