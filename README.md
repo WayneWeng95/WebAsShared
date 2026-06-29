@@ -93,6 +93,27 @@ Distributed correctness, capacity-aware fan-out, metrics, and streaming fixes:
   ([`Tests/Streaming_CrossNode/node{0,1}_mode2.json`](Tests/Streaming_CrossNode/),
   `verify_mode2.py`).
 
+- **SHM window enlarged 1.5 GiB → ~3.48 GiB (TeraSort now sorts 3 GB).** The
+  SHM window base `TARGET_OFFSET` was pinned at 2 GiB, but the guest only uses
+  ~1 MiB at the bottom of its wasm32 address space (static data + 1 MiB shadow
+  stack — Rust's wasm allocator grows the heap at the *top* via `memory.grow`,
+  never the low region). Lowering `TARGET_OFFSET` to 16 MiB reclaims the dead
+  `[~1 MiB, 2 GiB)` gap into the window (`DIRECT_LIMIT`, `CAPACITY_HARD_LIMIT`,
+  `BUMP_SOFT_LIMIT` raised in lockstep), **without** shrinking the 0.5 GiB guest
+  heap — so no workload regresses. Intra-node **TeraSort at N=16 now sorts a
+  3 GB dataset** (checksum = exact record count), up from the old ~1.2 GB
+  ceiling; WordCount/Matrix/ML/Finra verified unchanged at N=16. Per-run SHM and
+  per-guest heap high-water are now logged (`[DAG][shm] peak arena:` / `[heap]`)
+  to size the split from data. See the [Shared Memory Layout](#shared-memory-layout)
+  section for the window/heap trade-off.
+- **Matrix block-index decode fixed (regression from `9827c47`).** The
+  `mat_block` arg decode in `workloads/matrix.rs` had drifted 2 bits out of sync
+  with `gen_dag.py`'s encoder (`unpack_rcn` and the `i`/`j` shifts), so blocks
+  computed at the wrong positions and the checksum varied with fan-out. Restored
+  to the documented `(i<<24)|(j<<19)|(r<<16)|(c<<13)|N` layout; verified against
+  the known-good checksums (512→`2722562338`, 1024→`21734916428`,
+  2048→`173893359281`).
+
 See [`problems.md`](problems.md) for remaining open items and
 [`docs/updates.md`](docs/updates.md) for the full change log.
 
@@ -564,10 +585,12 @@ cargo test -p scheduler -- --nocapture
 
 ### Shared Memory Layout
 
-The host creates a SHM file and maps it at a fixed offset (`0x80000000`) in each WASM guest's 4 GB address space. Guests access it via ordinary pointer arithmetic -- no syscalls needed for data reads/writes. When RDMA is enabled, the same SHM is registered as an RDMA Memory Region (MR1) so peer nodes can write directly into it.
+The host creates a SHM file and maps it at a fixed offset (`TARGET_OFFSET = 0x01000000`, 16 MiB) in each WASM guest's 4 GB address space. Guests access it via ordinary pointer arithmetic -- no syscalls needed for data reads/writes. When RDMA is enabled, the same SHM is registered as an RDMA Memory Region (MR1) so peer nodes can write directly into it.
+
+The 4 GiB wasm32 linear memory is partitioned into three regions: the guest's static data + 1 MiB shadow stack at the bottom (`[0, ~1 MiB)`, fixed), the **SHM window** `[TARGET_OFFSET, wasm min)`, and the **guest heap** `[wasm min, 4 GiB)`. The guest heap grows at the top because Rust's wasm allocator only ever extends memory at the high end (`memory.grow`), never touching the low region — so the window can start just above the ~1 MiB static/stack footprint. `TARGET_OFFSET` was lowered from 2 GiB → 16 MiB to reclaim the previously-dead `[~1 MiB, 2 GiB)` gap into the window, taking it from 1.5 GiB → **~3.48 GiB** without shrinking the 0.5 GiB heap. With `wasm min = 57344 pages` (3.5 GiB, `worker.rs`): window = 3.5 GiB − 16 MiB. (Lowering `wasm min` instead trades window for a larger heap — see the heap-vs-window note below.)
 
 ```
-0x80000000  +--------------------------------+
+0x01000000  +--------------------------------+   ← TARGET_OFFSET (16 MiB)
             | Superblock                     |
             |  atomic counters, bump ptr     |
             |  stream heads/tails [2048]     |
@@ -594,7 +617,9 @@ The host creates a SHM file and maps it at a fixed offset (`0x80000000`) in each
             +--------------------------------+
 ```
 
-Starting SHM size is `INITIAL_SHM_SIZE = 64 MiB` (`common/src/lib.rs`), which grows geometrically on demand via `shm::try_grow_shm` up to `CAPACITY_HARD_LIMIT = 2 GiB`. The NIC registers MR1 over the initial window; MR-src-ext covers pages past the original MR1 boundary as SHM grows. The bump region grows on demand via `host_remap` (local) or via `MeshNode::ensure_shm_capacity` (host-side, used by the MR2 memcpy-back described below). No per-peer RDMA staging region is pre-reserved — receives allocate from the common page pool on demand.
+Starting SHM size is `INITIAL_SHM_SIZE = 64 MiB` (`common/src/lib.rs`), which grows geometrically on demand via `shm::try_grow_shm` up to `CAPACITY_HARD_LIMIT = 0xDF00_0000` (~3.48 GiB — the full window = wasm min − `TARGET_OFFSET`). `DIRECT_LIMIT` and `BUMP_SOFT_LIMIT` track the same window size; PageIds are offsets relative to `TARGET_OFFSET` and stay `< DIRECT_LIMIT`. The NIC registers MR1 over the initial window; MR-src-ext covers pages past the original MR1 boundary as SHM grows. The bump region grows on demand via `host_remap` (local) or via `MeshNode::ensure_shm_capacity` (host-side, used by the MR2 memcpy-back described below). No per-peer RDMA staging region is pre-reserved — receives allocate from the common page pool on demand.
+
+**Heap vs. window.** The window/heap boundary is `wasm min` (`MemoryType::shared(57344, 65536)` in `worker.rs`), fixed at instantiation (shared memories can't be grown through the store, and `min == max` OOMs the heap). `min` trades window against heap: 3.5 GiB min → ~3.48 GiB window + 0.5 GiB heap. The heap is the binding constraint for workloads that materialize their shard in guest memory — WordCount (`read_all_stream_records`), Matrix (block panels), and ML_training (centered matrix) scale heap with input and OOM above ~0.5 GiB (e.g. WordCount at 500 MB / 1 worker); streaming workloads (TeraSort, Finra, ML_inference) use a few MiB. Lowering `min` to grow the heap therefore shrinks the window for everyone, so it is best made a per-DAG knob rather than a global default. Per-run high-water is logged via `[DAG][shm] peak arena:` (host) and `[heap]` (per guest subprocess).
 
 ### Host-side overflow MRs (Path C)
 
