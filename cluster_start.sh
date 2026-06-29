@@ -109,7 +109,9 @@ fi
 if [ "$NO_PULL" -eq 1 ]; then
     LAUNCH="cd '$REMOTE_DIR' && { SKIP_PULL=1 setsid nohup ./node_update.sh </dev/null >'$REMOTE_LOG' 2>&1 & } && echo launched"
 else
-    LAUNCH="cd '$REMOTE_DIR' && git pull && { SKIP_PULL=1 setsid nohup ./node_update.sh </dev/null >'$REMOTE_LOG' 2>&1 & } && echo launched"
+    # git pull output → the remote log (not the SSH reply), so the only token we
+    # get back on success is exactly 'launched'; node_update.sh appends after it.
+    LAUNCH="cd '$REMOTE_DIR' && git pull >'$REMOTE_LOG' 2>&1 && { SKIP_PULL=1 setsid nohup ./node_update.sh </dev/null >>'$REMOTE_LOG' 2>&1 & } && echo launched"
 fi
 info "launching update+build+start on ${#WORKER_IDS[@]} workers (detached)…"
 for id in "${WORKER_IDS[@]}"; do
