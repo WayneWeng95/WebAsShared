@@ -102,8 +102,15 @@ if [ "$NO_PULL" -eq 0 ]; then
 fi
 
 # ── start: phase 1 — launch node_update.sh detached on every worker ──────────
-PULL_ENV=""; [ "$NO_PULL" -eq 1 ] && PULL_ENV="SKIP_PULL=1 "
-LAUNCH="cd '$REMOTE_DIR' && setsid nohup env ${PULL_ENV}./node_update.sh </dev/null >'$REMOTE_LOG' 2>&1 & echo launched"
+# A worker whose current commit predates node_update.sh wouldn't have the script
+# yet, so (unless --no-pull) we `git pull` SYNCHRONOUSLY first — that fetches the
+# script and the latest code, and lets us see a pull failure — then run it
+# detached with SKIP_PULL=1 so it goes straight to build + start.
+if [ "$NO_PULL" -eq 1 ]; then
+    LAUNCH="cd '$REMOTE_DIR' && { SKIP_PULL=1 setsid nohup ./node_update.sh </dev/null >'$REMOTE_LOG' 2>&1 & } && echo launched"
+else
+    LAUNCH="cd '$REMOTE_DIR' && git pull && { SKIP_PULL=1 setsid nohup ./node_update.sh </dev/null >'$REMOTE_LOG' 2>&1 & } && echo launched"
+fi
 info "launching update+build+start on ${#WORKER_IDS[@]} workers (detached)…"
 for id in "${WORKER_IDS[@]}"; do
     ( r="$(ssh_to "${WORKER_IP[$id]}" "$LAUNCH" 2>&1)"
