@@ -1,0 +1,13 @@
+system,workload,reps,cold_start_mean_ms,cold_start_std_ms,makespan_mean_ms,mem_total_mean_mb,mem_max_mb,redis_peak_mean_mb,gate
+cloudburst,wordcount,2,4565,78,23407,65173,18492,6839,676710552
+cloudburst,finra,2,4586,13,20722,24450,7337,1077,2271415
+cloudburst,ml_training,2,4681,27,3627,6686,2455,232,1232
+cloudburst,ml_inference,2,4686,117,1422,3952,867,230,18614792
+cloudburst,matrix,2,4707,22,6485,5744,1098,611,1391095867672
+cloudburst,terasort,2,4631,104,22703,13096,5105,3232,12582912
+rmmap,wordcount,2,9164,110,10381,52747,10569,1,676710552
+rmmap,finra,2,1815,50,18200,11796,3156,1,2271415
+rmmap,ml_training,2,1222,16,2002,2855,2290,1,1232
+rmmap,ml_inference,2,896,2,1449,1890,1725,1,18614792
+rmmap,matrix,2,1364,32,4147,4460,871,1,1391095867672
+rmmap,terasort,2,5322,28,16277,7717,3191,1,12582912

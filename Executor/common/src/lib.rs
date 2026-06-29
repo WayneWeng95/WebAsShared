@@ -45,9 +45,11 @@ pub const PAGE_ID_NULL: PageId = 0;
 /// resolved by pure arithmetic (`TARGET_OFFSET + id`) with no host call.
 /// A `PageId >= DIRECT_LIMIT` references a page in the host-side extended pool
 /// and must go through `host_fetch_page` (with a guest-side resident cache in
-/// front of it).  Chosen to match `TARGET_OFFSET` (2 GiB) so the direct window
-/// is fully usable before any paging kicks in.
-pub const DIRECT_LIMIT: PageId = 0x8000_0000;
+/// front of it).  Set to the full SHM-window size = (wasm Memory min) −
+/// `TARGET_OFFSET` = 3.5 GiB − 16 MiB, so the entire direct window is usable
+/// before any paging kicks in.  (Was 2 GiB when `TARGET_OFFSET` was 2 GiB; the
+/// window base was lowered to 16 MiB to reclaim the dead low region below it.)
+pub const DIRECT_LIMIT: PageId = 0xDF00_0000;
 
 /// Fill fraction at which the direct bump allocator flips to paged mode.
 /// Expressed as numerator/denominator to stay const-evaluable.
@@ -72,7 +74,13 @@ pub static mut READ_BUFFER: alloc::vec::Vec<u8> = alloc::vec::Vec::new();
 // -------------------------------------------------------
 // Memory Layout Constants (Single Source of Truth)
 // -------------------------------------------------------
-pub const TARGET_OFFSET: usize = 0x8000_0000;   // 2 GiB
+// Base of the SHM window inside the guest's wasm32 linear memory.  The guest's
+// static data + 1 MiB shadow stack occupy only ~1 MiB at the bottom, so the
+// window can start just above them; 16 MiB leaves a generous margin.  Lowering
+// this from 2 GiB → 16 MiB reclaims the previously-dead [~1 MiB, 2 GiB) region
+// into the SHM window (1.5 GiB → ~3.48 GiB) without touching the guest heap,
+// which still grows in [wasm min, 4 GiB).
+pub const TARGET_OFFSET: usize = 0x0100_0000;   // 16 MiB
 
 pub const KIB: ShmOffset = 1024;
 pub const MIB: ShmOffset = 1024 * 1024;
@@ -97,8 +105,8 @@ pub const INITIAL_SHM_SIZE: ShmOffset = 64 * MIB;
 /// 64 KiB / 2 MiB, and inter-node ML at 6M *regressed* at 2 MiB (inference +5%, training
 /// +12%) because those workloads are compute-bound with a small cross-node payload. The
 /// cost side is real: internal fragmentation (each slot/chain wastes up to one page in
-/// its tail) and the ~1.5 GiB wasm32 direct window holds only `CAPACITY_HARD_LIMIT/PAGE_SIZE`
-/// pages (≈740 at 2 MiB, vs ≈393k at 4 KiB). **4 KiB is therefore the default.** A larger
+/// its tail) and the ~3.48 GiB wasm32 direct window holds only `CAPACITY_HARD_LIMIT/PAGE_SIZE`
+/// pages (≈1.7k at 2 MiB, vs ≈913k at 4 KiB). **4 KiB is therefore the default.** A larger
 /// page is only expected to help bulk-shuffle workloads (WordCount 4 GB, TeraSort) whose
 /// whole dataset crosses the network — untested as of 2026-06-21; re-tune here and rebuild
 /// every node if revisiting. 2 MiB additionally matches the host THP frame.
@@ -183,8 +191,9 @@ pub const PAGE_DATA_SIZE: usize = PAGE_SIZE as usize - PAGE_HEADER_SIZE;
 
 // ─── Capacity guards ─────────────────────────────────────────────────────────
 
-/// Soft upper bound for bump allocation.
-pub const BUMP_SOFT_LIMIT: ShmOffset = 0x7FF0_0000;
+/// Soft upper bound for bump allocation (one page below `DIRECT_LIMIT`/the
+/// window top, so the guest stops bumping before overrunning the window).
+pub const BUMP_SOFT_LIMIT: ShmOffset = 0xDEF0_0000;
 
 /// Hard ceiling for `global_capacity` doubling (Rust workloads).
 ///
@@ -192,10 +201,11 @@ pub const BUMP_SOFT_LIMIT: ShmOffset = 0x7FF0_0000;
 /// The host maps the SHM file at `TARGET_OFFSET` and the guest heap grows in
 /// `[min, 4 GiB)`; if capacity exceeds the window the file mapping overruns the
 /// heap region and corrupts the guest allocator.  The wasm Memory min is
-/// 57344 pages (3.5 GiB) in `worker.rs`, so the window is 1.5 GiB — keep these
-/// two in sync.  (A larger SHM window means a smaller guest heap; wasm32 splits
-/// the 2 GiB above `TARGET_OFFSET` between the two.)
-pub const CAPACITY_HARD_LIMIT: ShmOffset = 0x6000_0000;           // 1.5 GiB (= 3.5 GiB min − 2 GiB)
+/// 57344 pages (3.5 GiB) in `worker.rs` and `TARGET_OFFSET` is 16 MiB, so the
+/// window is 3.5 GiB − 16 MiB = ~3.48 GiB — keep these in sync.  (The guest
+/// heap is unchanged at the 0.5 GiB region `[min, 4 GiB)`; the extra window
+/// came from lowering `TARGET_OFFSET`, not from shrinking the heap.)
+pub const CAPACITY_HARD_LIMIT: ShmOffset = 0xDF00_0000;           // ~3.48 GiB (= 3.5 GiB min − 16 MiB)
 
 /// Hard ceiling for `global_capacity` growth when the DAG contains
 /// Python workloads.

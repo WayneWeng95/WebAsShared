@@ -41,7 +41,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # RoCE fabric IP per node (eno1d1 = mlx4_0 port 2). node 0 = 10.10.1.2 (the input server).
 NODE_IP = {'node-0': '10.10.1.2', 'node-1': '10.10.1.1',
-           'node-2': '10.10.1.4', 'node-3': '10.10.1.3'}
+           'node-2': '10.10.1.4', 'node-3': '10.10.1.3',
+           'node-4': '10.10.1.8', 'node-5': '10.10.1.7',
+           'node-6': '10.10.1.6', 'node-7': '10.10.1.5',
+           'node-8': '10.10.1.9'}
 
 
 def ssh_or_local(node, self_host, remote_cmd, local_cmd):

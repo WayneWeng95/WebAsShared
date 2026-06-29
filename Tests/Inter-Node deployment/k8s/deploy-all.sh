@@ -60,7 +60,16 @@ MANUAL=()
 for ip in $AGENT_IPS; do
   if ssh_ok "$ip"; then
     log "SSH ok → joining $ip remotely"
-    ssh -o BatchMode=yes "$ip" "cd '$HERE' && K3S_URL=https://$SERVER_IP:6443 K3S_TOKEN='$(sudo cat /var/lib/rancher/k3s/server/node-token)' ./02-install-agent.sh" \
+    # Inline the agent install rather than `cd $HERE && ./02-install-agent.sh`:
+    # fresh worker boxes may not have the repo checked out at this path yet (and the
+    # space in "Inter-Node deployment" word-splits over ssh), so don't depend on it.
+    # The worker derives its own --node-ip from its cluster IP; flannel pinned to CLUSTER_IFACE.
+    ssh -o BatchMode=yes "$ip" "
+      systemctl is-active --quiet k3s-agent 2>/dev/null && exit 0
+      MY_IP=\$(ip -o -4 addr show | grep -o '10\.10\.1\.[0-9]*' | head -1)
+      curl -sfL https://get.k3s.io | INSTALL_K3S_VERSION='${K3S_VERSION}' \
+        K3S_URL='https://$SERVER_IP:6443' K3S_TOKEN='$(sudo cat /var/lib/rancher/k3s/server/node-token)' \
+        INSTALL_K3S_EXEC=\"agent --node-ip \$MY_IP${CLUSTER_IFACE:+ --flannel-iface $CLUSTER_IFACE}\" sh -" \
       || log "WARN: remote join of $ip failed — add it manually"
   else
     MANUAL+=("$ip")

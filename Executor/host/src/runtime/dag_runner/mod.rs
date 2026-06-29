@@ -890,6 +890,29 @@ pub fn run_dag(dag: &Dag) -> Result<()> {
         }
         println!("[DAG] All nodes completed (run #{}).", run_count);
 
+        // ── Peak shared-memory arena footprint ────────────────────────────────
+        // `bump_allocator` is the high-water of the page-arena bump pointer:
+        // reclaimed pages return to the free list and are reused without
+        // retreating it, so this is the peak simultaneous SHM the workload
+        // needs.  Compared against CAPACITY_HARD_LIMIT (the wasm32 SHM window)
+        // it shows how much headroom remains before a larger input overflows.
+        {
+            use common::{Superblock, BUMP_ALLOCATOR_START, CAPACITY_HARD_LIMIT, MIB};
+            use std::sync::atomic::Ordering;
+            let splice_addr = store.data().splice_addr;
+            let sb = unsafe { &*(splice_addr as *const Superblock) };
+            let used = sb.bump_allocator.load(Ordering::Acquire)
+                .saturating_sub(BUMP_ALLOCATOR_START);
+            let cap = sb.global_capacity.load(Ordering::Acquire);
+            println!(
+                "[DAG][shm] peak arena: {:.1} MiB used / {:.1} MiB mapped (hard limit {:.1} MiB) — headroom {:.1} MiB",
+                used as f64 / MIB as f64,
+                cap as f64 / MIB as f64,
+                CAPACITY_HARD_LIMIT as f64 / MIB as f64,
+                CAPACITY_HARD_LIMIT.saturating_sub(BUMP_ALLOCATOR_START.saturating_add(used)) as f64 / MIB as f64,
+            );
+        }
+
         // Chunked input drives the loop: keep running until every input hits EOF,
         // regardless of mode.
         if chunked_mode {

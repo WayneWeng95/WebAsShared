@@ -71,16 +71,20 @@ pub fn setup_vma_environment(
     linker: &mut Linker<WorkerState>,
     file: &File,
 ) -> Result<Memory> {
-    // The guest's 4 GiB wasm32 address space is split above TARGET_OFFSET
-    // (2 GiB): the SHM window is [TARGET_OFFSET, min) and the guest heap grows
-    // in [min, max).  `min` therefore trades guest-addressable SHM window
-    // against heap:
-    //   min=3   GiB → 1.0 GiB SHM window, 1.0 GiB heap (old default; OOB >1 GiB SHM)
-    //   min=3.5 GiB → 1.5 GiB SHM window, 0.5 GiB heap
-    // Shared memories can't be grown through the store at runtime (wasmtime
-    // unreachable!()), and min==max leaves the heap unable to grow (immediate
-    // OOM), so this split is fixed at instantiation.  57344 pages = 3.5 GiB:
-    // wc_distribute now streams (tiny heap), so we favour a larger SHM window.
+    // The guest's 4 GiB wasm32 address space holds three regions: the guest's
+    // static data + 1 MiB shadow stack at the very bottom (~1 MiB total), the
+    // SHM window [TARGET_OFFSET, min), and the guest heap [min, max).  The heap
+    // is at the TOP because Rust's wasm allocator only ever grows memory at the
+    // high end (memory.grow), never touching the low region — so the window can
+    // start just above the ~1 MiB static/stack footprint.  `TARGET_OFFSET` was
+    // lowered 2 GiB → 16 MiB (see common::TARGET_OFFSET) to reclaim the dead
+    // [~1 MiB, 2 GiB) gap into the window:
+    //   TARGET_OFFSET=2 GiB,  min=3.5 GiB → 1.5  GiB window, 0.5 GiB heap (old)
+    //   TARGET_OFFSET=16 MiB, min=3.5 GiB → 3.48 GiB window, 0.5 GiB heap (now)
+    // The heap is unchanged; only the window grew.  Shared memories can't be
+    // grown through the store at runtime (wasmtime unreachable!()), and min==max
+    // leaves the heap unable to grow (immediate OOM), so the split is fixed at
+    // instantiation.  57344 pages = 3.5 GiB.
     let memory_ty = MemoryType::shared(57344, 65536);
 
     let memory = Memory::new(&mut *store, memory_ty)?;
@@ -283,7 +287,7 @@ pub fn run_wasm_loop(shm_path: &str, wasm_path: &str, func: &str) -> Result<()> 
         splice_addr: 0,
     });
     let mut linker = Linker::new(&engine);
-    setup_vma_environment(&mut store, &mut linker, &file)?;
+    let memory = setup_vma_environment(&mut store, &mut linker, &file)?;
     let module = load_guest_module(&engine, wasm_path)?;
     let instance = linker.instantiate(&mut store, &module)?;
     let f = instance
@@ -294,6 +298,8 @@ pub fn run_wasm_loop(shm_path: &str, wasm_path: &str, func: &str) -> Result<()> 
     let stdout = std::io::stdout();
     let mut out = stdout.lock();
 
+    // Peak guest pages across all invocations on this long-lived worker.
+    let mut peak_pages: u64 = 0;
     for line in stdin.lock().lines() {
         let line = line?;
         let mut parts = line.split_whitespace();
@@ -303,8 +309,15 @@ pub fn run_wasm_loop(shm_path: &str, wasm_path: &str, func: &str) -> Result<()> 
             Ok(())  => writeln!(out, "ok")?,
             Err(e)  => writeln!(out, "err: {}", e)?,
         }
+        peak_pages = peak_pages.max(memory.size(&store));
         out.flush()?;
     }
+    // Guest heap high-water (see run_wasm_call for the [min,max) heap rationale).
+    let min_pages = memory.ty(&store).minimum();
+    eprintln!(
+        "[heap][{}] peak grown {} KiB",
+        func, peak_pages.saturating_sub(min_pages) * 64,
+    );
     Ok(())
 }
 
@@ -355,5 +368,20 @@ pub fn run_wasm_call(shm_path: &str, wasm_path: &str, func: &str, ret_type: &str
             f.call(&mut store, arg)?;
         }
     }
+
+    // ── Guest heap high-water ─────────────────────────────────────────────
+    // The guest heap lives in [min, max); reaching it requires growing the
+    // shared memory past `min`, so (current pages − min) is exactly the heap
+    // this node touched.  0 ⇒ the whole grow-region is unused headroom that
+    // could be reclaimed into the SHM window by raising `min` in
+    // setup_vma_environment.
+    let ty = memory.ty(&store);
+    let min_pages = ty.minimum();
+    let max_pages = ty.maximum().unwrap_or(min_pages);
+    let grown = memory.size(&store).saturating_sub(min_pages);
+    eprintln!(
+        "[heap][{}] grown {} pages = {} KiB of {} MiB heap budget",
+        func, grown, grown * 64, (max_pages - min_pages) * 64 / 1024,
+    );
     Ok(())
 }

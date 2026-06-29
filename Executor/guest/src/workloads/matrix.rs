@@ -100,8 +100,8 @@ fn bytes_to_f64(bytes: &[u8]) -> Vec<f64> {
 /// gen_matrix_ap_dag.py.
 fn unpack_rcn(arg: u32) -> (usize, usize, usize) {
     let n = (arg & 0x1FFF) as usize;
-    let c = ((arg >> 13) & 0xF) as usize;
-    let r = ((arg >> 17) & 0xF) as usize;
+    let c = ((arg >> 13) & 0x7) as usize;
+    let r = ((arg >> 16) & 0x7) as usize;
     (r, c, n)
 }
 
@@ -151,8 +151,8 @@ pub extern "C" fn mat_tile(arg: u32) {
 #[no_mangle]
 pub extern "C" fn mat_block(arg: u32) {
     let (r, c, n) = unpack_rcn(arg);
-    let j = ((arg >> 21) & 0x1F) as usize;
-    let i = ((arg >> 26) & 0x1F) as usize;
+    let j = ((arg >> 19) & 0x1F) as usize;
+    let i = ((arg >> 24) & 0x1F) as usize;
     if r == 0 || c == 0 || n == 0 {
         return;
     }

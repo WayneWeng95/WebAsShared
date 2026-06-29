@@ -1,0 +1,148 @@
+Rust is a systems programming language that runs blazingly fast and prevents segfaults
+Memory safety is guaranteed in Rust without a garbage collector
+The ownership model in Rust ensures memory is freed at the right time
+Borrowing rules in Rust prevent data races at compile time
+Rust empowers developers to write reliable and efficient software
+WebAssembly is a binary instruction format for a stack-based virtual machine
+WebAssembly is designed as a portable target for compilation of high-level languages
+The WebAssembly runtime provides a safe sandboxed execution environment
+WebAssembly enables near-native performance in web browsers and server environments
+WebAssembly modules can be compiled from Rust using the wasm32 target
+Shared memory allows multiple threads to access the same region of memory
+Shared memory communication avoids costly serialization and deserialization overhead
+A superblock stores metadata about the shared memory region and its allocator state
+Page allocation uses a bump allocator combined with a sharded free list
+The free list allows previously used pages to be reclaimed and reused efficiently
+Atomic operations ensure thread-safe access to shared state without locks
+A compare-and-swap operation atomically checks and updates a memory location
+The Treiber stack is a lock-free stack based on compare-and-swap operations
+Sharding the free list reduces contention among concurrent allocation requests
+Round-robin allocation spreads allocations evenly across all available shards
+A DAG is a directed acyclic graph used to model task dependencies
+Each node in the DAG represents a unit of computation with defined inputs and outputs
+Topological sort determines a valid execution order that respects all dependencies
+Kahn's algorithm computes a topological sort using in-degree counting
+Nodes with no remaining dependencies are eligible for immediate execution
+The map stage in a map-reduce pipeline processes independent partitions in parallel
+The reduce stage aggregates results produced by all map workers
+Word count is a classic map-reduce benchmark used to evaluate distributed frameworks
+Parallel execution of map workers reduces total runtime by a factor of the worker count
+A larger corpus with more lines exercises the distribution and aggregation logic
+Memory pages are four kilobytes in size and form linked chains called page chains
+A page chain stores a sequence of length-prefixed records written by one producer
+The cursor field inside each page tracks how many bytes have been written so far
+When a page is full a new page is allocated and linked via the next-offset field
+Freeing a page chain returns all pages in the chain back to the shared free list
+The host loads input files using memory-mapped I/O for efficient zero-copy reads
+Memory mapping avoids copying file contents into an intermediate heap buffer
+The operating system lazily faults in pages of the mapped file as they are accessed
+Large input files can be distributed across multiple worker slots for parallel processing
+Prefetching input data in a background thread overlaps I/O with independent computation
+Stream slots carry data between pipeline stages within the same WASM instance
+I/O slots carry data between the host and the WASM guest across the execution boundary
+The outputer reads records from an I/O slot and writes them to a file on disk
+The inputer reads a file from disk and writes its lines as records into an I/O slot
+Output records are accumulated in the shared memory until the output node flushes them
+Rust lifetimes ensure that references never outlive the data they point to
+The borrow checker enforces Rust's ownership and borrowing rules at compile time
+Zero-cost abstractions in Rust mean high-level code compiles to efficient machine code
+Closures in Rust capture their environment by reference move or copy as needed
+Iterators in Rust are lazy and compose without allocating intermediate collections
+Concurrency in Rust is safe because the type system prevents data races by design
+The Send trait marks types that can be transferred safely between threads
+The Sync trait marks types whose references can be shared safely between threads
+Arc provides thread-safe reference counting for shared ownership across threads
+Mutex provides mutual exclusion for protecting shared mutable state
+A spin loop uses the pause instruction to reduce bus contention during busy waiting
+Compare-exchange loops retry until the atomic operation succeeds without interference
+The ABA problem occurs when a value changes from A to B and back to A between reads
+Tagged pointers mitigate the ABA problem by embedding a generation counter in the pointer
+Sequential consistency is the strongest memory ordering guarantee in the atomic model
+Acquire and release orderings form a happens-before relationship across threads
+Relaxed ordering provides no synchronization guarantees beyond atomicity itself
+The bump allocator increments a single pointer to serve allocation requests in O(1) time
+Bump allocation is extremely fast but cannot reclaim individual allocations
+Combining bump allocation with a free list gives both speed and reclamation capability
+A Treiber stack push prepends a new node to the head of the lock-free stack
+A Treiber stack pop removes the head node using a compare-and-swap loop
+Multiple shards reduce the probability that two threads target the same stack head
+Cache locality improves when related pages return to the same shard they came from
+The deterministic shard formula uses the page offset modulo the shard count
+Wasmtime is a fast and secure runtime for WebAssembly developed by the Bytecode Alliance
+Wasmtime uses Cranelift as its just-in-time compilation backend for generating native code
+The Wasmtime store holds per-instance state and mediates access to host resources
+Shared memory in Wasmtime is exposed to the guest as a linear memory region
+The guest accesses shared memory via a fixed base address known at compile time
+Host functions imported by the guest allow calling into Rust code from WebAssembly
+The target offset places the superblock at a well-known address inside the linear memory
+Wasmtime enforces bounds checking on every memory access made by the guest module
+WASM linear memory grows in units of sixty-four kilobytes called memory pages
+The wasm32 target limits linear memory to four gigabytes of addressable space
+JSON configuration files describe the DAG structure and node parameters
+Serde deserializes JSON into strongly typed Rust structs using derived implementations
+The dag runner reads the JSON file validates the graph and executes nodes in order
+Dependency resolution ensures that every producer runs before its consumers
+Parallel nodes are those whose dependency sets are disjoint and can run simultaneously
+A bridge node performs a zero-copy transfer of a stream slot from one index to another
+An aggregate node merges multiple upstream slots into a single downstream slot
+A shuffle node routes records from upstream slots to downstream slots by policy
+Broadcast replicates every upstream record into every downstream slot simultaneously
+Modulo routing sends each record to the downstream slot equal to its hash modulo count
+Round-robin routing cycles through downstream slots in sequential order
+The persist node snapshots selected stream slots and shared state entries to disk
+The watch node is a lightweight variant that persists exactly one slot or entry
+The stream pipeline node drives a multi-stage stateful pipeline over multiple rounds
+The source stage appends a fresh batch of records every round
+The filter stage keeps only records that match a selection predicate
+The transform stage applies a function to each record and writes the result downstream
+The sink stage consumes transformed records and emits one summary record per round
+Per-stage cursors stored as named SHM atomics allow each stage to track its progress
+Named atomics are registered in the registry and assigned a stable index on first use
+The registry stores named entries used for shared state coordination between workers
+A conflict policy determines which writer wins when multiple writers target the same key
+Last-writer-wins is a simple policy that always selects the most recent value
+The organizer consumes all hash buckets after writers finish and commits winning entries
+The reclaimer module provides the unified allocation and reclamation interface
+All host side allocations go through reclaimer alloc page regardless of slot kind
+Freed slot pages are returned to the free list via reclaimer free page chain
+The slicer divides a loaded file into non-overlapping slices for parallel dispatch
+Equal slicing splits the file into equal byte ranges assigned to each worker
+Line boundary slicing ensures that no slice cuts through the middle of a line
+Fixed size slicing produces chunks of at most a given number of bytes each
+The file dispatcher assigns one slice to each worker and logs the slice boundaries
+The owned dispatcher accepts a list of byte payloads and distributes them to workers
+Performance benchmarks measure throughput in records per second and latency in microseconds
+Profiling with perf or flamegraph identifies hot paths in the allocation and routing code
+The critical path through the DAG determines the minimum achievable end-to-end latency
+Reducing synchronization on the critical path is more valuable than optimizing off-path work
+Lock-free data structures avoid kernel intervention and reduce scheduling jitter
+Memory bandwidth is often the limiting factor for data-intensive pipeline stages
+NUMA awareness can improve performance by keeping allocations on the local memory node
+Huge pages reduce TLB pressure for workloads that access large contiguous memory regions
+Cache-line alignment prevents false sharing between atomics accessed by different threads
+Write combining buffers in the CPU allow sequential stores to be batched for efficiency
+The page size of four kilobytes matches the typical operating system virtual memory page
+Aligning data structures to cache lines avoids partial cache-line updates
+Prefetching the next page while processing the current page hides memory latency
+Batching multiple small writes into one larger write reduces per-record overhead
+Inlining short functions eliminates call overhead and exposes more optimization opportunities
+The compiler can vectorize inner loops when data is contiguous and access is sequential
+Profile-guided optimization uses runtime feedback to improve branch prediction accuracy
+Link-time optimization enables cross-crate inlining and dead code elimination
+Release builds enable full optimization including loop unrolling and constant folding
+Debug builds preserve all symbols and disable optimizations for easier debugging
+The word count workload is memory-bound because each line must be read exactly once
+Scanning a line for whitespace-delimited tokens is a simple but cache-friendly operation
+Hashing words into a frequency map requires random access into the hash table buckets
+Sorting the final word list by frequency requires O(n log n) comparisons
+Writing results in sorted order makes the output easy to inspect and diff across runs
+A deterministic output format makes automated testing and regression detection simple
+Unit tests verify individual functions while integration tests verify end-to-end behavior
+Property-based testing generates random inputs to find edge cases in complex functions
+Fuzzing subjects the parser and allocator to malformed input to uncover panics or crashes
+The test harness resets shared memory before each test to ensure isolation between runs
+Observability into the pipeline is provided by the host logger writing to the SHM log arena
+The log arena is a fixed-size circular region that stores UTF-8 log records sequentially
+Log records can be read back by a diagnostic tool after the DAG run completes
+Structured logging with key-value pairs makes log records machine-parseable
+Correlating log records with DAG node identifiers aids debugging of complex pipelines

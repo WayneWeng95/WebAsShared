@@ -1,4 +1,3 @@
 size_trades,topo,compute_ms,throughput_trades_s,peak_mem_mb,reps,total_violations
-10000,intra-shm,612.02,16339,305.0,3,6183
-100000,intra-shm,790.17,126555,255.0,3,49763
-1000000,intra-shm,2336.59,427974,518.3,3,456574
+100000,intra-shm,1038.45,96297,390.9,1,49763
+1000000,intra-shm,2700.25,370336,593.1,1,456574

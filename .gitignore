@@ -4,8 +4,11 @@ node-agent
 Executor/.claude/
 .claude/
 Partitioner/target/
-TestData/
+TestData/*
 TestOutput/
+# …but DO track the tiny (12 KiB) WordCount seed so it can't be lost again on a
+# cluster migration — every corpus_* tiles from it (Scripts/gen_testdata.sh).
+!TestData/corpus.txt
 Tests/Micro-Benchmarks/StateSync-local/.run
 Tests/Micro-Benchmarks/StateSync-remote/.run
 

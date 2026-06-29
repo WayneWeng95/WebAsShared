@@ -1,0 +1,13 @@
+system,workload,size,workers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,gate,success,reps
+cloudburst,wordcount,4096MiB,60,9,23258,214.2,576230,occ=676710552,True,3
+cloudburst,finra,5000000,58,9,20815,241.3,152991,violations=2271415,True,3
+cloudburst,ml_training,6000000,60,9,3626,120.2,77558,weight_checksum=1232,True,3
+cloudburst,ml_inference,6000000,60,9,1371,34.9,45062,prediction_checksum=18614792,True,3
+cloudburst,matrix,4096,64,9,6592,181.8,112599,checksum=1391095867672,True,3
+cloudburst,terasort,1200MiB,4,9,22194,314.2,76665,records=12582912|keysum=8115998987|sorted=1,True,3
+rmmap,wordcount,4096MiB,60,9,10371,228.1,541339,occ=676710552,True,3
+rmmap,finra,5000000,58,9,18148,137.9,148620,violations=2271415,True,3
+rmmap,ml_training,6000000,60,9,2261,159.8,64869,weight_checksum=1232,True,3
+rmmap,ml_inference,6000000,60,9,1903,183.6,30005,prediction_checksum=18614792,True,3
+rmmap,matrix,4096,64,9,4158,33.7,196015,checksum=1391095867672,True,3
+rmmap,terasort,1200MiB,4,9,16144,184.8,54337,records=12582912|keysum=8115998987|sorted=1,True,3

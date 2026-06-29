@@ -20,7 +20,10 @@ log "1/3 install Strimzi operator $STRIMZI_VERSION (watching ns '$KAFKA_NS')"
 # and do the namespace rewrite ourselves (what the redirector used to do): every
 # `namespace: myproject` → our ns, so the operator watches $KAFKA_NS.
 STRIMZI_YAML="https://github.com/strimzi/strimzi-kafka-operator/releases/download/${STRIMZI_VERSION}/strimzi-cluster-operator-${STRIMZI_VERSION}.yaml"
-strimzi_manifest="$(curl -fsSL "$STRIMZI_YAML" | sed "s/namespace: .*/namespace: ${KAFKA_NS}/")" \
+# Bump the operator's memory from the upstream default (384Mi) to 1Gi: on this
+# 9-node cluster the operator OOMKills (exit 137) at 384Mi mid-reconciliation and
+# crashloops, so new KafkaTopic CRs never get created for StateFun.
+strimzi_manifest="$(curl -fsSL "$STRIMZI_YAML" | sed "s/namespace: .*/namespace: ${KAFKA_NS}/; s/memory: 384Mi/memory: 1Gi/g")" \
   || die "Strimzi YAML fetch failed ($STRIMZI_YAML) — offline? mirror it (see README)"
 printf '%s\n' "$strimzi_manifest" | kubectl create -n "$KAFKA_NS" -f - 2>/dev/null \
   || printf '%s\n' "$strimzi_manifest" | kubectl apply -n "$KAFKA_NS" -f - \
