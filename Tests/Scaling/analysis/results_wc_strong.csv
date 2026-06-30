@@ -1,0 +1,5 @@
+workload,mode,policy,threads,nodes,total_mb,per_thread_mb,wall_ms_median,wall_ms_min,wall_ms_max,throughput_mb_s,speedup,efficiency,peak_mem_mb_per_node,peak_mem_mb_total,success,reps
+word_count,strong,balanced,16,1,2048,128.0,55119,55116,55564,37.2,1.00,1.00,5592.4,5592.4,true,3
+word_count,strong,balanced,48,3,2048,42.7,20547,20536,21038,99.7,2.68,0.89,2466.9,7379.1,true,3
+word_count,strong,balanced,96,6,2048,21.3,12267,12170,12334,167.0,4.49,0.75,1621.5,9672.2,true,3
+word_count,strong,balanced,144,9,2048,14.2,9459,9407,9482,216.5,5.83,0.65,1305.3,11712,true,3

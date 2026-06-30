@@ -197,4 +197,27 @@ impl ClusterDag {
         }
         false
     }
+
+    /// For each (logical) node id, the set of input-file paths its DAG actually
+    /// loads (the `path` of every `Input` node). The coordinator uses this to
+    /// stage each shared-input file only to the workers that read it, instead of
+    /// broadcasting every file to every node.
+    pub fn input_paths_by_node(&self) -> HashMap<u32, std::collections::HashSet<String>> {
+        let mut map: HashMap<u32, std::collections::HashSet<String>> = HashMap::new();
+        for (node_id_str, nodes) in &self.node_dags {
+            let node_id: u32 = match node_id_str.parse() { Ok(v) => v, Err(_) => continue };
+            let set = map.entry(node_id).or_default();
+            for node in nodes {
+                if let Some(path) = node
+                    .get("kind")
+                    .and_then(|k| k.get("Input"))
+                    .and_then(|i| i.get("path"))
+                    .and_then(|p| p.as_str())
+                {
+                    set.insert(path.to_string());
+                }
+            }
+        }
+        map
+    }
 }

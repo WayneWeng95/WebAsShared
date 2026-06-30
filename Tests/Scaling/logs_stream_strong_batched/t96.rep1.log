@@ -1,0 +1,15 @@
+Submitting job to coordinator at 10.10.1.2:9500...
+Job submitted: job_1782834446223
+Waiting for job completion...
+
+=== Job Result ===
+Job ID:  job_1782834446223
+Success: true
+Summary:
+node 0 (local): 4168ms
+node 1 (worker): 4698ms
+node 3 (worker): 4717ms
+node 5 (worker): 4763ms
+node 2 (worker): 5062ms
+node 4 (worker): 5106ms
+total wall time: 5175ms

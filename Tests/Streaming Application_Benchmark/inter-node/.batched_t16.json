@@ -1,0 +1,952 @@
+{
+  "_comment": "ClusterDag: mediareview streaming across 1 nodes, 3 batches/node (data-parallel + RDMA partial-tally flat merge on node 0).",
+  "shm_path_prefix": "/dev/shm/rdma_stream",
+  "log_level": "info",
+  "transfer": true,
+  "shared_inputs": [
+    {
+      "path": "TestData/stream_app/cluster/events_node0_b0.csv",
+      "source_node": 0
+    },
+    {
+      "path": "TestData/stream_app/cluster/events_node0_b1.csv",
+      "source_node": 0
+    },
+    {
+      "path": "TestData/stream_app/cluster/events_node0_b2.csv",
+      "source_node": 0
+    }
+  ],
+  "node_dags": {
+    "0": [
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "mr_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "load_0",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node0_b0.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_0",
+        "deps": [
+          "load_0"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_parse",
+            "arg": 16,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0_0",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_0_1",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_0_2",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_0_3",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_0_4",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_0_5",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_0_6",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_0_7",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "apply_0_8",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 18,
+            "arg2": 118
+          }
+        }
+      },
+      {
+        "id": "apply_0_9",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 19,
+            "arg2": 119
+          }
+        }
+      },
+      {
+        "id": "apply_0_10",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 20,
+            "arg2": 120
+          }
+        }
+      },
+      {
+        "id": "apply_0_11",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 21,
+            "arg2": 121
+          }
+        }
+      },
+      {
+        "id": "apply_0_12",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 22,
+            "arg2": 122
+          }
+        }
+      },
+      {
+        "id": "apply_0_13",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 23,
+            "arg2": 123
+          }
+        }
+      },
+      {
+        "id": "apply_0_14",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 24,
+            "arg2": 124
+          }
+        }
+      },
+      {
+        "id": "apply_0_15",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 25,
+            "arg2": 125
+          }
+        }
+      },
+      {
+        "id": "free_0",
+        "deps": [
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7",
+          "apply_0_8",
+          "apply_0_9",
+          "apply_0_10",
+          "apply_0_11",
+          "apply_0_12",
+          "apply_0_13",
+          "apply_0_14",
+          "apply_0_15"
+        ],
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25
+            ],
+            "io": []
+          }
+        }
+      },
+      {
+        "id": "load_1",
+        "deps": [
+          "free_0"
+        ],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node0_b1.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_1",
+        "deps": [
+          "load_1"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_parse",
+            "arg": 16,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_1_0",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_1_1",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_1_2",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_1_3",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_1_4",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_1_5",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_1_6",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_1_7",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "apply_1_8",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 18,
+            "arg2": 118
+          }
+        }
+      },
+      {
+        "id": "apply_1_9",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 19,
+            "arg2": 119
+          }
+        }
+      },
+      {
+        "id": "apply_1_10",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 20,
+            "arg2": 120
+          }
+        }
+      },
+      {
+        "id": "apply_1_11",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 21,
+            "arg2": 121
+          }
+        }
+      },
+      {
+        "id": "apply_1_12",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 22,
+            "arg2": 122
+          }
+        }
+      },
+      {
+        "id": "apply_1_13",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 23,
+            "arg2": 123
+          }
+        }
+      },
+      {
+        "id": "apply_1_14",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 24,
+            "arg2": 124
+          }
+        }
+      },
+      {
+        "id": "apply_1_15",
+        "deps": [
+          "parse_1",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 25,
+            "arg2": 125
+          }
+        }
+      },
+      {
+        "id": "free_1",
+        "deps": [
+          "apply_1_0",
+          "apply_1_1",
+          "apply_1_2",
+          "apply_1_3",
+          "apply_1_4",
+          "apply_1_5",
+          "apply_1_6",
+          "apply_1_7",
+          "apply_1_8",
+          "apply_1_9",
+          "apply_1_10",
+          "apply_1_11",
+          "apply_1_12",
+          "apply_1_13",
+          "apply_1_14",
+          "apply_1_15"
+        ],
+        "kind": {
+          "FreeSlots": {
+            "stream": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18,
+              19,
+              20,
+              21,
+              22,
+              23,
+              24,
+              25
+            ],
+            "io": []
+          }
+        }
+      },
+      {
+        "id": "load_2",
+        "deps": [
+          "free_1"
+        ],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node0_b2.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_2",
+        "deps": [
+          "load_2"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_parse",
+            "arg": 16,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_2_0",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_2_1",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_2_2",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_2_3",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_2_4",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_2_5",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_2_6",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_2_7",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "apply_2_8",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 18,
+            "arg2": 118
+          }
+        }
+      },
+      {
+        "id": "apply_2_9",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 19,
+            "arg2": 119
+          }
+        }
+      },
+      {
+        "id": "apply_2_10",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 20,
+            "arg2": 120
+          }
+        }
+      },
+      {
+        "id": "apply_2_11",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 21,
+            "arg2": 121
+          }
+        }
+      },
+      {
+        "id": "apply_2_12",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 22,
+            "arg2": 122
+          }
+        }
+      },
+      {
+        "id": "apply_2_13",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 23,
+            "arg2": 123
+          }
+        }
+      },
+      {
+        "id": "apply_2_14",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 24,
+            "arg2": 124
+          }
+        }
+      },
+      {
+        "id": "apply_2_15",
+        "deps": [
+          "parse_2",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_apply",
+            "arg": 25,
+            "arg2": 125
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "apply_2_0",
+          "apply_2_1",
+          "apply_2_2",
+          "apply_2_3",
+          "apply_2_4",
+          "apply_2_5",
+          "apply_2_6",
+          "apply_2_7",
+          "apply_2_8",
+          "apply_2_9",
+          "apply_2_10",
+          "apply_2_11",
+          "apply_2_12",
+          "apply_2_13",
+          "apply_2_14",
+          "apply_2_15"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117,
+              118,
+              119,
+              120,
+              121,
+              122,
+              123,
+              124,
+              125
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "aggregate_global",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              200
+            ],
+            "downstream": 300
+          }
+        }
+      },
+      {
+        "id": "summary",
+        "deps": [
+          "aggregate_global"
+        ],
+        "kind": {
+          "Func": {
+            "func": "mr_summary",
+            "arg": 300
+          }
+        }
+      },
+      {
+        "id": "save",
+        "deps": [
+          "summary"
+        ],
+        "kind": {
+          "Output": {
+            "path": "TestOutput/rdma_stream_mediareview.txt"
+          }
+        }
+      }
+    ]
+  }
+}

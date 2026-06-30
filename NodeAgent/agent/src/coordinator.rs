@@ -251,6 +251,23 @@ fn handle_submit(
 
     let job_id = format!("job_{}", chrono_simple_id());
 
+    // Which input files each PHYSICAL worker actually loads — so we stage a file
+    // only to the nodes that read it, instead of broadcasting every slice to every
+    // node. Map the (logical) node ids from `node_dags` onto physical ids the same
+    // way the mesh does (`logical i → live_ids[i]`, identity for a pre-partitioned DAG).
+    let needed_by_physical: std::collections::HashMap<u32, std::collections::HashSet<String>> = {
+        let mut m: std::collections::HashMap<u32, std::collections::HashSet<String>> =
+            std::collections::HashMap::new();
+        for (logical, paths) in cluster_dag.input_paths_by_node() {
+            let physical = match logical_to_physical {
+                Some(map) => map.get(logical as usize).copied().unwrap_or(logical),
+                None => logical,
+            };
+            m.entry(physical).or_default().extend(paths);
+        }
+        m
+    };
+
     // Stage shared input files to workers before splitting and assigning jobs.
     // Try RDMA first; fall back to TCP on error (e.g. no RDMA hardware).
     if !cluster_dag.shared_inputs.is_empty() {
@@ -259,21 +276,21 @@ fn handle_submit(
             &mut s.workers,
             config.node_id,
             &cluster_dag.shared_inputs,
+            &needed_by_physical,
             &job_id,
         );
         drop(s);
         if let Err(e) = rdma_result {
             println!("[coordinator] RDMA input staging unavailable ({:#}), falling back to TCP", e);
-            let staging_payload = file_staging::prepare_payload(
-                &job_id,
+            let mut s = state.lock().unwrap();
+            stage_shared_inputs_tcp(
+                &mut s.workers,
                 config.node_id,
                 &cluster_dag.shared_inputs,
+                &needed_by_physical,
+                &job_id,
             )?;
-            if !staging_payload.files.is_empty() {
-                let mut s = state.lock().unwrap();
-                stage_shared_inputs(&mut s.workers, config.node_id, &staging_payload)?;
-                drop(s);
-            }
+            drop(s);
         }
     }
 
@@ -802,18 +819,19 @@ fn stage_shared_inputs_rdma(
     workers: &mut HashMap<u32, WorkerConn>,
     own_node_id: u32,
     shared_inputs: &[crate::cluster_dag::SharedInput],
+    needed: &HashMap<u32, std::collections::HashSet<String>>,
     job_id: &str,
 ) -> Result<()> {
-    let remote_ids: Vec<u32> = workers
+    let all_remote: Vec<u32> = workers
         .keys()
         .filter(|&&id| id != own_node_id)
         .cloned()
         .collect();
-    if remote_ids.is_empty() {
+    if all_remote.is_empty() {
         return Ok(());
     }
 
-    // Read all files that are owned by this node into a flat buffer.
+    // Read all files that are owned by this node into a flat source buffer.
     struct FileEntry { path: String, offset: usize, len: usize }
     let mut entries: Vec<FileEntry> = Vec::new();
     let mut flat: Vec<u8> = Vec::new();
@@ -836,6 +854,36 @@ fn stage_shared_inputs_rdma(
         bail!("shared input total size {} exceeds 4 GiB RDMA READ limit", flat.len());
     }
 
+    // Per-worker plan: only the files THIS worker loads, laid out compactly in its
+    // own receive buffer (local_off), each RDMA-WRITten from the file's position in
+    // the source buffer (global_off). Workers that load nothing get no offer at all.
+    struct WFile { path: String, global_off: usize, local_off: usize, len: usize }
+    let empty = std::collections::HashSet::new();
+    let mut per_worker: HashMap<u32, Vec<WFile>> = HashMap::new();
+    for &id in &all_remote {
+        let want = needed.get(&id).unwrap_or(&empty);
+        let mut local = 0usize;
+        let mut v = Vec::new();
+        for e in &entries {
+            if want.contains(&e.path) {
+                v.push(WFile { path: e.path.clone(), global_off: e.offset, local_off: local, len: e.len });
+                local += e.len;
+            }
+        }
+        if !v.is_empty() {
+            per_worker.insert(id, v);
+        }
+    }
+    let remote_ids: Vec<u32> = per_worker.keys().copied().collect();
+    if remote_ids.is_empty() {
+        println!("[coordinator] no worker needs a shared input — skipping staging");
+        return Ok(());
+    }
+    let skipped = all_remote.len() - remote_ids.len();
+    if skipped > 0 {
+        println!("[coordinator] staging: {} worker(s) load no shared input — not sending to them", skipped);
+    }
+
     // Pin the buffer on the heap (Box<[u8]> address is stable).
     let mut buf: Box<[u8]> = flat.into_boxed_slice();
 
@@ -855,19 +903,20 @@ fn stage_shared_inputs_rdma(
         qps.insert(id, (qp, psn));
     }
 
-    // Build the file-entry list for the offer payload.
-    let file_entries: Vec<InputFileEntry> = entries
-        .iter()
-        .map(|e| InputFileEntry {
-            path: e.path.clone(),
-            offset: e.offset as u64,
-            len: e.len as u64,
-        })
-        .collect();
-
-    // Send InputShareOffer to each worker.
+    // Send a per-worker InputShareOffer: only that worker's files, with offsets
+    // into ITS OWN compact receive buffer (total_len = just those files' bytes).
     for &id in &remote_ids {
         let (qp, psn) = &qps[&id];
+        let wf = &per_worker[&id];
+        let file_entries: Vec<InputFileEntry> = wf
+            .iter()
+            .map(|f| InputFileEntry {
+                path: f.path.clone(),
+                offset: f.local_off as u64,
+                len: f.len as u64,
+            })
+            .collect();
+        let worker_total: u64 = wf.iter().map(|f| f.len as u64).sum();
         let offer = InputShareOfferPayload {
             job_id: job_id.to_string(),
             qpn: qp.qpn(),
@@ -876,8 +925,8 @@ fn stage_shared_inputs_rdma(
             lid: port_attr.lid,
             rkey: mr.rkey(),
             addr: mr.addr(),
-            total_len: buf.len() as u64,
-            files: file_entries.clone(),
+            total_len: worker_total,
+            files: file_entries,
         };
         if let Some(w) = workers.get_mut(&id) {
             send_message(&mut w.stream, &make_message(MessageKind::InputShareOffer, &offer)?)
@@ -934,32 +983,34 @@ fn stage_shared_inputs_rdma(
     // all completions, then advance the offset (RC QPs preserve concurrency
     // across workers; staging is pre-job and untimed, so the serialization per
     // chunk is free).
+    // Each worker gets only ITS files: RDMA-WRITE each file from its position in the
+    // source buffer (global_off) to the file's slot in that worker's compact receive
+    // buffer (local_off), chunked to ≤1 GiB per WR (the 2 GiB WR cap).
     const RDMA_WRITE_CHUNK: usize = 1 << 30; // 1 GiB, well under the 2 GiB WR cap
-    let total = buf.len();
-    let n_chunks = total.div_ceil(RDMA_WRITE_CHUNK);
-    println!("[coordinator] RDMA WRITE {} bytes → {} worker(s) in {} chunk(s)",
-             total, remote_ids.len(), n_chunks);
-    let mut off = 0usize;
-    while off < total {
-        let len = std::cmp::min(RDMA_WRITE_CHUNK, total - off);
-        for &id in &remote_ids {
-            let accept = &accepts[&id];
-            let (qp, _) = &qps[&id];
-            qp.post_rdma_write_raw(
-                mr.addr() + off as u64, mr.lkey(), len as u32,
-                accept.addr + off as u64, accept.rkey,
-            )?;
-        }
-        for &id in &remote_ids {
-            let (qp, _) = &qps[&id];
-            qp.poll_one_blocking()
-                .with_context(|| format!("RDMA WRITE chunk @ {} to worker {} failed", off, id))?;
-        }
-        off += len;
-    }
+    let mut total_sent = 0usize;
     for &id in &remote_ids {
-        println!("[coordinator] RDMA WRITE to worker {} complete", id);
+        let accept = &accepts[&id];
+        let (qp, _) = &qps[&id];
+        for f in &per_worker[&id] {
+            let mut o = 0usize;
+            while o < f.len {
+                let len = std::cmp::min(RDMA_WRITE_CHUNK, f.len - o);
+                qp.post_rdma_write_raw(
+                    mr.addr() + (f.global_off + o) as u64, mr.lkey(), len as u32,
+                    accept.addr + (f.local_off + o) as u64, accept.rkey,
+                )?;
+                qp.poll_one_blocking()
+                    .with_context(|| format!("RDMA WRITE '{}' to worker {} failed", f.path, id))?;
+                o += len;
+            }
+            total_sent += f.len;
+        }
+        let nf = per_worker[&id].len();
+        let nb: usize = per_worker[&id].iter().map(|f| f.len).sum();
+        println!("[coordinator] RDMA WRITE to worker {} complete ({} file(s), {} bytes)", id, nf, nb);
     }
+    println!("[coordinator] staged {} bytes total (vs {} if broadcast to all)",
+             total_sent, buf.len() * remote_ids.len());
 
     // Signal all workers that their buffers are ready.
     for &id in &remote_ids {
@@ -997,14 +1048,81 @@ fn stage_shared_inputs_rdma(
         }
     }
 
-    println!("[coordinator] RDMA input staging complete ({} bytes across {} files)",
-             buf.len(), file_entries.len());
+    println!("[coordinator] RDMA input staging complete ({} source files, per-worker subsets)",
+             entries.len());
 
     // buf, mr, qps all dropped here (MR deregistered after all READs are done).
     Ok(())
 }
 
 /// Send staged files to all workers (except self) and wait for StageFilesAck.
+/// TCP fallback for shared-input staging that, like the RDMA path, sends each
+/// worker ONLY the files its node-DAG loads (per `needed`). Workers that load no
+/// shared input get no StageFiles message at all.
+fn stage_shared_inputs_tcp(
+    workers: &mut HashMap<u32, WorkerConn>,
+    own_node_id: u32,
+    shared_inputs: &[crate::cluster_dag::SharedInput],
+    needed: &HashMap<u32, std::collections::HashSet<String>>,
+    job_id: &str,
+) -> Result<()> {
+    // Read each coordinator-owned file once.
+    let mut data_by_path: HashMap<String, Vec<u8>> = HashMap::new();
+    for input in shared_inputs {
+        if input.source_node != own_node_id { continue; }
+        let data = std::fs::read(&input.path)
+            .with_context(|| format!("read shared input: {}", input.path))?;
+        data_by_path.insert(input.path.clone(), data);
+    }
+    if data_by_path.is_empty() { return Ok(()); }
+
+    let remote_ids: Vec<u32> = workers.keys().filter(|&&id| id != own_node_id).cloned().collect();
+    let empty = std::collections::HashSet::new();
+    let mut pending: std::collections::HashSet<u32> = std::collections::HashSet::new();
+
+    for &id in &remote_ids {
+        let want = needed.get(&id).unwrap_or(&empty);
+        let files: Vec<StagedFile> = data_by_path
+            .iter()
+            .filter(|(pth, _)| want.contains(*pth))
+            .map(|(pth, d)| StagedFile { rel_path: pth.clone(), data: d.clone() })
+            .collect();
+        if files.is_empty() { continue; }
+        let payload = StageFilesPayload { job_id: job_id.to_string(), files };
+        let msg = make_message(MessageKind::StageFiles, &payload)?;
+        if let Some(w) = workers.get_mut(&id) {
+            send_message(&mut w.stream, &msg)
+                .with_context(|| format!("send StageFiles to worker {}", id))?;
+            pending.insert(id);
+        }
+    }
+    if pending.is_empty() { return Ok(()); }
+
+    let timeout = Duration::from_secs(30);
+    let start = Instant::now();
+    let wait_ids: Vec<u32> = pending.iter().copied().collect();
+    while !pending.is_empty() {
+        if start.elapsed() > timeout {
+            bail!("timeout waiting for StageFilesAck from {:?}", pending);
+        }
+        for &id in &wait_ids {
+            if !pending.contains(&id) { continue; }
+            if let Some(w) = workers.get_mut(&id) {
+                w.stream.set_read_timeout(Some(Duration::from_millis(100))).ok();
+                match recv_message(&mut w.stream) {
+                    Ok(msg) if msg.kind == MessageKind::StageFilesAck => {
+                        println!("[coordinator] worker {} staged files (TCP)", id);
+                        pending.remove(&id);
+                    }
+                    Ok(_) | Err(_) => {}
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[allow(dead_code)]
 fn stage_shared_inputs(
     workers: &mut HashMap<u32, WorkerConn>,
     own_node_id: u32,
