@@ -1,6 +1,48 @@
 # Parallel Jobs & Job-Level Divide-and-Merge — design plan
 
-**Status: PLAN (not yet implemented).** Two related capabilities:
+**Status: IMPLEMENTED & VALIDATED ON THE LIVE 9-NODE CLUSTER (2026-07-02).**
+The original two "Parts" were reframed into two user goals (see next section); both
+are built and proven on hardware. This document keeps the original design notes for
+context; the authoritative status is the checklist below.
+
+### Progress checklist
+
+**Goal 1 — big-file split/merge within one job — DONE ✅**
+- `host split` / `host merge` native subcommands; reducers `wordcount`, `counters`,
+  `concat`, `sum`, `topk:K`, plus a workload-supplied native `merge.source` hook.
+- `ShardedJob` orchestration: split → N shard executors (each own SHM) → merge.
+- Memory-bounded **waves** (`max_concurrent`), **size-based auto-split**
+  (`max_shard_bytes`), intermediate + SHM cleanup (coordinator and workers).
+- Multi-node distribution (one shard per node, waves) — *local* only for GB shards
+  until RDMA staging lands (TCP `StageFiles` size cap).
+- **Validated on the real 4 GiB file** (`corpus_4gb.txt`, which a single executor
+  cannot load): split→waves→merge, correct result, clean up verified. This was the
+  original motivation, now proven.
+
+**Goal 2 — concurrent independent jobs (placement model) — Phase 1 DONE ✅**
+- `PlacedJob`: the coordinator places a single-node job on a node, ships input,
+  runs, ships output back. Each job owns its node's socket → concurrent jobs on
+  different nodes → **no demux needed** (see the placement section below).
+- Async submit (thread per job), **load-aware placement** (SCX score),
+  **queue** when saturated, **coordinator overflow-only** (kept free for control +
+  the fan-out / cross-node aggregation that lands on node 0).
+- **Validated on the 9-node cluster:** concurrent placement across workers, queue
+  oversubscription, coordinator-free-until-saturated.
+
+**Regression — normal all-nodes multi-node RDMA path** still correct (validated at
+50 MB and 500 MB on the cluster; proportional, exact).
+
+**Remaining / TODO (need the cluster to validate):**
+- RDMA (vs TCP) shard staging → *distributed* sharding of GB-size shards.
+- Python sharded jobs.
+- Goal 2 Phase 2: concurrent **multi-node** jobs sharing workers (the reader-thread
+  demux in "Part A" below); strict FIFO queue ordering.
+
+---
+
+## Original framing (kept for context)
+
+Two related capabilities:
 
 - **Part A — multi-job parallelism:** run several *independent* jobs concurrently
   under one NodeAgent (each with its own SHM region), instead of one job at a time.
@@ -171,11 +213,15 @@ collected back to the coordinator.
 correct). No regression to normal/sharded paths.
 
 **Placement + queue (done):** placement is **load-aware** — a job takes the
-least-loaded free node via `CoordinatorState::placement_order()` (the SCX
-scheduler score, same signal the partitioner uses), or an explicit `target_node`.
-When every node is busy the job **queues** — the thread waits for a node to free
-up (up to the job timeout) instead of rejecting. Verified on loopback: 4 jobs on 3
-nodes → 3 run immediately, the 4th queues then runs on the first freed node.
+least-loaded free node via `CoordinatorState::placement_order(live, coordinator_id)`
+(the SCX scheduler score, same signal the partitioner uses), or an explicit
+`target_node`. The **coordinator (node 0) is always ranked last** — kept free for
+control duties and the fan-out / cross-node aggregation + reduce that multi-node
+jobs land on it, so it's used only as overflow. When every node is busy the job
+**queues** — the thread waits for a node to free up (up to the job timeout) instead
+of rejecting. **Validated on the live 9-node cluster:** 6 concurrent jobs spread
+across the load-ranked workers; 8 jobs → all on workers with node 0 left free;
+12 jobs → 3 workers doubled up via the queue and node 0 took exactly the overflow.
 
 **Deferred to Phase 2 (needs cluster/RDMA to validate):** concurrent *multi-node*
 jobs sharing workers (the reader-thread demux below); strict FIFO queue ordering
