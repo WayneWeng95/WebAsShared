@@ -4,11 +4,22 @@
     "0": [
       {
         "deps": [],
-        "id": "rr_aggregate_8_from_8",
+        "id": "rr_aggregate_3_from_3",
         "kind": {
           "RemoteRecv": {
-            "peer": 8,
-            "slot": 181,
+            "peer": 3,
+            "slot": 176,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_5_from_5",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 5,
+            "slot": 178,
             "slot_kind": "Stream"
           }
         }
@@ -26,22 +37,11 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_3_from_3",
+        "id": "rr_aggregate_1_from_1",
         "kind": {
           "RemoteRecv": {
-            "peer": 3,
-            "slot": 176,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_5_from_5",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 5,
-            "slot": 178,
+            "peer": 1,
+            "slot": 174,
             "slot_kind": "Stream"
           }
         }
@@ -70,11 +70,11 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_1_from_1",
+        "id": "rr_aggregate_8_from_8",
         "kind": {
           "RemoteRecv": {
-            "peer": 1,
-            "slot": 174,
+            "peer": 8,
+            "slot": 181,
             "slot_kind": "Stream"
           }
         }
