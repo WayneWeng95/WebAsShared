@@ -36,7 +36,7 @@
         "id": "tile_0",
         "kind": {
           "WasmVoid": {
-            "arg": 282624,
+            "arg": 151552,
             "func": "mat_tile"
           }
         }
@@ -48,7 +48,7 @@
         "id": "block_0_0",
         "kind": {
           "WasmVoid": {
-            "arg": 282624,
+            "arg": 151552,
             "func": "mat_block"
           }
         }
@@ -60,31 +60,7 @@
         "id": "block_0_1",
         "kind": {
           "WasmVoid": {
-            "arg": 2379776,
-            "func": "mat_block"
-          }
-        }
-      },
-      {
-        "deps": [
-          "tile_0"
-        ],
-        "id": "block_1_0",
-        "kind": {
-          "WasmVoid": {
-            "arg": 67391488,
-            "func": "mat_block"
-          }
-        }
-      },
-      {
-        "deps": [
-          "tile_0"
-        ],
-        "id": "block_1_1",
-        "kind": {
-          "WasmVoid": {
-            "arg": 69488640,
+            "arg": 2248704,
             "func": "mat_block"
           }
         }
@@ -144,9 +120,7 @@
       {
         "deps": [
           "block_0_0",
-          "block_0_1",
-          "block_1_0",
-          "block_1_1"
+          "block_0_1"
         ],
         "id": "aggregate_local_0",
         "kind": {
@@ -154,9 +128,7 @@
             "downstream": 2,
             "upstream": [
               100,
-              101,
-              102,
-              103
+              101
             ]
           }
         }

@@ -25,7 +25,7 @@
 #   load_a (all, replicate) Input slot 0  (binary)
 #   load_b (all, replicate) Input slot 2  (binary)
 #   tile   (all) mat_tile wasm_arg=rcn    → A row-panels 10..10+r, B col-panels 40..40+c
-#   block_i_j ← FAN (all) mat_block wasm_arg=(i<<24)|(j<<19)|rcn  → C block 100+i*c+j
+#   block_i_j ← FAN (all) mat_block wasm_arg=(i<<26)|(j<<21)|rcn  → C block 100+i*c+j
 #                   gen_variants strips placement and places these per policy; each
 #                   reads its same-machine A_i and B_j panels (tile is placement:"all",
 #                   so every node holds every panel — only the C blocks cross nodes).

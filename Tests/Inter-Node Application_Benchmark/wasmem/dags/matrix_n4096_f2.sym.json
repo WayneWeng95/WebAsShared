@@ -44,7 +44,7 @@
         "Func": {
           "func": "mat_tile",
           "arg": 10,
-          "wasm_arg": 282624
+          "wasm_arg": 151552
         }
       }
     },
@@ -57,7 +57,7 @@
         "Func": {
           "func": "mat_block",
           "arg": 100,
-          "wasm_arg": 282624
+          "wasm_arg": 151552
         }
       },
       "node_id": 0,
@@ -72,41 +72,11 @@
         "Func": {
           "func": "mat_block",
           "arg": 101,
-          "wasm_arg": 2379776
+          "wasm_arg": 2248704
         }
       },
       "node_id": 0,
       "output_slot": 101
-    },
-    {
-      "id": "block_1_0",
-      "deps": [
-        "tile"
-      ],
-      "kind": {
-        "Func": {
-          "func": "mat_block",
-          "arg": 102,
-          "wasm_arg": 67391488
-        }
-      },
-      "node_id": 0,
-      "output_slot": 102
-    },
-    {
-      "id": "block_1_1",
-      "deps": [
-        "tile"
-      ],
-      "kind": {
-        "Func": {
-          "func": "mat_block",
-          "arg": 103,
-          "wasm_arg": 69488640
-        }
-      },
-      "node_id": 0,
-      "output_slot": 103
     },
     {
       "id": "aggregate",
@@ -159,9 +129,7 @@
       "node_id": 0,
       "deps": [
         "block_0_0",
-        "block_0_1",
-        "block_1_0",
-        "block_1_1"
+        "block_0_1"
       ],
       "kind": {
         "Aggregate": {}

@@ -4,22 +4,11 @@
     "0": [
       {
         "deps": [],
-        "id": "rr_aggregate_local_2_from_2",
+        "id": "rr_aggregate_local_3_from_3",
         "kind": {
           "RemoteRecv": {
-            "peer": 2,
-            "slot": 603,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_local_8_from_8",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 8,
-            "slot": 609,
+            "peer": 3,
+            "slot": 604,
             "slot_kind": "Stream"
           }
         }
@@ -37,33 +26,33 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_local_3_from_3",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 3,
-            "slot": 604,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_local_7_from_7",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 7,
-            "slot": 608,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
         "id": "rr_aggregate_local_4_from_4",
         "kind": {
           "RemoteRecv": {
             "peer": 4,
             "slot": 605,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_local_1_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 602,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_local_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 603,
             "slot_kind": "Stream"
           }
         }
@@ -81,11 +70,22 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_local_1_from_1",
+        "id": "rr_aggregate_local_7_from_7",
         "kind": {
           "RemoteRecv": {
-            "peer": 1,
-            "slot": 602,
+            "peer": 7,
+            "slot": 608,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_local_8_from_8",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 8,
+            "slot": 609,
             "slot_kind": "Stream"
           }
         }

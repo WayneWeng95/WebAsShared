@@ -4,6 +4,17 @@
     "0": [
       {
         "deps": [],
+        "id": "rr_aggregate_4_from_4",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 4,
+            "slot": 177,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
         "id": "rr_aggregate_3_from_3",
         "kind": {
           "RemoteRecv": {
@@ -15,22 +26,11 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_7_from_7",
+        "id": "rr_aggregate_6_from_6",
         "kind": {
           "RemoteRecv": {
-            "peer": 7,
-            "slot": 180,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_8_from_8",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 8,
-            "slot": 181,
+            "peer": 6,
+            "slot": 179,
             "slot_kind": "Stream"
           }
         }
@@ -48,22 +48,22 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_2_from_2",
+        "id": "rr_aggregate_8_from_8",
         "kind": {
           "RemoteRecv": {
-            "peer": 2,
-            "slot": 175,
+            "peer": 8,
+            "slot": 181,
             "slot_kind": "Stream"
           }
         }
       },
       {
         "deps": [],
-        "id": "rr_aggregate_4_from_4",
+        "id": "rr_aggregate_2_from_2",
         "kind": {
           "RemoteRecv": {
-            "peer": 4,
-            "slot": 177,
+            "peer": 2,
+            "slot": 175,
             "slot_kind": "Stream"
           }
         }
@@ -81,11 +81,11 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_6_from_6",
+        "id": "rr_aggregate_7_from_7",
         "kind": {
           "RemoteRecv": {
-            "peer": 6,
-            "slot": 179,
+            "peer": 7,
+            "slot": 180,
             "slot_kind": "Stream"
           }
         }
