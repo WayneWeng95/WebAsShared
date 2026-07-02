@@ -22,19 +22,41 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 /// State for a connected worker.
-struct WorkerConn {
-    node_id: u32,
-    stream: TcpStream,
-    running_job: Option<String>,
+pub(crate) struct WorkerConn {
+    pub(crate) node_id: u32,
+    pub(crate) stream: TcpStream,
+    pub(crate) running_job: Option<String>,
     last_heartbeat: Instant,
 }
 
 /// Shared coordinator state.
-struct CoordinatorState {
-    workers: HashMap<u32, WorkerConn>,
+pub(crate) struct CoordinatorState {
+    pub(crate) workers: HashMap<u32, WorkerConn>,
     current_job_id: Option<String>,
     /// Aggregated SCX stats from all nodes.
     scx_view: ScxClusterView,
+    /// Nodes currently reserved by a concurrent placed job (Goal 2). A reserved
+    /// node's socket is owned exclusively by that job's thread; the main-loop
+    /// metrics drain skips it so it can't steal the job's messages. Includes the
+    /// coordinator's own id when it runs a placed job locally.
+    pub(crate) reserved_nodes: HashSet<u32>,
+}
+
+impl CoordinatorState {
+    /// Reserve a free node for a placed job. Prefers `prefer` (if given, live, and
+    /// free); otherwise the first free node in `live` order. Returns the reserved
+    /// node id, or `None` if every live node is busy. Marks the node reserved.
+    pub(crate) fn reserve_node(&mut self, prefer: Option<u32>, live: &[u32]) -> Option<u32> {
+        let pick = prefer
+            .filter(|n| live.contains(n) && !self.reserved_nodes.contains(n))
+            .or_else(|| live.iter().copied().find(|n| !self.reserved_nodes.contains(n)))?;
+        self.reserved_nodes.insert(pick);
+        Some(pick)
+    }
+
+    pub(crate) fn release_node(&mut self, node: u32) {
+        self.reserved_nodes.remove(&node);
+    }
 }
 
 /// Run the coordinator daemon.
@@ -53,7 +75,12 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
         workers: HashMap::new(),
         current_job_id: None,
         scx_view: ScxClusterView::new(),
+        reserved_nodes: HashSet::new(),
     }));
+
+    // Cloneable handle to config so per-job threads (concurrent placed jobs) can
+    // own their own copy without borrowing the loop's reference.
+    let config_arc = Arc::new(config.clone());
 
     // Accept worker connections in a background thread.
     let accept_state = Arc::clone(&state);
@@ -83,8 +110,14 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
         // Drain any pending metrics from worker streams (doubles as heartbeat).
         {
             let mut s = state.lock().unwrap();
+            let reserved = s.reserved_nodes.clone();
             let mut pending: Vec<metrics::NodeMetrics> = Vec::new();
             for worker in s.workers.values_mut() {
+                // Skip nodes a concurrent placed job owns — its thread reads that
+                // socket, and draining here would steal the job's JobCompleted.
+                if reserved.contains(&worker.node_id) {
+                    continue;
+                }
                 worker.stream.set_read_timeout(Some(Duration::from_millis(1))).ok();
                 while let Ok(msg) = recv_message(&mut worker.stream) {
                     worker.last_heartbeat = Instant::now();
@@ -144,8 +177,28 @@ pub fn run_coordinator(config: &AgentConfig) -> Result<()> {
                                     last_heartbeat: Instant::now(),
                                 });
                             }
+                            MessageKind::SubmitJob if crate::placed::is_submit_placed(&msg) => {
+                                // Placed independent job (Goal 2): run it on its own
+                                // thread so the accept loop keeps serving and multiple
+                                // placed jobs execute concurrently on different nodes.
+                                let cfg = Arc::clone(&config_arc);
+                                let st = Arc::clone(&state);
+                                thread::spawn(move || {
+                                    let mut stream = stream;
+                                    if let Err(e) =
+                                        crate::placed::handle_placed_submit(&cfg, &st, msg, &mut stream)
+                                    {
+                                        eprintln!("[coordinator] placed submit error: {:#}", e);
+                                    }
+                                });
+                            }
                             MessageKind::SubmitJob => {
-                                handle_submit(&config, &state, msg, &mut stream)?;
+                                // Partitioned / sharded jobs stay on the accept thread
+                                // (serialized). Never let a bad/failed submit tear down
+                                // the loop — log and keep serving.
+                                if let Err(e) = handle_submit(&config, &state, msg, &mut stream) {
+                                    eprintln!("[coordinator] submit handling error: {:#}", e);
+                                }
                             }
                             MessageKind::StatusQuery => {
                                 handle_status(&state, &mut stream)?;
@@ -194,6 +247,18 @@ fn handle_submit(
 ) -> Result<()> {
     let payload: SubmitJobPayload =
         serde_json::from_value(msg.payload).context("parse SubmitJob payload")?;
+
+    // Divide-and-merge (sharded) jobs run entirely on this node: split → N local
+    // executors → merge. They share the SubmitJob message/ACK/JobResult wire, but
+    // none of the cluster partitioning / RDMA mesh path below.
+    if crate::sharded::is_sharded_job(&payload.cluster_dag_json) {
+        return crate::sharded::handle_sharded_submit(
+            config,
+            state,
+            &payload.cluster_dag_json,
+            client_stream,
+        );
+    }
 
     // Snapshot capacity + live membership before acquiring any further locks.
     // `live_ids` is the set of physical nodes participating in this job: the

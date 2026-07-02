@@ -35,7 +35,8 @@ fn run(h: &PlacementHints) -> Value {
     partition(&dag, Some(h)).expect("partition")
 }
 
-/// Count nodes on each host; ignores RemoteSend/RemoteRecv infrastructure nodes.
+/// Count nodes on each host; ignores placer-injected infrastructure nodes
+/// (RemoteSend `rs_`, RemoteRecv `rr_`, and `FreeSlots` `free_` reclaim nodes).
 fn count_original_nodes(cluster: &Value) -> HashMap<u32, usize> {
     let node_dags = cluster["node_dags"].as_object().expect("node_dags");
     node_dags
@@ -48,8 +49,11 @@ fn count_original_nodes(cluster: &Value) -> HashMap<u32, usize> {
                 .iter()
                 .filter(|n| {
                     let id = n["id"].as_str().unwrap_or("");
-                    // Skip placer-injected infrastructure nodes.
-                    !id.starts_with("rs_") && !id.starts_with("rr_")
+                    // Skip placer-injected infrastructure nodes: RDMA send/recv
+                    // pairs and FreeSlots reclaim nodes (e.g. `free_distribute_0_m0`).
+                    !id.starts_with("rs_")
+                        && !id.starts_with("rr_")
+                        && !id.starts_with("free_")
                 })
                 .count();
             (host, count)

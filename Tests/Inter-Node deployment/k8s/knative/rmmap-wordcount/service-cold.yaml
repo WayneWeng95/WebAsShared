@@ -25,6 +25,7 @@ spec:
           env:
             - { name: REDIS_HOST, value: redis.baselines.svc.cluster.local }
             - { name: REDIS_PORT, value: "6379" }
+          # FAIRNESS CAP: 1 CPU + 2 GiB RAM per mapper pod (matches our per-executor budget).
           resources:
             requests: { cpu: "200m", memory: "256Mi" }
-            limits: { memory: "1Gi" }
+            limits: { cpu: "1", memory: "2Gi" }

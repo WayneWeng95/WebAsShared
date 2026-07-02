@@ -26,6 +26,7 @@ spec:
             - { name: REDIS_HOST, value: redis.baselines.svc.cluster.local }
             - { name: REDIS_PORT, value: "6379" }
             - { name: CB_TASK_QUEUE, value: "cb:tasks:single" }
+          # FAIRNESS CAP: 1 CPU + 2 GiB RAM per worker pod (matches our per-executor budget).
           resources:
             requests: { cpu: "200m", memory: "256Mi" }
-            limits: { memory: "4Gi" }
+            limits: { cpu: "1", memory: "2Gi" }

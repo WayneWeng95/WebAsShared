@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::Path;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct AgentConfig {
     /// This node's ID in the cluster (0-based).
     pub node_id: u32,
@@ -33,7 +33,7 @@ pub enum Role {
     Worker,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ClusterConfig {
     /// IP addresses of all nodes in the cluster, in node_id order.
     pub ips: Vec<String>,
@@ -44,7 +44,7 @@ pub struct ClusterConfig {
 
 fn default_agent_port() -> u16 { common::DEFAULT_AGENT_PORT }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct PathsConfig {
     /// Path to the Executor binary (host).
     #[serde(default = "default_executor_bin")]
@@ -57,7 +57,7 @@ pub struct PathsConfig {
 fn default_executor_bin() -> String { "../Executor/target/release/host".into() }
 fn default_executor_work_dir() -> String { common::DEFAULT_EXECUTOR_WORK_DIR.into() }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct MetricsConfig {
     /// Metrics sampling interval in milliseconds.
     #[serde(default = "default_metrics_interval")]
@@ -84,7 +84,7 @@ impl Default for MetricsConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct TimeoutConfig {
     /// Maximum job execution time in seconds.
     #[serde(default = "default_job_timeout")]
@@ -106,7 +106,7 @@ impl Default for TimeoutConfig {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub struct ScxConfig {
     /// Whether SCX stats collection is enabled.
     #[serde(default = "default_scx_enabled")]

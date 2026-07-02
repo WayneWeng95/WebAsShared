@@ -5,7 +5,9 @@ mod dag_transform;
 mod executor;
 mod file_staging;
 mod metrics;
+mod placed;
 mod protocol;
+mod sharded;
 mod worker;
 
 use node_agent_common as common;

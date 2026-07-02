@@ -374,6 +374,8 @@ mod tests {
                 fanout: None,
                 placement: None,
                 barrier_group: None,
+                split: None,
+                out_weight: None,
                 kind: serde_json::json!({"Func": {"slot": i}}),
             })
             .collect();

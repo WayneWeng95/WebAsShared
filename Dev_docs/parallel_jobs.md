@@ -13,6 +13,120 @@ Part B is built on Part A, so Part A lands first.
 
 ---
 
+## Reframed direction & agreed plan (2026-07-02)
+
+After review, the priorities were reframed. The two capabilities above map to two
+concrete user goals, and the **order is reversed** from the original doc:
+
+- **Goal 1 — big-file split/merge within ONE job (do first).** The SHM 4 GiB
+  wasm32 cap blocks loading large files. For workloads where the output is smaller
+  than the input and the work is splittable (wordcount, tallies, sums, top-k), run
+  one job as: split the big file into `N` shards → run each shard in its **own SHM
+  region with its own executor** (concurrently) → **merge** the smaller partials
+  into the final result. This is the doc's "Part B", but **scoped down and pulled
+  first**.
+- **Goal 2 — multiple independent jobs at once (later).** The doc's "Part A" +
+  admission control. Deferred behind Goal 1.
+
+**Key simplifications agreed for Goal 1:**
+
+1. **Split and merge run as NATIVE processes** (no WASM guest, so no 4 GiB cap),
+   spawned directly by the node agent and located on the **coordinator node**.
+   Implemented as new `host` subcommands `host split` / `host merge`, alongside the
+   existing `compile` / `dag` / `wasm-call` dispatch in `Executor/host/src/main.rs`.
+   Only the shard *compute* stays in WASM (the fast zero-copy SHM path).
+2. **Single node first**, multiple nodes later.
+3. **Assume the whole job fits in one node's RAM; test with a small `N`** → run all
+   `N` shard executors at once. The memory-bounded "waves" scheduler (process `K`
+   shards at a time when the file exceeds RAM) is **deferred**.
+4. **Merge logic = "built-ins + source hook" (option c):** ship built-in reducers
+   (sum / count / topk / concat / wordcount) now, and add a hook for a workload to
+   supply its **own native merge source** later.
+5. **Shard count is an explicit `N`** for now; size-based auto-split
+   (`N = filesize ÷ SHM window`) is deferred (same machinery).
+
+**Goal 1 phasing:**
+- **P1 — the two native subcommands** (standalone, testable by hand, no agent):
+  `host split <input> <N> <out_prefix>` (record/line-boundary split) and
+  `host merge <reducer> <out> <partial…>` (starting with the `wordcount` reducer).
+- **P2 — agent orchestration (local only):** a `ShardedJob` spec
+  `{ input, shards: N, per_shard_dag, merge: {reducer|source}, output }`; the
+  coordinator runs `host split` (blocking) → `N` concurrent `host dag` executors,
+  each with its own SHM `{prefix}_s{i}` (reusing `ExecutorHandle::spawn`, just `N`
+  of them + poll-all) → `host merge` (blocking). **No async `handle_submit`, no
+  demux, no worker sockets touched** — that keeps this milestone small.
+- **P3 — reducer library + source-merge hook** (the rest of option c).
+
+**Status (2026-07-02): P1, P2, P3 all implemented and tested end-to-end.**
+- P1 — `Executor/host/src/shard.rs`: `host split` (line-boundary, byte-exact) and
+  `host merge` with reducers `wordcount`, `counters`, `concat`, `sum`, `topk:K`.
+- P2 — `NodeAgent/agent/src/sharded.rs`: `ShardedJob` detected in
+  `coordinator.rs::handle_submit` (JSON has a `per_shard_dag` key), runs
+  split → `N` concurrent local executors (each SHM `{prefix}_s{i}`) → merge.
+  Reuses the SubmitJob/SubmitAck/JobResult wire — no protocol/client change.
+- P3 — `merge: { source: <file.rs> }` compiles a self-contained native Rust merge
+  (`rustc -O`, `main` gets argv `[1]`=output, `[2..]`=partials) and runs it — no
+  4 GiB cap. Set exactly one of `merge.reducer` / `merge.source`.
+- **Multi-node** — `distribute: true` spreads shards one-per-node across the
+  cluster: coordinator runs shard 0 locally, each other shard is TCP-staged to a
+  worker and run there as an independent single-node job (no RDMA mesh); the worker
+  returns its partial, and the coordinator merges. Requires `shards <= live nodes`.
+  Verified on a loopback 3-node cluster: distributed result byte-identical to the
+  local run. A failed/oversized submit now returns a failed `JobResult` instead of
+  crashing the coordinator (hardened `handle_submit` call site + wrapped
+  `run_sharded_job`).
+- **Waves** — memory-bounded scheduling so shards need not all run at once:
+  - LOCAL: `max_concurrent: K` runs shards in a sliding window of K executors
+    (default = all at once), so a file with more shards than fit in RAM is chewed
+    through K at a time.
+  - DISTRIBUTED: shards run in waves of one-per-node, so `distribute` now accepts
+    `shards > nodes` (extra shards land in later waves; fail-fast between waves).
+  Verified on a loopback 3-node cluster: all-at-once, local-window(2), and
+  distributed-2-waves produce byte-identical 5-shard results.
+- **Full-system check:** the normal (non-sharded) submit path still works
+  end-to-end (single-node auto-placement wordcount → success), and the hardened
+  `handle_submit` call site turns a bad DAG into a logged error instead of taking
+  the coordinator down.
+- Intermediate shard/partial files and SHM regions are reclaimed after the merge
+  (`keep_intermediates: true` to retain them for debugging); the final output is
+  always kept. Workers also unlink their own SHM region after every job (normal
+  and sharded), so distributed shards don't leak `/dev/shm` on worker nodes.
+- **Size-based auto-split:** omit `shards` and the count is derived from the input
+  size — `N = ceil(filesize / max_shard_bytes)` (default `max_shard_bytes` = 3 GiB,
+  under one executor's ~3.48 GiB window). Pass explicit `shards` to override.
+- Goal 1 is functionally complete for one-node and multi-node. Remaining polish
+  needs the real cluster/hardware: >4 GiB validation, RDMA (not TCP) shard staging,
+  Python sharded jobs.
+
+### Submitting a sharded job
+
+A `ShardedJob` is detected by the `per_shard_dag` key and submitted like any DAG:
+`node-agent submit --dag sharded.json`. Fields:
+
+| field | required | meaning |
+|-------|----------|---------|
+| `input` | yes | large input file on the coordinator |
+| `shards` | no | number of shards `N`; if omitted, auto-derived from file size |
+| `max_shard_bytes` | no | target bytes/shard for auto-split when `shards` omitted (default 3 GiB) |
+| `shm_path_prefix` | yes | shard `i` uses SHM region `{prefix}_s{i}` |
+| `per_shard_dag` | yes | template single-node DAG; `{{SHARD_INPUT}}` / `{{SHARD_OUTPUT}}` are substituted per shard, `shm_path` is overridden |
+| `merge.reducer` \| `merge.source` | one of | built-in (`wordcount`/`counters`/`concat`/`sum`/`topk:K`) or a self-contained native Rust merge file (`main` gets argv `[1]`=output, `[2..]`=partials) |
+| `output` | yes | final result path |
+| `distribute` | no | spread shards across the cluster (waves of one-per-node); default local |
+| `max_concurrent` | no | local only: max shards running at once (memory bound); default all |
+| `work_dir` | no | where shard/partial files live; default `/tmp/{job_id}` |
+| `keep_intermediates` | no | retain shards/partials/SHM after the run; default false |
+
+Goal 2's control-plane demux (single reader thread per worker socket → per-job
+inboxes) is analysed in Part A below but **not** needed for Goal 1, since a
+single-node sharded job has no worker sockets.
+
+> **Stale paths in the sections below:** `agent/src/*` → `NodeAgent/agent/src/*`,
+> and `connect/src/*` → `Executor/connect/src/*` (constants live in
+> `Executor/connect/src/mesh/mod.rs`, not `lib.rs`).
+
+---
+
 ## 0. What already works (so we don't rebuild it)
 
 Each job's executor is a **separate `host` subprocess** that maps its **own** SHM
@@ -21,6 +135,49 @@ space. So two executors with *different* `shm_path_prefix` already coexist with
 fully isolated SHM regions — there is no OS-level or wasm-address-space conflict
 between concurrent SHM objects. **SHM multiplexing is not the blocker;** the
 single-job assumptions in the NodeAgent and the RDMA mesh are.
+
+---
+
+## Goal 2 — concurrent jobs via placement (Phase 1, IMPLEMENTED 2026-07-02)
+
+Rather than time-slicing many jobs over a shared worker mesh (the demux problem
+below), Phase 1 takes the simpler **placement** model: the coordinator assigns
+each independent job to a *single node*, ships its input there, runs it, and ships
+the output back. Concurrent jobs land on **different** nodes, so each job
+exclusively owns its node's socket — no two jobs share a socket, which removes the
+need for the reader-thread/inbox demux entirely.
+
+**Submission — a `PlacedJob`** (detected by a top-level `dag` key):
+```json
+{ "dag": { ...single-node Executor DAG (Func nodes ok)... },
+  "inputs": ["/abs/path/input"],   // shipped to the target node
+  "target_node": 1 }                // optional; else the coordinator picks a free node
+```
+Submit with `node-agent submit --dag placed.json`. The DAG's `Output` node is
+collected back to the coordinator.
+
+**How it works (`NodeAgent/agent/src/placed.rs`):**
+- Each placed submit runs on its **own thread** (`SubmitJob if is_submit_placed`),
+  so the accept loop keeps serving and multiple placed jobs run concurrently.
+- `CoordinatorState.reserve_node()` reserves a free node (or the requested one);
+  the main-loop metrics drain **skips reserved nodes** so it can't steal the job's
+  `JobCompleted`. The job thread `try_clone()`s the reserved socket and reads
+  completion off it without holding the state lock.
+- Coordinator-local placement runs `host dag` directly; remote placement reuses
+  the Goal 1 dispatch (stage input → `AssignJob` → collect output).
+
+**Verified on a loopback 3-node cluster:** local placement, remote placement, and
+**two jobs concurrently on nodes 1 & 2** (both placed before either finished, both
+correct). No regression to normal/sharded paths.
+
+**Deferred to Phase 2 (needs cluster/RDMA to validate):** concurrent *multi-node*
+jobs sharing workers (the reader-thread demux below), queueing when all nodes are
+busy (currently rejects), and load-aware placement.
+
+> Note (loopback testing only): staging an input writes it to the same path on the
+> "worker", and the worker cleans up staged inputs after the job — on a shared
+> loopback filesystem that deletes the source. Use throwaway per-job input copies
+> when testing on one box; on a real cluster each node has its own filesystem.
 
 ---
 

@@ -113,7 +113,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                             );
                             let _ = exec.kill();
                             current_executor = None;
-                            current_shm_path = None;
+                            remove_shm(current_shm_path.take(), config.node_id);
                             current_dag_json = None;
                             remove_staged_files(&mut current_staged_files, config.node_id);
                         }
@@ -231,7 +231,7 @@ pub fn run_worker(config: &AgentConfig) -> Result<()> {
                         )?;
                     }
                     current_executor = None;
-                    current_shm_path = None;
+                    remove_shm(current_shm_path.take(), config.node_id);
                     // current_dag_json already consumed by take() above
                     remove_staged_files(&mut current_staged_files, config.node_id);
 
@@ -359,6 +359,20 @@ fn rand_psn() -> u32 {
 /// 4. Posts an RDMA READ to pull the file data from coordinator's MR.
 /// 5. Writes each file to its destination path on disk.
 /// 6. Sends `InputShareDone`.
+/// Remove the SHM backing file a finished executor used (best-effort). The
+/// executor process has already exited by the time we call this, so no one holds
+/// the mapping; unlinking reclaims the `/dev/shm` space instead of leaking a
+/// region per job. Applies to every worker job — normal and sharded shards alike.
+fn remove_shm(shm_path: Option<String>, node_id: u32) {
+    if let Some(path) = shm_path {
+        match std::fs::remove_file(&path) {
+            Ok(()) => println!("[worker {}] removed shm region '{}'", node_id, path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => eprintln!("[worker {}] failed to remove shm '{}': {}", node_id, path, e),
+        }
+    }
+}
+
 fn remove_staged_files(paths: &mut Vec<String>, node_id: u32) {
     // Dedup: `current_staged_files` can hold the same path more than once — a worker
     // is staged to for jobs it never executes (e.g. a 1-node ground-truth run still

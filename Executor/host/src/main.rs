@@ -2,6 +2,7 @@ mod shm;
 mod runtime;
 mod routing;
 mod policy;
+mod shard;
 
 use anyhow::Result;
 use std::env;
@@ -31,6 +32,29 @@ fn main() -> Result<()> {
         let arg: u32  = args.get(6).and_then(|s| s.parse().ok()).unwrap_or(0);
         let arg1: Option<u32> = args.get(7).and_then(|s| s.parse().ok());
         runtime::worker::run_wasm_call(shm_path, wasm_path, func, ret_type, arg, arg1)
+    } else if args.len() > 1 && args[1] == "split" {
+        // Native big-file split (no WASM, no 4 GiB cap): host split <input> <N> <out_prefix>
+        // Writes <out_prefix>.0 .. <out_prefix>.{N-1}, cutting on line boundaries.
+        if args.len() < 5 {
+            eprintln!("usage: host split <input> <N> <out_prefix>");
+            std::process::exit(2);
+        }
+        let input = &args[2];
+        let n: usize = args[3].parse()
+            .unwrap_or_else(|_| { eprintln!("split: N must be a positive integer"); std::process::exit(2) });
+        let out_prefix = &args[4];
+        shard::run_split(input, n, out_prefix)
+    } else if args.len() > 1 && args[1] == "merge" {
+        // Native partial merge (no WASM, no 4 GiB cap):
+        //   host merge <reducer> <output> <partial...>
+        if args.len() < 5 {
+            eprintln!("usage: host merge <reducer> <output> <partial...>  (reducers: wordcount, counters, concat)");
+            std::process::exit(2);
+        }
+        let reducer = &args[2];
+        let output = &args[3];
+        let partials = &args[4..];
+        shard::run_merge(reducer, output, partials)
     } else if args.len() > 1 && args[1] == "wasm-loop" {
         // Persistent pipeline worker: ./host wasm-loop <shm_path> <wasm_path> <func>
         // Reads "arg0 arg1\n" lines from stdin, calls func(arg0, arg1) for each,

@@ -1,9 +1,9 @@
 workload,mode,policy,threads,nodes,total_mb,per_thread_mb,wall_ms_median,wall_ms_min,wall_ms_max,throughput_mb_s,speedup,efficiency,peak_mem_mb_per_node,peak_mem_mb_total,success,reps
-word_count,weak,balanced,16,1,256,16.0,7880,7719,7901,32.5,1.00,1.00,1350.4,1350.4,true,3
-word_count,weak,balanced,48,3,768,16.0,9998,9980,10171,76.8,0.79,0.79,1365.1,4086.6,true,3
-word_count,weak,balanced,96,6,1536,16.0,10112,9997,10494,151.9,0.78,0.78,1369.4,8179.6,true,3
-word_count,weak,balanced,144,9,2304,16.0,10260,10094,10750,224.6,0.77,0.77,1374.1,12282.9,true,3
-word_count,weak,pack,16,1,256,16.0,8036,7804,8163,31.9,1.00,1.00,1346.2,1346.2,true,3
-word_count,weak,pack,48,3,768,16.0,10266,10023,10316,74.8,0.78,0.78,1363.1,4070.7,true,3
-word_count,weak,pack,96,6,1536,16.0,10055,10032,10196,152.8,0.80,0.80,1371,8183.9,true,3
-word_count,weak,pack,144,9,2304,16.0,10284,9993,10394,224.0,0.78,0.78,1378.7,12304.7,true,3
+word_count,weak,balanced,16,1,256,16.0,7943,7943,7943,32.2,1.00,1.00,1344.6,1344.6,true,1
+word_count,weak,balanced,48,3,768,16.0,10145,10145,10145,75.7,0.78,0.78,1357.9,4070,true,1
+word_count,weak,balanced,96,6,1536,16.0,10720,10720,10720,143.3,0.74,0.74,1371.6,8186.9,true,1
+word_count,weak,balanced,144,9,2304,16.0,10808,10808,10808,213.2,0.73,0.73,1374.1,12259.5,true,1
+word_count,weak,pack,16,1,256,16.0,7869,7869,7869,32.5,1.00,1.00,1342.4,1342.4,true,1
+word_count,weak,pack,48,3,768,16.0,10135,10135,10135,75.8,0.78,0.78,1361.8,4070.6,true,1
+word_count,weak,pack,96,6,1536,16.0,10309,10309,10309,149.0,0.76,0.76,1360.3,8132.2,true,1
+word_count,weak,pack,144,9,2304,16.0,10216,10216,10216,225.5,0.77,0.77,1374.4,12269.8,true,1
