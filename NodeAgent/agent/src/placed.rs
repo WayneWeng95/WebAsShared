@@ -109,18 +109,34 @@ fn run_placed_job(
         v
     };
 
-    // Reserve a free node (the placement decision).
-    let node = {
-        let mut s = state.lock().unwrap();
-        match s.reserve_node(spec.target_node, &live) {
-            Some(n) => n,
-            None => {
-                return Ok((
-                    false,
-                    format!("no free node available ({} live, all reserved)", live.len()),
-                ))
+    // Reserve a node (the placement decision). Load-aware: pick the least-loaded
+    // free node. If every node is busy, QUEUE — wait for one to free up rather
+    // than rejecting — up to the job timeout.
+    let queue_timeout = Duration::from_secs(config.timeouts.job_timeout_s);
+    let wait_start = Instant::now();
+    let mut announced_wait = false;
+    let node = loop {
+        {
+            let mut s = state.lock().unwrap();
+            let order = s.placement_order(&live);
+            if let Some(n) = s.reserve_node(spec.target_node, &order) {
+                break n;
             }
         }
+        if wait_start.elapsed() > queue_timeout {
+            return Ok((
+                false,
+                format!("queued but no node freed within {:?}", queue_timeout),
+            ));
+        }
+        if !announced_wait {
+            println!(
+                "[coordinator] placed job {} queued — all {} node(s) busy, waiting…",
+                job_id, live.len()
+            );
+            announced_wait = true;
+        }
+        std::thread::sleep(Duration::from_millis(200));
     };
     println!("[coordinator] placed job {} → node {}", job_id, node);
 

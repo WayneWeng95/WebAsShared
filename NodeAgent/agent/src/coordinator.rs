@@ -43,13 +43,30 @@ pub(crate) struct CoordinatorState {
 }
 
 impl CoordinatorState {
-    /// Reserve a free node for a placed job. Prefers `prefer` (if given, live, and
-    /// free); otherwise the first free node in `live` order. Returns the reserved
-    /// node id, or `None` if every live node is busy. Marks the node reserved.
-    pub(crate) fn reserve_node(&mut self, prefer: Option<u32>, live: &[u32]) -> Option<u32> {
+    /// Load-aware placement order for the `live` nodes: least-loaded first, using
+    /// the SCX scheduler score (same signal the partitioner uses). Nodes without a
+    /// score yet (no metrics) are appended in id order so they're still usable.
+    pub(crate) fn placement_order(&self, live: &[u32]) -> Vec<u32> {
+        let mut order: Vec<u32> = scheduler::score_nodes(&self.scx_view)
+            .into_iter()
+            .map(|(id, _)| id)
+            .filter(|id| live.contains(id))
+            .collect();
+        for &n in live {
+            if !order.contains(&n) {
+                order.push(n);
+            }
+        }
+        order
+    }
+
+    /// Reserve a free node for a placed job. Prefers `prefer` (if given and free);
+    /// otherwise the first free node in `order` (which the caller sorts least-
+    /// loaded first). Returns the reserved node id, or `None` if all are busy.
+    pub(crate) fn reserve_node(&mut self, prefer: Option<u32>, order: &[u32]) -> Option<u32> {
         let pick = prefer
-            .filter(|n| live.contains(n) && !self.reserved_nodes.contains(n))
-            .or_else(|| live.iter().copied().find(|n| !self.reserved_nodes.contains(n)))?;
+            .filter(|n| order.contains(n) && !self.reserved_nodes.contains(n))
+            .or_else(|| order.iter().copied().find(|n| !self.reserved_nodes.contains(n)))?;
         self.reserved_nodes.insert(pick);
         Some(pick)
     }
