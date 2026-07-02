@@ -170,9 +170,16 @@ collected back to the coordinator.
 **two jobs concurrently on nodes 1 & 2** (both placed before either finished, both
 correct). No regression to normal/sharded paths.
 
+**Placement + queue (done):** placement is **load-aware** — a job takes the
+least-loaded free node via `CoordinatorState::placement_order()` (the SCX
+scheduler score, same signal the partitioner uses), or an explicit `target_node`.
+When every node is busy the job **queues** — the thread waits for a node to free
+up (up to the job timeout) instead of rejecting. Verified on loopback: 4 jobs on 3
+nodes → 3 run immediately, the 4th queues then runs on the first freed node.
+
 **Deferred to Phase 2 (needs cluster/RDMA to validate):** concurrent *multi-node*
-jobs sharing workers (the reader-thread demux below), queueing when all nodes are
-busy (currently rejects), and load-aware placement.
+jobs sharing workers (the reader-thread demux below); strict FIFO queue ordering
+(current queue is a fair poll, not strictly ordered).
 
 > Note (loopback testing only): staging an input writes it to the same path on the
 > "worker", and the worker cleans up staged inputs after the job — on a shared

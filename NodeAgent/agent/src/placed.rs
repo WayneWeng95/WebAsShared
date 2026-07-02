@@ -118,7 +118,7 @@ fn run_placed_job(
     let node = loop {
         {
             let mut s = state.lock().unwrap();
-            let order = s.placement_order(&live);
+            let order = s.placement_order(&live, config.node_id);
             if let Some(n) = s.reserve_node(spec.target_node, &order) {
                 break n;
             }

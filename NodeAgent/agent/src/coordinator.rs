@@ -43,19 +43,25 @@ pub(crate) struct CoordinatorState {
 }
 
 impl CoordinatorState {
-    /// Load-aware placement order for the `live` nodes: least-loaded first, using
-    /// the SCX scheduler score (same signal the partitioner uses). Nodes without a
-    /// score yet (no metrics) are appended in id order so they're still usable.
-    pub(crate) fn placement_order(&self, live: &[u32]) -> Vec<u32> {
+    /// Load-aware placement order for the `live` nodes: least-loaded worker first
+    /// (SCX score, the signal the partitioner uses), unscored workers next, and the
+    /// coordinator (`coordinator_id`) **always last** — it's kept free for control
+    /// duties AND for the fan-out / cross-node aggregation + reduce that multi-node
+    /// jobs land on node 0, so it's only used as overflow when every worker is busy.
+    pub(crate) fn placement_order(&self, live: &[u32], coordinator_id: u32) -> Vec<u32> {
         let mut order: Vec<u32> = scheduler::score_nodes(&self.scx_view)
             .into_iter()
             .map(|(id, _)| id)
-            .filter(|id| live.contains(id))
+            .filter(|id| live.contains(id) && *id != coordinator_id)
             .collect();
         for &n in live {
-            if !order.contains(&n) {
+            if n != coordinator_id && !order.contains(&n) {
                 order.push(n);
             }
+        }
+        // Coordinator is the last resort, regardless of its score.
+        if live.contains(&coordinator_id) {
+            order.push(coordinator_id);
         }
         order
     }
