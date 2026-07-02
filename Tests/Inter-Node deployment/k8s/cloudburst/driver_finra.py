@@ -37,6 +37,8 @@ import redis
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import finra_rules
+from mem_probe import MemSampler
+import exec_pool
 
 DONE_TIMEOUT = 300         # a stateful full-data task parses 5M trades (~30 s); 300 s headroom
 MAX_REDISPATCH = 8
@@ -93,7 +95,7 @@ def run_wave(R, task_q, tasks, done_key, label):
     return busy
 
 
-def run_once(R, trades, n_shards, task_q):
+def run_once(R, trades, n_shards, task_q, cold=False):
     uid = uuid.uuid4().hex
     done = 'cb:finra:' + uid
 
@@ -124,6 +126,8 @@ def run_once(R, trades, n_shards, task_q):
         keymap.append(rk)
         idx += 1
 
+    if cold:                                  # cold start: launch executors ON the audit wave
+        exec_pool.launch_on_wave(len(tasks))
     busy = run_wave(R, task_q, tasks, done, 'finra')
 
     # --- aggregate (node 0): sum every worker's violation count ---
@@ -144,7 +148,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--trades', default='TestData/finra_5m.csv')
     ap.add_argument('--fanout', type=int, default=60, help='audit-rule fan width (F → S=round((F-3)/5))')
-    ap.add_argument('--reps', type=int, default=15)
+    ap.add_argument('--warm-reps', type=int, default=12, help='warm reps (pool pre-launched)')
+    ap.add_argument('--cold-reps', type=int, default=3, help='cold reps (executors launched on-wave)')
+    ap.add_argument('--reps', type=int, default=None, help='ignored (kept for back-compat)')
     ap.add_argument('--redis-host', default=os.environ.get('REDIS_HOST', '10.10.1.2'))
     ap.add_argument('--redis-port', type=int, default=int(os.environ.get('REDIS_PORT', '30679')))
     ap.add_argument('--task-queue', default='cb:tasks')
@@ -165,34 +171,51 @@ def main():
     n_trades = max(0, trades.count(b'\n') - 1)
     S = max(1, round((a.fanout - len(finra_rules.STATEFUL)) / len(finra_rules.STATELESS)))
     n_workers = len(finra_rules.STATELESS) * S + len(finra_rules.STATEFUL)
-    print('[cloudburst-finra] trades=%d fanout=%d shards/rule=%d workers=%d reps=%d' %
-          (n_trades, a.fanout, S, n_workers, a.reps), flush=True)
+    print('[cloudburst-finra] trades=%d fanout=%d shards/rule=%d workers=%d warm=%d cold=%d' %
+          (n_trades, a.fanout, S, n_workers, a.warm_reps, a.cold_reps), flush=True)
 
-    mk_ms, tj_ms = [], []
+    mk_warm, mk_cold, tj_ms = [], [], []
     viol = None
     success = True
-    for r in range(a.reps):
-        m, tj, v, w = run_once(R, trades, S, a.task_queue)
-        mk_ms.append(m)
+    mem = MemSampler(a.redis_host, a.redis_port); mem.start()   # peak-memory-cost sampler
+
+    def _rep(r, cold):
+        nonlocal viol, success
+        m, tj, v, w = run_once(R, trades, S, a.task_queue, cold=cold)
         tj_ms.append(tj)
         if viol is None:
             viol = v
         elif v != viol:
-            print('[cloudburst-finra] GATE FAIL rep%d: violations %d != %d' % (r, v, viol))
-            success = False
-        print('[cloudburst-finra] rep%d makespan=%.0f ms total_job=%.0f ms violations=%d workers=%d' %
-              (r, m, tj, v, w), flush=True)
+            print('[cloudburst-finra] GATE FAIL %s rep%d: violations %d != %d' %
+                  ('cold' if cold else 'warm', r, v, viol)); success = False
+        print('[cloudburst-finra] %s rep%d makespan=%.0f ms total_job=%.0f ms violations=%d workers=%d' %
+              ('cold' if cold else 'warm', r, m, tj, v, w), flush=True)
+        return m
+
+    for r in range(a.cold_reps):
+        exec_pool.teardown()
+        mk_cold.append(_rep(r, True))
+    exec_pool.launch_on_wave(n_workers)
+    for r in range(a.warm_reps):
+        mk_warm.append(_rep(r, False))
+    exec_pool.teardown()
+
+    mem.stop.set(); mem.join()
+    mem_total_mb, mem_max_mb, redis_peak_mb = mem.result()
 
     if a.expect is not None and viol != a.expect:
         print('[cloudburst-finra] GATE FAIL: violations %d != expected %d' % (viol, a.expect))
         success = False
 
-    mk_mean = statistics.mean(mk_ms)
-    mk_std = statistics.pstdev(mk_ms) if len(mk_ms) > 1 else 0.0
+    mk_mean = statistics.mean(mk_warm) if mk_warm else 0.0
+    mk_std = statistics.pstdev(mk_warm) if len(mk_warm) > 1 else 0.0
+    cold_mean = statistics.mean(mk_cold) if mk_cold else 0.0
+    cold_std = statistics.pstdev(mk_cold) if len(mk_cold) > 1 else 0.0
     tj_mean = statistics.mean(tj_ms)
-    print('[cloudburst-finra] === trades=%d workers=%d makespan=%.0f ± %.1f ms total_job=%.0f ms '
-          'violations=%d %s ===' %
-          (n_trades, n_workers, mk_mean, mk_std, tj_mean, viol, 'OK' if success else 'GATE-FAIL'))
+    print('[cloudburst-finra] === trades=%d workers=%d warm_makespan=%.0f ± %.1f ms '
+          'cold_makespan=%.0f ± %.1f ms total_job=%.0f ms violations=%d %s ===' %
+          (n_trades, n_workers, mk_mean, mk_std, cold_mean, cold_std, tj_mean, viol,
+           'OK' if success else 'GATE-FAIL'))
 
     if a.csv:
         os.makedirs(os.path.dirname(os.path.abspath(a.csv)), exist_ok=True)
@@ -200,10 +223,13 @@ def main():
         with open(a.csv, 'a') as f:
             if new:
                 f.write('trades,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,'
-                        'total_job_mean_ms,violations,expect,success,reps\n')
-            f.write('%d,%d,4,%.0f,%.1f,%.0f,%d,%d,%s,%d\n' %
+                        'total_job_mean_ms,violations,expect,success,reps,'
+                        'mem_max_mb,mem_total_mb,redis_peak_mb,'
+                        'cold_makespan_mean_ms,cold_makespan_std_ms\n')
+            f.write('%d,%d,8,%.0f,%.1f,%.0f,%d,%d,%s,%d,%.0f,%.0f,%.0f,%.0f,%.1f\n' %
                     (n_trades, n_workers, mk_mean, mk_std, tj_mean, viol,
-                     a.expect if a.expect is not None else viol, success, a.reps))
+                     a.expect if a.expect is not None else viol, success, a.warm_reps,
+                     mem_max_mb, mem_total_mb, redis_peak_mb, cold_mean, cold_std))
     sys.exit(0 if success else 1)
 
 

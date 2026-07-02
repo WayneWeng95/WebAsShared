@@ -1,0 +1,426 @@
+{
+  "shm_path_prefix": "/dev/shm/rdma_terasort_ap",
+  "log_level": "info",
+  "total_nodes": 9,
+  "transfer": true,
+  "placement_policy": "balanced",
+  "converge_on_coordinator": false,
+  "nodes": [
+    {
+      "id": "load",
+      "placement": "all",
+      "deps": [],
+      "kind": {
+        "Input": {
+          "path": "TestData/terasort_1.2gb.txt",
+          "slot": 0,
+          "prefetch": true
+        }
+      }
+    },
+    {
+      "id": "part_0",
+      "node_id": 0,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition_local",
+          "arg": 0,
+          "wasm_arg": 589824
+        }
+      }
+    },
+    {
+      "id": "part_1",
+      "node_id": 1,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition_local",
+          "arg": 0,
+          "wasm_arg": 589825
+        }
+      }
+    },
+    {
+      "id": "part_2",
+      "node_id": 2,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition_local",
+          "arg": 0,
+          "wasm_arg": 589826
+        }
+      }
+    },
+    {
+      "id": "part_3",
+      "node_id": 3,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition_local",
+          "arg": 0,
+          "wasm_arg": 589827
+        }
+      }
+    },
+    {
+      "id": "part_4",
+      "node_id": 4,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition_local",
+          "arg": 0,
+          "wasm_arg": 589828
+        }
+      }
+    },
+    {
+      "id": "part_5",
+      "node_id": 5,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition_local",
+          "arg": 0,
+          "wasm_arg": 589829
+        }
+      }
+    },
+    {
+      "id": "part_6",
+      "node_id": 6,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition_local",
+          "arg": 0,
+          "wasm_arg": 589830
+        }
+      }
+    },
+    {
+      "id": "part_7",
+      "node_id": 7,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition_local",
+          "arg": 0,
+          "wasm_arg": 589831
+        }
+      }
+    },
+    {
+      "id": "part_8",
+      "node_id": 8,
+      "deps": [
+        "load"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_partition_local",
+          "arg": 0,
+          "wasm_arg": 589832
+        }
+      }
+    },
+    {
+      "id": "combine_0",
+      "node_id": 0,
+      "deps": [
+        "part_0"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_1",
+      "node_id": 1,
+      "deps": [
+        "part_1"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_2",
+      "node_id": 2,
+      "deps": [
+        "part_2"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_3",
+      "node_id": 3,
+      "deps": [
+        "part_3"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            127,
+            128,
+            129,
+            130,
+            131,
+            132,
+            133,
+            134,
+            135
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_4",
+      "node_id": 4,
+      "deps": [
+        "part_4"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            136,
+            137,
+            138,
+            139,
+            140,
+            141,
+            142,
+            143,
+            144
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_5",
+      "node_id": 5,
+      "deps": [
+        "part_5"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            145,
+            146,
+            147,
+            148,
+            149,
+            150,
+            151,
+            152,
+            153
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_6",
+      "node_id": 6,
+      "deps": [
+        "part_6"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_7",
+      "node_id": 7,
+      "deps": [
+        "part_7"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            163,
+            164,
+            165,
+            166,
+            167,
+            168,
+            169,
+            170,
+            171
+          ]
+        }
+      }
+    },
+    {
+      "id": "combine_8",
+      "node_id": 8,
+      "deps": [
+        "part_8"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream": [
+            172,
+            173,
+            174,
+            175,
+            176,
+            177,
+            178,
+            179,
+            180
+          ]
+        }
+      }
+    },
+    {
+      "id": "gather",
+      "node_id": 0,
+      "deps": [
+        "combine_0",
+        "combine_1",
+        "combine_2",
+        "combine_3",
+        "combine_4",
+        "combine_5",
+        "combine_6",
+        "combine_7",
+        "combine_8"
+      ],
+      "kind": {
+        "Aggregate": {
+          "upstream_nodes": [
+            "combine_0",
+            "combine_1",
+            "combine_2",
+            "combine_3",
+            "combine_4",
+            "combine_5",
+            "combine_6",
+            "combine_7",
+            "combine_8"
+          ],
+          "downstream": 400
+        }
+      }
+    },
+    {
+      "id": "summary",
+      "node_id": 0,
+      "deps": [
+        "gather"
+      ],
+      "output_slot": 500,
+      "kind": {
+        "Func": {
+          "func": "ts_range_summary",
+          "arg": 400,
+          "wasm_arg": 32768400
+        }
+      }
+    },
+    {
+      "id": "summary_global",
+      "node_id": 0,
+      "deps": [
+        "summary"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "finalize",
+      "node_id": 0,
+      "deps": [
+        "summary_global"
+      ],
+      "kind": {
+        "Func": {
+          "func": "ts_finalize"
+        }
+      }
+    },
+    {
+      "id": "save",
+      "node_id": 0,
+      "deps": [
+        "finalize"
+      ],
+      "kind": {
+        "Output": {
+          "path": "TestOutput/terasort_ap_result.txt"
+        }
+      }
+    }
+  ]
+}

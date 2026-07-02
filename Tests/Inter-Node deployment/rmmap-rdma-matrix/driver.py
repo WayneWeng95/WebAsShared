@@ -100,6 +100,9 @@ def run_once(server_ip, port, R, C, BR, BC, N, nodes, self_host):
     by_node = {nd: [] for nd in nodes}
     for k, ij in enumerate(cells):
         by_node[nodes[k % len(nodes)]].append(ij)
+    _mx = max((len(v) for v in by_node.values()), default=0)   # hard 16/node cap
+    if _mx > 16:
+        raise SystemExit('16/node cap exceeded: %d mappers on one node over %d nodes' % (_mx, len(nodes)))
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=len(nodes)) as pool:
         futs = [pool.submit(run_node, nd, self_host, server_ip, port, R, BR, BC, N, by_node[nd])
@@ -202,10 +205,13 @@ def main():
         with open(a.csv, 'a') as f:
             if new:
                 f.write('matrix_n,workers,nodes_used,variant,makespan_mean_ms,makespan_std_ms,'
-                        'total_job_mean_ms,gflops,checksum,expect,success,reps\n')
-            f.write('%d,%d,%d,rdma,%.0f,%.1f,%.0f,%.3f,%d,%d,%s,%d\n' %
+                        'total_job_mean_ms,gflops,checksum,expect,success,reps,'
+                        'cold_start_ms,cold_makespan_ms\n')
+            # cold_start_ms = one-time RDMA MR publish (RMMap cold start); cold_makespan = warm + publish.
+            f.write('%d,%d,%d,rdma,%.0f,%.1f,%.0f,%.3f,%d,%d,%s,%d,%.0f,%.0f\n' %
                     (N, W, len(nodes), mk_mean, mk_std, tj_mean, gflops, cks,
-                     a.expect if a.expect is not None else cks, success, a.reps))
+                     a.expect if a.expect is not None else cks, success, a.reps,
+                     publish_ms, mk_mean + publish_ms))
     sys.exit(0 if success else 1)
 
 

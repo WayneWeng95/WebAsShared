@@ -1,2 +1,5 @@
 workload,mode,policy,threads,nodes,events,events_per_node,wall_ms_median,wall_ms_min,wall_ms_max,throughput_ev_s,speedup,efficiency,peak_mem_mb_per_node,peak_mem_mb_total,total_events,expect,success,reps
-mediareview,weak,n/a,144,9,3600000,400000,6595,6595,6595,545868,1.00,1.00,1601.8,8402.9,3600000,3600000,true,1
+mediareview,weak,n/a,16,1,500000,500000,4306,4306,4306,116117,1.000,1.000,1249.9,1249.9,500000,500000,true,1
+mediareview,weak,n/a,48,3,1500000,500000,8676,8676,8676,172891,1.489,0.496,1678.8,5033.0,1500000,1500000,true,1
+mediareview,weak,n/a,96,6,3000000,500000,7647,7647,7647,392311,3.379,0.563,1764.9,8362.2,3000000,3000000,true,1
+mediareview,weak,n/a,144,9,4500000,500000,8510,8510,8510,528790,4.554,0.506,1684.9,10483.0,4500000,4500000,true,1

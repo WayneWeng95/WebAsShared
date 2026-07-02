@@ -1,2 +1,0 @@
-size_mb,workers,nodes_used,variant,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,records,keysum,sorted,expect,success,reps
-1200,4,9,rdma,16144,184.8,54337,12582912,8115998987,1,12582912|8115998987|1,True,3

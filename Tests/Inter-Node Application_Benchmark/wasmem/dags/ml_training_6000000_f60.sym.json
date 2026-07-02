@@ -1,7 +1,7 @@
 {
   "shm_path_prefix": "/dev/shm/rdma_sgd_ap",
   "log_level": "info",
-  "total_nodes": 4,
+  "total_nodes": 9,
   "transfer": true,
   "placement_policy": "balanced",
   "nodes": [
@@ -11,7 +11,7 @@
       "deps": [],
       "kind": {
         "Input": {
-          "path": "/opt/myapp/WebAsShared/TestData/ml_training_6m.csv",
+          "path": "TestData/ml_training_6m.csv",
           "prefetch": true,
           "replicate": true
         }
@@ -99,7 +99,7 @@
           "wasm_arg": 6815758
         }
       },
-      "node_id": 0
+      "node_id": 4
     },
     {
       "id": "encode_5",
@@ -113,7 +113,7 @@
           "wasm_arg": 6881295
         }
       },
-      "node_id": 1
+      "node_id": 5
     },
     {
       "id": "encode_6",
@@ -127,7 +127,7 @@
           "wasm_arg": 6946832
         }
       },
-      "node_id": 2
+      "node_id": 6
     },
     {
       "id": "encode_7",
@@ -141,7 +141,7 @@
           "wasm_arg": 7012369
         }
       },
-      "node_id": 3
+      "node_id": 7
     },
     {
       "id": "encode_8",
@@ -155,7 +155,7 @@
           "wasm_arg": 7077906
         }
       },
-      "node_id": 0
+      "node_id": 8
     },
     {
       "id": "encode_9",
@@ -169,7 +169,7 @@
           "wasm_arg": 7143443
         }
       },
-      "node_id": 1
+      "node_id": 0
     },
     {
       "id": "encode_10",
@@ -183,7 +183,7 @@
           "wasm_arg": 7208980
         }
       },
-      "node_id": 2
+      "node_id": 1
     },
     {
       "id": "encode_11",
@@ -197,7 +197,7 @@
           "wasm_arg": 7274517
         }
       },
-      "node_id": 3
+      "node_id": 2
     },
     {
       "id": "encode_12",
@@ -211,7 +211,7 @@
           "wasm_arg": 7340054
         }
       },
-      "node_id": 0
+      "node_id": 3
     },
     {
       "id": "encode_13",
@@ -225,7 +225,7 @@
           "wasm_arg": 7405591
         }
       },
-      "node_id": 1
+      "node_id": 4
     },
     {
       "id": "encode_14",
@@ -239,7 +239,7 @@
           "wasm_arg": 7471128
         }
       },
-      "node_id": 2
+      "node_id": 5
     },
     {
       "id": "encode_15",
@@ -253,7 +253,7 @@
           "wasm_arg": 7536665
         }
       },
-      "node_id": 3
+      "node_id": 6
     },
     {
       "id": "encode_16",
@@ -267,7 +267,7 @@
           "wasm_arg": 7602202
         }
       },
-      "node_id": 0
+      "node_id": 7
     },
     {
       "id": "encode_17",
@@ -281,7 +281,7 @@
           "wasm_arg": 7667739
         }
       },
-      "node_id": 1
+      "node_id": 8
     },
     {
       "id": "encode_18",
@@ -295,7 +295,7 @@
           "wasm_arg": 7733276
         }
       },
-      "node_id": 2
+      "node_id": 0
     },
     {
       "id": "encode_19",
@@ -309,7 +309,7 @@
           "wasm_arg": 7798813
         }
       },
-      "node_id": 3
+      "node_id": 1
     },
     {
       "id": "encode_20",
@@ -323,7 +323,7 @@
           "wasm_arg": 7864350
         }
       },
-      "node_id": 0
+      "node_id": 2
     },
     {
       "id": "encode_21",
@@ -337,7 +337,7 @@
           "wasm_arg": 7929887
         }
       },
-      "node_id": 1
+      "node_id": 3
     },
     {
       "id": "encode_22",
@@ -351,7 +351,7 @@
           "wasm_arg": 7995424
         }
       },
-      "node_id": 2
+      "node_id": 4
     },
     {
       "id": "encode_23",
@@ -365,7 +365,7 @@
           "wasm_arg": 8060961
         }
       },
-      "node_id": 3
+      "node_id": 5
     },
     {
       "id": "encode_24",
@@ -379,7 +379,7 @@
           "wasm_arg": 8126498
         }
       },
-      "node_id": 0
+      "node_id": 6
     },
     {
       "id": "encode_25",
@@ -393,7 +393,7 @@
           "wasm_arg": 8192035
         }
       },
-      "node_id": 1
+      "node_id": 7
     },
     {
       "id": "encode_26",
@@ -407,7 +407,7 @@
           "wasm_arg": 8257572
         }
       },
-      "node_id": 2
+      "node_id": 8
     },
     {
       "id": "encode_27",
@@ -421,7 +421,7 @@
           "wasm_arg": 8323109
         }
       },
-      "node_id": 3
+      "node_id": 0
     },
     {
       "id": "encode_28",
@@ -435,7 +435,7 @@
           "wasm_arg": 8388646
         }
       },
-      "node_id": 0
+      "node_id": 1
     },
     {
       "id": "encode_29",
@@ -449,7 +449,7 @@
           "wasm_arg": 8454183
         }
       },
-      "node_id": 1
+      "node_id": 2
     },
     {
       "id": "encode_30",
@@ -463,7 +463,7 @@
           "wasm_arg": 8519720
         }
       },
-      "node_id": 2
+      "node_id": 3
     },
     {
       "id": "encode_31",
@@ -477,7 +477,7 @@
           "wasm_arg": 8585257
         }
       },
-      "node_id": 3
+      "node_id": 4
     },
     {
       "id": "encode_32",
@@ -491,7 +491,7 @@
           "wasm_arg": 8650794
         }
       },
-      "node_id": 0
+      "node_id": 5
     },
     {
       "id": "encode_33",
@@ -505,7 +505,7 @@
           "wasm_arg": 8716331
         }
       },
-      "node_id": 1
+      "node_id": 6
     },
     {
       "id": "encode_34",
@@ -519,7 +519,7 @@
           "wasm_arg": 8781868
         }
       },
-      "node_id": 2
+      "node_id": 7
     },
     {
       "id": "encode_35",
@@ -533,7 +533,7 @@
           "wasm_arg": 8847405
         }
       },
-      "node_id": 3
+      "node_id": 8
     },
     {
       "id": "encode_36",
@@ -603,7 +603,7 @@
           "wasm_arg": 9175090
         }
       },
-      "node_id": 0
+      "node_id": 4
     },
     {
       "id": "encode_41",
@@ -617,7 +617,7 @@
           "wasm_arg": 9240627
         }
       },
-      "node_id": 1
+      "node_id": 5
     },
     {
       "id": "encode_42",
@@ -631,7 +631,7 @@
           "wasm_arg": 9306164
         }
       },
-      "node_id": 2
+      "node_id": 6
     },
     {
       "id": "encode_43",
@@ -645,7 +645,7 @@
           "wasm_arg": 9371701
         }
       },
-      "node_id": 3
+      "node_id": 7
     },
     {
       "id": "encode_44",
@@ -659,7 +659,7 @@
           "wasm_arg": 9437238
         }
       },
-      "node_id": 0
+      "node_id": 8
     },
     {
       "id": "encode_45",
@@ -673,7 +673,7 @@
           "wasm_arg": 9502775
         }
       },
-      "node_id": 1
+      "node_id": 0
     },
     {
       "id": "encode_46",
@@ -687,7 +687,7 @@
           "wasm_arg": 9568312
         }
       },
-      "node_id": 2
+      "node_id": 1
     },
     {
       "id": "encode_47",
@@ -701,7 +701,7 @@
           "wasm_arg": 9633849
         }
       },
-      "node_id": 3
+      "node_id": 2
     },
     {
       "id": "encode_48",
@@ -715,7 +715,7 @@
           "wasm_arg": 9699386
         }
       },
-      "node_id": 0
+      "node_id": 3
     },
     {
       "id": "encode_49",
@@ -729,7 +729,7 @@
           "wasm_arg": 9764923
         }
       },
-      "node_id": 1
+      "node_id": 4
     },
     {
       "id": "encode_50",
@@ -743,7 +743,7 @@
           "wasm_arg": 9830460
         }
       },
-      "node_id": 2
+      "node_id": 5
     },
     {
       "id": "encode_51",
@@ -757,7 +757,7 @@
           "wasm_arg": 9895997
         }
       },
-      "node_id": 3
+      "node_id": 6
     },
     {
       "id": "encode_52",
@@ -771,7 +771,7 @@
           "wasm_arg": 9961534
         }
       },
-      "node_id": 0
+      "node_id": 7
     },
     {
       "id": "encode_53",
@@ -785,7 +785,7 @@
           "wasm_arg": 10027071
         }
       },
-      "node_id": 1
+      "node_id": 8
     },
     {
       "id": "encode_54",
@@ -799,7 +799,7 @@
           "wasm_arg": 10092608
         }
       },
-      "node_id": 2
+      "node_id": 0
     },
     {
       "id": "encode_55",
@@ -813,7 +813,7 @@
           "wasm_arg": 10158145
         }
       },
-      "node_id": 3
+      "node_id": 1
     },
     {
       "id": "encode_56",
@@ -827,7 +827,7 @@
           "wasm_arg": 10223682
         }
       },
-      "node_id": 0
+      "node_id": 2
     },
     {
       "id": "encode_57",
@@ -841,7 +841,7 @@
           "wasm_arg": 10289219
         }
       },
-      "node_id": 1
+      "node_id": 3
     },
     {
       "id": "encode_58",
@@ -855,7 +855,7 @@
           "wasm_arg": 10354756
         }
       },
-      "node_id": 2
+      "node_id": 4
     },
     {
       "id": "encode_59",
@@ -869,7 +869,7 @@
           "wasm_arg": 10420293
         }
       },
-      "node_id": 3
+      "node_id": 5
     },
     {
       "id": "train_0",
@@ -943,7 +943,7 @@
           "wasm_arg": 19923048
         }
       },
-      "node_id": 0,
+      "node_id": 4,
       "output_slot": 304
     },
     {
@@ -958,7 +958,7 @@
           "wasm_arg": 19988585
         }
       },
-      "node_id": 1,
+      "node_id": 5,
       "output_slot": 305
     },
     {
@@ -973,7 +973,7 @@
           "wasm_arg": 20054122
         }
       },
-      "node_id": 2,
+      "node_id": 6,
       "output_slot": 306
     },
     {
@@ -988,7 +988,7 @@
           "wasm_arg": 20119659
         }
       },
-      "node_id": 3,
+      "node_id": 7,
       "output_slot": 307
     },
     {
@@ -1003,7 +1003,7 @@
           "wasm_arg": 20185196
         }
       },
-      "node_id": 0,
+      "node_id": 8,
       "output_slot": 308
     },
     {
@@ -1018,7 +1018,7 @@
           "wasm_arg": 20250733
         }
       },
-      "node_id": 1,
+      "node_id": 0,
       "output_slot": 309
     },
     {
@@ -1033,7 +1033,7 @@
           "wasm_arg": 20316270
         }
       },
-      "node_id": 2,
+      "node_id": 1,
       "output_slot": 310
     },
     {
@@ -1048,7 +1048,7 @@
           "wasm_arg": 20381807
         }
       },
-      "node_id": 3,
+      "node_id": 2,
       "output_slot": 311
     },
     {
@@ -1063,7 +1063,7 @@
           "wasm_arg": 20447344
         }
       },
-      "node_id": 0,
+      "node_id": 3,
       "output_slot": 312
     },
     {
@@ -1078,7 +1078,7 @@
           "wasm_arg": 20512881
         }
       },
-      "node_id": 1,
+      "node_id": 4,
       "output_slot": 313
     },
     {
@@ -1093,7 +1093,7 @@
           "wasm_arg": 20578418
         }
       },
-      "node_id": 2,
+      "node_id": 5,
       "output_slot": 314
     },
     {
@@ -1108,7 +1108,7 @@
           "wasm_arg": 20643955
         }
       },
-      "node_id": 3,
+      "node_id": 6,
       "output_slot": 315
     },
     {
@@ -1123,7 +1123,7 @@
           "wasm_arg": 20709492
         }
       },
-      "node_id": 0,
+      "node_id": 7,
       "output_slot": 316
     },
     {
@@ -1138,7 +1138,7 @@
           "wasm_arg": 20775029
         }
       },
-      "node_id": 1,
+      "node_id": 8,
       "output_slot": 317
     },
     {
@@ -1153,7 +1153,7 @@
           "wasm_arg": 20840566
         }
       },
-      "node_id": 2,
+      "node_id": 0,
       "output_slot": 318
     },
     {
@@ -1168,7 +1168,7 @@
           "wasm_arg": 20906103
         }
       },
-      "node_id": 3,
+      "node_id": 1,
       "output_slot": 319
     },
     {
@@ -1183,7 +1183,7 @@
           "wasm_arg": 20971640
         }
       },
-      "node_id": 0,
+      "node_id": 2,
       "output_slot": 320
     },
     {
@@ -1198,7 +1198,7 @@
           "wasm_arg": 21037177
         }
       },
-      "node_id": 1,
+      "node_id": 3,
       "output_slot": 321
     },
     {
@@ -1213,7 +1213,7 @@
           "wasm_arg": 21102714
         }
       },
-      "node_id": 2,
+      "node_id": 4,
       "output_slot": 322
     },
     {
@@ -1228,7 +1228,7 @@
           "wasm_arg": 21168251
         }
       },
-      "node_id": 3,
+      "node_id": 5,
       "output_slot": 323
     },
     {
@@ -1243,7 +1243,7 @@
           "wasm_arg": 21233788
         }
       },
-      "node_id": 0,
+      "node_id": 6,
       "output_slot": 324
     },
     {
@@ -1258,7 +1258,7 @@
           "wasm_arg": 21299325
         }
       },
-      "node_id": 1,
+      "node_id": 7,
       "output_slot": 325
     },
     {
@@ -1273,7 +1273,7 @@
           "wasm_arg": 21364862
         }
       },
-      "node_id": 2,
+      "node_id": 8,
       "output_slot": 326
     },
     {
@@ -1288,7 +1288,7 @@
           "wasm_arg": 21430399
         }
       },
-      "node_id": 3,
+      "node_id": 0,
       "output_slot": 327
     },
     {
@@ -1303,7 +1303,7 @@
           "wasm_arg": 21495936
         }
       },
-      "node_id": 0,
+      "node_id": 1,
       "output_slot": 328
     },
     {
@@ -1318,7 +1318,7 @@
           "wasm_arg": 21561473
         }
       },
-      "node_id": 1,
+      "node_id": 2,
       "output_slot": 329
     },
     {
@@ -1333,7 +1333,7 @@
           "wasm_arg": 21627010
         }
       },
-      "node_id": 2,
+      "node_id": 3,
       "output_slot": 330
     },
     {
@@ -1348,7 +1348,7 @@
           "wasm_arg": 21692547
         }
       },
-      "node_id": 3,
+      "node_id": 4,
       "output_slot": 331
     },
     {
@@ -1363,7 +1363,7 @@
           "wasm_arg": 21758084
         }
       },
-      "node_id": 0,
+      "node_id": 5,
       "output_slot": 332
     },
     {
@@ -1378,7 +1378,7 @@
           "wasm_arg": 21823621
         }
       },
-      "node_id": 1,
+      "node_id": 6,
       "output_slot": 333
     },
     {
@@ -1393,7 +1393,7 @@
           "wasm_arg": 21889158
         }
       },
-      "node_id": 2,
+      "node_id": 7,
       "output_slot": 334
     },
     {
@@ -1408,7 +1408,7 @@
           "wasm_arg": 21954695
         }
       },
-      "node_id": 3,
+      "node_id": 8,
       "output_slot": 335
     },
     {
@@ -1483,7 +1483,7 @@
           "wasm_arg": 22282380
         }
       },
-      "node_id": 0,
+      "node_id": 4,
       "output_slot": 340
     },
     {
@@ -1498,7 +1498,7 @@
           "wasm_arg": 22347917
         }
       },
-      "node_id": 1,
+      "node_id": 5,
       "output_slot": 341
     },
     {
@@ -1513,7 +1513,7 @@
           "wasm_arg": 22413454
         }
       },
-      "node_id": 2,
+      "node_id": 6,
       "output_slot": 342
     },
     {
@@ -1528,7 +1528,7 @@
           "wasm_arg": 22478991
         }
       },
-      "node_id": 3,
+      "node_id": 7,
       "output_slot": 343
     },
     {
@@ -1543,7 +1543,7 @@
           "wasm_arg": 22544528
         }
       },
-      "node_id": 0,
+      "node_id": 8,
       "output_slot": 344
     },
     {
@@ -1558,7 +1558,7 @@
           "wasm_arg": 22610065
         }
       },
-      "node_id": 1,
+      "node_id": 0,
       "output_slot": 345
     },
     {
@@ -1573,7 +1573,7 @@
           "wasm_arg": 22675602
         }
       },
-      "node_id": 2,
+      "node_id": 1,
       "output_slot": 346
     },
     {
@@ -1588,7 +1588,7 @@
           "wasm_arg": 22741139
         }
       },
-      "node_id": 3,
+      "node_id": 2,
       "output_slot": 347
     },
     {
@@ -1603,7 +1603,7 @@
           "wasm_arg": 22806676
         }
       },
-      "node_id": 0,
+      "node_id": 3,
       "output_slot": 348
     },
     {
@@ -1618,7 +1618,7 @@
           "wasm_arg": 22872213
         }
       },
-      "node_id": 1,
+      "node_id": 4,
       "output_slot": 349
     },
     {
@@ -1633,7 +1633,7 @@
           "wasm_arg": 22937750
         }
       },
-      "node_id": 2,
+      "node_id": 5,
       "output_slot": 350
     },
     {
@@ -1648,7 +1648,7 @@
           "wasm_arg": 23003287
         }
       },
-      "node_id": 3,
+      "node_id": 6,
       "output_slot": 351
     },
     {
@@ -1663,7 +1663,7 @@
           "wasm_arg": 23068824
         }
       },
-      "node_id": 0,
+      "node_id": 7,
       "output_slot": 352
     },
     {
@@ -1678,7 +1678,7 @@
           "wasm_arg": 23134361
         }
       },
-      "node_id": 1,
+      "node_id": 8,
       "output_slot": 353
     },
     {
@@ -1693,7 +1693,7 @@
           "wasm_arg": 23199898
         }
       },
-      "node_id": 2,
+      "node_id": 0,
       "output_slot": 354
     },
     {
@@ -1708,7 +1708,7 @@
           "wasm_arg": 23265435
         }
       },
-      "node_id": 3,
+      "node_id": 1,
       "output_slot": 355
     },
     {
@@ -1723,7 +1723,7 @@
           "wasm_arg": 23330972
         }
       },
-      "node_id": 0,
+      "node_id": 2,
       "output_slot": 356
     },
     {
@@ -1738,7 +1738,7 @@
           "wasm_arg": 23396509
         }
       },
-      "node_id": 1,
+      "node_id": 3,
       "output_slot": 357
     },
     {
@@ -1753,7 +1753,7 @@
           "wasm_arg": 23462046
         }
       },
-      "node_id": 2,
+      "node_id": 4,
       "output_slot": 358
     },
     {
@@ -1768,7 +1768,7 @@
           "wasm_arg": 23527583
         }
       },
-      "node_id": 3,
+      "node_id": 5,
       "output_slot": 359
     },
     {
@@ -1777,7 +1777,12 @@
         "aggregate_train_local_0",
         "aggregate_train_local_1",
         "aggregate_train_local_2",
-        "aggregate_train_local_3"
+        "aggregate_train_local_3",
+        "aggregate_train_local_4",
+        "aggregate_train_local_5",
+        "aggregate_train_local_6",
+        "aggregate_train_local_7",
+        "aggregate_train_local_8"
       ],
       "kind": {
         "Aggregate": {
@@ -1786,7 +1791,12 @@
             "aggregate_train_local_0",
             "aggregate_train_local_1",
             "aggregate_train_local_2",
-            "aggregate_train_local_3"
+            "aggregate_train_local_3",
+            "aggregate_train_local_4",
+            "aggregate_train_local_5",
+            "aggregate_train_local_6",
+            "aggregate_train_local_7",
+            "aggregate_train_local_8"
           ]
         }
       },
@@ -1841,20 +1851,12 @@
       "node_id": 0,
       "deps": [
         "train_0",
-        "train_4",
-        "train_8",
-        "train_12",
-        "train_16",
-        "train_20",
-        "train_24",
-        "train_28",
-        "train_32",
+        "train_9",
+        "train_18",
+        "train_27",
         "train_36",
-        "train_40",
-        "train_44",
-        "train_48",
-        "train_52",
-        "train_56"
+        "train_45",
+        "train_54"
       ],
       "kind": {
         "Aggregate": {}
@@ -1865,20 +1867,12 @@
       "node_id": 1,
       "deps": [
         "train_1",
-        "train_5",
-        "train_9",
-        "train_13",
-        "train_17",
-        "train_21",
-        "train_25",
-        "train_29",
-        "train_33",
+        "train_10",
+        "train_19",
+        "train_28",
         "train_37",
-        "train_41",
-        "train_45",
-        "train_49",
-        "train_53",
-        "train_57"
+        "train_46",
+        "train_55"
       ],
       "kind": {
         "Aggregate": {}
@@ -1889,20 +1883,12 @@
       "node_id": 2,
       "deps": [
         "train_2",
-        "train_6",
-        "train_10",
-        "train_14",
-        "train_18",
-        "train_22",
-        "train_26",
-        "train_30",
-        "train_34",
+        "train_11",
+        "train_20",
+        "train_29",
         "train_38",
-        "train_42",
-        "train_46",
-        "train_50",
-        "train_54",
-        "train_58"
+        "train_47",
+        "train_56"
       ],
       "kind": {
         "Aggregate": {}
@@ -1913,20 +1899,89 @@
       "node_id": 3,
       "deps": [
         "train_3",
-        "train_7",
-        "train_11",
-        "train_15",
-        "train_19",
-        "train_23",
-        "train_27",
-        "train_31",
-        "train_35",
+        "train_12",
+        "train_21",
+        "train_30",
         "train_39",
-        "train_43",
-        "train_47",
-        "train_51",
-        "train_55",
+        "train_48",
+        "train_57"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_train_local_4",
+      "node_id": 4,
+      "deps": [
+        "train_4",
+        "train_13",
+        "train_22",
+        "train_31",
+        "train_40",
+        "train_49",
+        "train_58"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_train_local_5",
+      "node_id": 5,
+      "deps": [
+        "train_5",
+        "train_14",
+        "train_23",
+        "train_32",
+        "train_41",
+        "train_50",
         "train_59"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_train_local_6",
+      "node_id": 6,
+      "deps": [
+        "train_6",
+        "train_15",
+        "train_24",
+        "train_33",
+        "train_42",
+        "train_51"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_train_local_7",
+      "node_id": 7,
+      "deps": [
+        "train_7",
+        "train_16",
+        "train_25",
+        "train_34",
+        "train_43",
+        "train_52"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_train_local_8",
+      "node_id": 8,
+      "deps": [
+        "train_8",
+        "train_17",
+        "train_26",
+        "train_35",
+        "train_44",
+        "train_53"
       ],
       "kind": {
         "Aggregate": {}

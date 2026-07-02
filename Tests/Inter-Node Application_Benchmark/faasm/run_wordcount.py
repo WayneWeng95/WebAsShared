@@ -128,7 +128,11 @@ def main():
     args = ap.parse_args()
 
     env, nodes = load_env()
-    nodes = nodes[:max(1, min(args.nodes, len(nodes)))]
+    coord = nodes[0]                                        # node-0 = coordinator (runs the reduce)
+    wnodes = nodes[1:]                                      # workers only — node-0 excluded from maps
+    nodes = wnodes[:max(1, min(args.nodes, len(wnodes)))]
+    if -(-args.mappers // len(nodes)) > 16:                 # hard 16/node cap (ceil div)
+        sys.exit(f"[wc] 16/node cap: {args.mappers} mappers over {len(nodes)} nodes > 16/node")
     port = int(env.get("AGENT_PORT", "9600"))
     rh, rp = env["REDIS_HOST"], int(env.get("REDIS_PORT", "6379"))
     r = redis.Redis(host=rh, port=rp)
@@ -136,7 +140,7 @@ def main():
         r.ping()
     except Exception as ex:
         sys.exit(f"[wc] Redis unreachable at {rh}:{rp} — open protected-mode + bind on node 0 ({ex})")
-    for n in nodes:
+    for n in [coord] + nodes:                              # coord runs the reduce; workers run the maps
         try:
             call(n, port, "/health", timeout=5)
         except Exception as ex:
@@ -169,9 +173,9 @@ def main():
             h = call(n, port, "/launch", {"cmd": ["python3", WRAPPER, "map", uid, str(i)],
                                           "env": fenv, "tag": f"map_{i}"})["handle"]
             launched.append((n, h))
-        h = call(nodes[0], port, "/launch", {"cmd": ["python3", WRAPPER, "reduce", uid, str(N)],
-                                             "env": fenv, "tag": "reduce"})["handle"]
-        launched.append((nodes[0], h))
+        h = call(coord, port, "/launch", {"cmd": ["python3", WRAPPER, "reduce", uid, str(N)],
+                                          "env": fenv, "tag": "reduce"})["handle"]
+        launched.append((coord, h))
 
         done, ok, job_ms = set(), True, 0
         while len(done) < len(launched):

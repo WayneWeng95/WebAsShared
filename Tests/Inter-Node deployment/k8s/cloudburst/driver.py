@@ -33,6 +33,8 @@ import cloudpickle as cp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import wc_ops
+from mem_probe import MemSampler
+import exec_pool
 
 # Map-stage robustness knobs. A normal rep drains all N done signals in seconds, so
 # DONE_TIMEOUT only ever fires when a task is genuinely lost (its pod was evicted /
@@ -49,7 +51,7 @@ def task_json(uid, i, done_key):
             '"result_key":"%s_res_%d","done_key":"%s"}') % (i, uid, i, uid, i, done_key)
 
 
-def run_once(R, corpus_path, n, task_q):
+def run_once(R, corpus_path, n, task_q, cold=False):
     uid = uuid.uuid4().hex
     done_key = 'cb:done:' + uid
     R.delete(done_key)
@@ -64,6 +66,8 @@ def run_once(R, corpus_path, n, task_q):
     # whole corpus in Redis's query buffer and trip client-query-buffer-limit (1 GB).
     for i, ch in enumerate(chunks):
         R.set('%s_chunk_%d' % (uid, i), ch)
+    if cold:                                  # cold start: launch executors ON the map wave
+        exec_pool.launch_on_wave(n)           # (its latency is inside t0..t1 → cold makespan)
     for i in range(n):
         R.lpush(task_q, task_json(uid, i, done_key))
     split_ms = (time.time() - s0) * 1000.0
@@ -122,11 +126,13 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--corpus', default='TestData/corpus_4gb.txt')
     ap.add_argument('--fanout', type=int, default=60)
-    ap.add_argument('--reps', type=int, default=3)
     ap.add_argument('--redis-host', default=os.environ.get('REDIS_HOST', '10.10.1.2'))
     ap.add_argument('--redis-port', type=int, default=int(os.environ.get('REDIS_PORT', '30679')))
     ap.add_argument('--task-queue', default='cb:tasks')
     ap.add_argument('--expect', type=int, default=None, help='expected occurrences (gate)')
+    ap.add_argument('--warm-reps', type=int, default=12, help='warm reps (pool pre-launched)')
+    ap.add_argument('--cold-reps', type=int, default=3, help='cold reps (executors launched on-wave)')
+    ap.add_argument('--reps', type=int, default=None, help='ignored (kept for back-compat)')
     ap.add_argument('--csv')
     a = ap.parse_args()
 
@@ -139,34 +145,53 @@ def main():
         sys.exit('redis unreachable at %s:%d (%r)' % (a.redis_host, a.redis_port, e))
 
     size_mb = round(os.path.getsize(a.corpus) / (1024 * 1024))
-    print('[cloudburst-wc] corpus=%s (%d MB) fanout=%d reps=%d redis=%s:%d' %
-          (a.corpus, size_mb, a.fanout, a.reps, a.redis_host, a.redis_port), flush=True)
+    print('[cloudburst-wc] corpus=%s (%d MB) fanout=%d warm=%d cold=%d redis=%s:%d' %
+          (a.corpus, size_mb, a.fanout, a.warm_reps, a.cold_reps, a.redis_host, a.redis_port), flush=True)
 
-    mk_ms, tj_ms = [], []
+    mk_warm, mk_cold, tj_ms = [], [], []
     occ = uniq = None
     success = True
-    for r in range(a.reps):
-        m, tj, tot, u = run_once(R, a.corpus, a.fanout, a.task_queue)
-        mk_ms.append(m)
+    mem = MemSampler(a.redis_host, a.redis_port); mem.start()   # peak-memory-cost sampler
+
+    def _rep(r, cold):
+        nonlocal occ, uniq, success
+        m, tj, tot, u = run_once(R, a.corpus, a.fanout, a.task_queue, cold=cold)
         tj_ms.append(tj)
         if occ is None:
             occ, uniq = tot, u
         elif tot != occ:
-            print('[cloudburst-wc] GATE FAIL rep%d: occurrences %d != %d' % (r, tot, occ))
-            success = False
-        print('[cloudburst-wc] rep%d makespan=%.0f ms total_job=%.0f ms occ=%d unique=%d' %
-              (r, m, tj, tot, u), flush=True)
+            print('[cloudburst-wc] GATE FAIL %s rep%d: occurrences %d != %d' %
+                  ('cold' if cold else 'warm', r, tot, occ)); success = False
+        print('[cloudburst-wc] %s rep%d makespan=%.0f ms total_job=%.0f ms occ=%d unique=%d' %
+              ('cold' if cold else 'warm', r, m, tj, tot, u), flush=True)
+        return m
+
+    # COLD reps: pool starts at 0, executors launched on the map wave (launch in makespan).
+    for r in range(a.cold_reps):
+        exec_pool.teardown()
+        mk_cold.append(_rep(r, True))
+    # WARM reps: bring the pool up once (not timed), then reuse it.
+    exec_pool.launch_on_wave(a.fanout)
+    for r in range(a.warm_reps):
+        mk_warm.append(_rep(r, False))
+    exec_pool.teardown()             # leave pool at 0 for the next workload's cold reps
+
+    mem.stop.set(); mem.join()
+    mem_total_mb, mem_max_mb, redis_peak_mb = mem.result()
 
     if a.expect is not None and occ != a.expect:
         print('[cloudburst-wc] GATE FAIL: occurrences %d != expected %d' % (occ, a.expect))
         success = False
 
-    mk_mean = statistics.mean(mk_ms)
-    mk_std = statistics.pstdev(mk_ms) if len(mk_ms) > 1 else 0.0
+    mk_mean = statistics.mean(mk_warm) if mk_warm else 0.0
+    mk_std = statistics.pstdev(mk_warm) if len(mk_warm) > 1 else 0.0
+    cold_mean = statistics.mean(mk_cold) if mk_cold else 0.0
+    cold_std = statistics.pstdev(mk_cold) if len(mk_cold) > 1 else 0.0
     tj_mean = statistics.mean(tj_ms)
-    print('[cloudburst-wc] === size=%d MB fanout=%d makespan=%.0f ± %.1f ms '
-          'total_job=%.0f ms occ=%d %s ===' %
-          (size_mb, a.fanout, mk_mean, mk_std, tj_mean, occ, 'OK' if success else 'GATE-FAIL'))
+    print('[cloudburst-wc] === size=%d MB fanout=%d warm_makespan=%.0f ± %.1f ms '
+          'cold_makespan=%.0f ± %.1f ms total_job=%.0f ms occ=%d %s ===' %
+          (size_mb, a.fanout, mk_mean, mk_std, cold_mean, cold_std, tj_mean, occ,
+           'OK' if success else 'GATE-FAIL'))
 
     if a.csv:
         os.makedirs(os.path.dirname(os.path.abspath(a.csv)), exist_ok=True)
@@ -174,10 +199,13 @@ def main():
         with open(a.csv, 'a') as f:
             if new:
                 f.write('size_mb,mappers,nodes_used,makespan_mean_ms,makespan_std_ms,'
-                        'total_job_mean_ms,occurrences,expect,success,reps\n')
-            f.write('%d,%d,4,%.0f,%.1f,%.0f,%d,%s,%s,%d\n' %
+                        'total_job_mean_ms,occurrences,expect,success,reps,'
+                        'mem_max_mb,mem_total_mb,redis_peak_mb,'
+                        'cold_makespan_mean_ms,cold_makespan_std_ms\n')
+            f.write('%d,%d,8,%.0f,%.1f,%.0f,%d,%s,%s,%d,%.0f,%.0f,%.0f,%.0f,%.1f\n' %
                     (size_mb, a.fanout, mk_mean, mk_std, tj_mean, occ,
-                     a.expect if a.expect is not None else occ, success, a.reps))
+                     a.expect if a.expect is not None else occ, success, a.warm_reps,
+                     mem_max_mb, mem_total_mb, redis_peak_mb, cold_mean, cold_std))
     sys.exit(0 if success else 1)
 
 

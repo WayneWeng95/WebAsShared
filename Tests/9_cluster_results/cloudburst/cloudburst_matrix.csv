@@ -1,0 +1,2 @@
+matrix_n,workers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,gflops,checksum,expect,success,reps,mem_max_mb,mem_total_mb,redis_peak_mb,cold_makespan_mean_ms,cold_makespan_std_ms
+4096,128,8,7601,399.3,128948,18.081,1391095867672,1391095867672,True,12,1157,9592,1153,15018,145.0

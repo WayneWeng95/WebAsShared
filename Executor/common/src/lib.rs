@@ -85,7 +85,15 @@ pub const TARGET_OFFSET: usize = 0x0100_0000;   // 16 MiB
 pub const KIB: ShmOffset = 1024;
 pub const MIB: ShmOffset = 1024 * 1024;
 
-pub const INITIAL_SHM_SIZE: ShmOffset = 64 * MIB;
+// Size of the SHM file + the RDMA MR (MR1) registered at startup, and the initial mapping.
+// This is a HARD ceiling: bytes past it are RDMA-unreachable even after the SHM grows
+// (see host/src/runtime/remote/sender_initiated.rs) and remote reads of the over-cap tail
+// silently return zeros (see host/src/shm.rs). So any node's SHM working set — replicated
+// inputs (matrix A/B), a per-node input slice (word_count), plus fan-out intermediates —
+// must fit under it. Raised 64 MiB → 1 GiB so the 9-node comparison inputs fit per node:
+// matrix N=4096 replicate ≈ 286 MiB, word_count 4 GiB sliced 1/9 ≈ 480 MiB. (u32 offsets →
+// must stay < DIRECT_LIMIT ≈ 3.74 GiB; the SHM file is sparse via set_len, but reg_mr pins it.)
+pub const INITIAL_SHM_SIZE: ShmOffset = 1024 * MIB;
 
 /// **Engine page size — the single tunable knob for the page-chain granularity.**
 ///

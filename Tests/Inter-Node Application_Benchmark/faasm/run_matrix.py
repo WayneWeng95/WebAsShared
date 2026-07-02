@@ -62,7 +62,7 @@ def main():
     ap.add_argument("--csv", default=os.path.join(HERE, "results_matrix.csv"))
     args = ap.parse_args()
 
-    nodes = nodes[:max(1, min(args.nodes, len(nodes)))]
+    nodes = fl.map_nodes(nodes, args.nodes)   # compute faaslets on WORKER nodes only (node-0 = coordinator)
     N, W = args.matrix_n, args.workers
     R, C = grid(W)
     if N % R or N % C:

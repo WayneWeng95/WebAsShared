@@ -12,9 +12,26 @@ spec:
     metadata:
       annotations:
         autoscaling.knative.dev/min-scale: "60"
-        autoscaling.knative.dev/max-scale: "60"
+        autoscaling.knative.dev/max-scale: "128"   # 16/node × 8 workers ceiling
         autoscaling.knative.dev/target: "1"
     spec:
+      # 16/node cap: keep mapper pods OFF node-0 (control-plane/coordinator) and spread
+      # ≤16 per worker. NOTE: these podSpec fields are feature-gated in Knative — enable once:
+      #   kubectl -n knative-serving patch cm config-features --type merge -p \
+      #     '{"data":{"kubernetes.podspec-affinity":"enabled","kubernetes.podspec-topologyspreadconstraints":"enabled"}}'
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels: { serving.knative.dev/service: wc-mapper }
       containerConcurrency: 1
       timeoutSeconds: 600
       containers:

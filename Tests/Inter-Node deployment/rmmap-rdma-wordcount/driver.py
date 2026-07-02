@@ -67,6 +67,9 @@ def run_once(server_ip, port, n, nodes, self_host):
     by_node = {nd: [] for nd in nodes}
     for i in range(n):
         by_node[nodes[i % len(nodes)]].append(i)
+    _mx = max((len(v) for v in by_node.values()), default=0)   # hard 16/node cap
+    if _mx > 16:
+        raise SystemExit('16/node cap exceeded: %d mappers on one node over %d nodes' % (_mx, len(nodes)))
     t0 = time.time()
     with ThreadPoolExecutor(max_workers=len(nodes)) as pool:
         futs = [pool.submit(run_node, nd, server_ip, port, by_node[nd], self_host)
@@ -164,10 +167,14 @@ def main():
         with open(a.csv, 'a') as f:
             if new:
                 f.write('size_mb,mappers,nodes_used,variant,makespan_mean_ms,makespan_std_ms,'
-                        'total_job_mean_ms,occurrences,expect,success,reps\n')
-            f.write('%d,%d,%d,rdma,%.0f,%.1f,%.0f,%d,%s,%s,%d\n' %
+                        'total_job_mean_ms,occurrences,expect,success,reps,'
+                        'cold_start_ms,cold_makespan_ms\n')
+            # cold_start_ms = the one-time RDMA MR publish/reg_mr (RMMap's cold start, the
+            # analogue of Cloudburst's on-wave pod launch); cold_makespan = warm + that publish.
+            f.write('%d,%d,%d,rdma,%.0f,%.1f,%.0f,%d,%s,%s,%d,%.0f,%.0f\n' %
                     (size_mb, a.fanout, len(nodes), mk_mean, mk_std, tj_mean, occ,
-                     a.expect if a.expect is not None else occ, success, a.reps))
+                     a.expect if a.expect is not None else occ, success, a.reps,
+                     publish_ms, mk_mean + publish_ms))
     sys.exit(0 if success else 1)
 
 

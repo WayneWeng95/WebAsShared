@@ -69,7 +69,7 @@ def main():
     ap.add_argument("--csv", default=os.path.join(HERE, "results_finra.csv"))
     args = ap.parse_args()
 
-    nodes = nodes[:max(1, min(args.nodes, len(nodes)))]
+    nodes = fl.map_nodes(nodes, args.nodes)   # compute faaslets on WORKER nodes only (node-0 = coordinator)
     S = max(1, round((args.fanout - len(FINRA_STATEFUL)) / len(FINRA_STATELESS)))
     n_workers = len(FINRA_STATELESS) * S + len(FINRA_STATEFUL)
     port = int(env.get("AGENT_PORT", "9600"))

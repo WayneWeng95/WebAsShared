@@ -1,7 +1,7 @@
 {
   "shm_path_prefix": "/dev/shm/rdma_matrix_ap",
   "log_level": "info",
-  "total_nodes": 4,
+  "total_nodes": 9,
   "transfer": true,
   "placement_policy": "balanced",
   "nodes": [
@@ -44,7 +44,7 @@
         "Func": {
           "func": "mat_tile",
           "arg": 10,
-          "wasm_arg": 295936
+          "wasm_arg": 558080
         }
       }
     },
@@ -57,7 +57,7 @@
         "Func": {
           "func": "mat_block",
           "arg": 100,
-          "wasm_arg": 295936
+          "wasm_arg": 558080
         }
       },
       "node_id": 0,
@@ -72,7 +72,7 @@
         "Func": {
           "func": "mat_block",
           "arg": 101,
-          "wasm_arg": 820224
+          "wasm_arg": 2655232
         }
       },
       "node_id": 1,
@@ -87,7 +87,7 @@
         "Func": {
           "func": "mat_block",
           "arg": 102,
-          "wasm_arg": 1344512
+          "wasm_arg": 4752384
         }
       },
       "node_id": 2,
@@ -102,7 +102,7 @@
         "Func": {
           "func": "mat_block",
           "arg": 103,
-          "wasm_arg": 1868800
+          "wasm_arg": 6849536
         }
       },
       "node_id": 3,
@@ -117,10 +117,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 104,
-          "wasm_arg": 17073152
+          "wasm_arg": 67666944
         }
       },
-      "node_id": 0,
+      "node_id": 4,
       "output_slot": 104
     },
     {
@@ -132,10 +132,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 105,
-          "wasm_arg": 17597440
+          "wasm_arg": 69764096
         }
       },
-      "node_id": 1,
+      "node_id": 5,
       "output_slot": 105
     },
     {
@@ -147,10 +147,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 106,
-          "wasm_arg": 18121728
+          "wasm_arg": 71861248
         }
       },
-      "node_id": 2,
+      "node_id": 6,
       "output_slot": 106
     },
     {
@@ -162,10 +162,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 107,
-          "wasm_arg": 18646016
+          "wasm_arg": 73958400
         }
       },
-      "node_id": 3,
+      "node_id": 7,
       "output_slot": 107
     },
     {
@@ -177,10 +177,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 108,
-          "wasm_arg": 33850368
+          "wasm_arg": 134775808
         }
       },
-      "node_id": 0,
+      "node_id": 8,
       "output_slot": 108
     },
     {
@@ -192,10 +192,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 109,
-          "wasm_arg": 34374656
+          "wasm_arg": 136872960
         }
       },
-      "node_id": 1,
+      "node_id": 0,
       "output_slot": 109
     },
     {
@@ -207,10 +207,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 110,
-          "wasm_arg": 34898944
+          "wasm_arg": 138970112
         }
       },
-      "node_id": 2,
+      "node_id": 1,
       "output_slot": 110
     },
     {
@@ -222,10 +222,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 111,
-          "wasm_arg": 35423232
+          "wasm_arg": 141067264
         }
       },
-      "node_id": 3,
+      "node_id": 2,
       "output_slot": 111
     },
     {
@@ -237,10 +237,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 112,
-          "wasm_arg": 50627584
+          "wasm_arg": 201884672
         }
       },
-      "node_id": 0,
+      "node_id": 3,
       "output_slot": 112
     },
     {
@@ -252,10 +252,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 113,
-          "wasm_arg": 51151872
+          "wasm_arg": 203981824
         }
       },
-      "node_id": 1,
+      "node_id": 4,
       "output_slot": 113
     },
     {
@@ -267,10 +267,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 114,
-          "wasm_arg": 51676160
+          "wasm_arg": 206078976
         }
       },
-      "node_id": 2,
+      "node_id": 5,
       "output_slot": 114
     },
     {
@@ -282,10 +282,10 @@
         "Func": {
           "func": "mat_block",
           "arg": 115,
-          "wasm_arg": 52200448
+          "wasm_arg": 208176128
         }
       },
-      "node_id": 3,
+      "node_id": 6,
       "output_slot": 115
     },
     {
@@ -294,7 +294,12 @@
         "aggregate_local_0",
         "aggregate_local_1",
         "aggregate_local_2",
-        "aggregate_local_3"
+        "aggregate_local_3",
+        "aggregate_local_4",
+        "aggregate_local_5",
+        "aggregate_local_6",
+        "aggregate_local_7",
+        "aggregate_local_8"
       ],
       "kind": {
         "Aggregate": {
@@ -303,7 +308,12 @@
             "aggregate_local_0",
             "aggregate_local_1",
             "aggregate_local_2",
-            "aggregate_local_3"
+            "aggregate_local_3",
+            "aggregate_local_4",
+            "aggregate_local_5",
+            "aggregate_local_6",
+            "aggregate_local_7",
+            "aggregate_local_8"
           ]
         }
       },
@@ -345,9 +355,7 @@
       "node_id": 0,
       "deps": [
         "block_0_0",
-        "block_1_0",
-        "block_2_0",
-        "block_3_0"
+        "block_2_1"
       ],
       "kind": {
         "Aggregate": {}
@@ -358,9 +366,7 @@
       "node_id": 1,
       "deps": [
         "block_0_1",
-        "block_1_1",
-        "block_2_1",
-        "block_3_1"
+        "block_2_2"
       ],
       "kind": {
         "Aggregate": {}
@@ -371,9 +377,7 @@
       "node_id": 2,
       "deps": [
         "block_0_2",
-        "block_1_2",
-        "block_2_2",
-        "block_3_2"
+        "block_2_3"
       ],
       "kind": {
         "Aggregate": {}
@@ -384,9 +388,60 @@
       "node_id": 3,
       "deps": [
         "block_0_3",
-        "block_1_3",
-        "block_2_3",
+        "block_3_0"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_4",
+      "node_id": 4,
+      "deps": [
+        "block_1_0",
+        "block_3_1"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_5",
+      "node_id": 5,
+      "deps": [
+        "block_1_1",
+        "block_3_2"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_6",
+      "node_id": 6,
+      "deps": [
+        "block_1_2",
         "block_3_3"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_7",
+      "node_id": 7,
+      "deps": [
+        "block_1_3"
+      ],
+      "kind": {
+        "Aggregate": {}
+      }
+    },
+    {
+      "id": "aggregate_local_8",
+      "node_id": 8,
+      "deps": [
+        "block_2_0"
       ],
       "kind": {
         "Aggregate": {}

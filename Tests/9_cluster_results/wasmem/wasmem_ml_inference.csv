@@ -1,0 +1,2 @@
+samples,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,accuracy_pct,prediction_checksum,expect,success,reps,total_mem_mb,mem_max_mb
+6000000,120,9,3426,153.9,26778,74.29,18614792,18614792,True,3,2575,287

@@ -88,32 +88,35 @@ for wl in COLOR:
         w = [r for r in w if int(r["threads"]) in ticks]   # only 16/48/96/144 points
         ps = POL_STYLE.get(pol, POL_STYLE["n/a"])
         thr = [int(r["threads"]) for r in w]; tp = colf(w, "throughput_mb_s", "throughput_ev_s"); tp0 = tp[0]
-        sc = [v/tp0 if (v and tp0) else None for v in tp]
+        # weak scaling grows the load with the thread count, so raw throughput
+        # scaling (tp/tp0) rises to p/16 ideally. Normalise by the load ratio
+        # (load/load0) so the ideal line is a flat 1× — i.e. per-unit-of-work speedup.
+        ld = colf(w, "total_mb", "events"); ld0 = ld[0]
+        sc = [(v/tp0)/(l/ld0) if (v and tp0 and l and ld0) else None for v,l in zip(tp,ld)]
         X = list(thr)
         ax_w.plot(X, sc, marker=ps["marker"], ls=ps["ls"], color=COLOR[wl], lw=2, ms=8,
                   mfc=(COLOR[wl] if ps["mfc"]=="full" else "white"), label=WLABEL[wl])
         for p,v in zip(thr,sc):
-            if v and f"{v:.1f}" != "1.0":     # below the node; drop 1.0× baseline
-                above = (wl == "word_count" and p == 48)   # lift the first WordCount (2.4×) above
-                ax_w.annotate(f"{v:.1f}×", (p,v), textcoords="offset points",
-                              xytext=(0, 8 if above else -8), ha="center",
-                              va="bottom" if above else "top",
+            if v and f"{v:.2f}" != "1.00":    # drop the 1.00× baseline point
+                ax_w.annotate(f"{v:.2f}×", (p,v), textcoords="offset points",
+                              xytext=(0,-8), ha="center", va="top",
                               fontsize=VALUE_SIZE, fontweight="bold", color=COLOR[wl])
 
-for ax, title in (
-    (ax_s, "Strong scaling"),
-    (ax_w, "Weak scaling"),
+for ax, title, ideal, ideal_lbl, ytop in (
+    # strong: ideal speedup is linear (p/16); weak: normalised by load, so ideal is a flat 1×.
+    (ax_s, "Strong scaling", [t/16 for t in ticks], "ideal (linear), = compute", ymax),
+    (ax_w, "Weak scaling",   [1 for _ in ticks],    "ideal (flat), = 1×",         1.6),
 ):
-    ax.plot(ticks, [t/16 for t in ticks], "k--", alpha=.55, label="ideal (linear), = compute")
+    ax.plot(ticks, ideal, "k--", alpha=.55, label=ideal_lbl)
     ax.set_xticks(ticks)
     ax.set_xticklabels([str(t) for t in ticks])      # proportional spacing → straight ideal
     ax.tick_params(axis="both", labelsize=TICK_SIZE)
-    ax.set_ylabel("throughput scaling", fontsize=YLABEL_SIZE)
+    ax.set_ylabel("speedup", fontsize=YLABEL_SIZE)
     ax.set_xlabel("number of executors", fontsize=LABEL_SIZE)
     # subplot title at the very bottom, below the axis label (pushed down to fill
     # the empty band so there's little blank under it on the fixed 9×4.5 canvas)
     ax.text(0.5, -0.24, title, transform=ax.transAxes, ha="center", fontweight="bold", fontsize=18)
-    ax.set_ylim(0, ymax); ax.grid(True, alpha=.3); ax.legend(loc="upper left", fontsize=LEGEND_SIZE)
+    ax.set_ylim(0, ytop); ax.grid(True, alpha=.3); ax.legend(loc="upper left", fontsize=LEGEND_SIZE)
 
 fig.subplots_adjust(left=0.085, right=0.985, top=0.97, bottom=0.20, wspace=0.22)
 for ext in ("pdf","png"):

@@ -1,0 +1,3747 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "rr_aggregate_train_local_4_from_4",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 4,
+            "slot": 1205,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_train_local_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 1203,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_train_local_6_from_6",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 6,
+            "slot": 1207,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_train_local_8_from_8",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 8,
+            "slot": 1209,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_train_local_5_from_5",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 5,
+            "slot": 1206,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_train_local_3_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 1204,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_train_local_1_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 1202,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_train_local_7_from_7",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 7,
+            "slot": 1208,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml_training_6m.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_0"
+        ],
+        "id": "partition_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864330,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6553610,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_9",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7143443,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_18",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7733276,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_27",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8323109,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_36",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8912942,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_45",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9502775,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_54",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10092608,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_63",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10682441,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_72",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11272274,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_81",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11862107,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_90",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12451940,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_99",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13041773,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_108",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13631606,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_0"
+        ],
+        "id": "encode_117",
+        "kind": {
+          "WasmVoid": {
+            "arg": 14221439,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_0"
+        ],
+        "id": "train_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19660900,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_9"
+        ],
+        "id": "train_9",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20250733,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_18"
+        ],
+        "id": "train_18",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20840566,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_27"
+        ],
+        "id": "train_27",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21430399,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_36"
+        ],
+        "id": "train_36",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22020232,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_45"
+        ],
+        "id": "train_45",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22610065,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_54"
+        ],
+        "id": "train_54",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23199898,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_63"
+        ],
+        "id": "train_63",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23789731,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_72"
+        ],
+        "id": "train_72",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24379564,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_81"
+        ],
+        "id": "train_81",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24969397,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_90"
+        ],
+        "id": "train_90",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25559230,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_99"
+        ],
+        "id": "train_99",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26149063,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_108"
+        ],
+        "id": "train_108",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26738896,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_117"
+        ],
+        "id": "train_117",
+        "kind": {
+          "WasmVoid": {
+            "arg": 27328729,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_0",
+          "rr_aggregate_train_local_1_from_1",
+          "rr_aggregate_train_local_2_from_2",
+          "rr_aggregate_train_local_3_from_3",
+          "rr_aggregate_train_local_4_from_4",
+          "rr_aggregate_train_local_5_from_5",
+          "rr_aggregate_train_local_6_from_6",
+          "rr_aggregate_train_local_7_from_7",
+          "rr_aggregate_train_local_8_from_8"
+        ],
+        "id": "aggregate_train",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1200,
+            "upstream": [
+              2,
+              1202,
+              1203,
+              1204,
+              1205,
+              1206,
+              1207,
+              1208,
+              1209
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train"
+        ],
+        "id": "aggregate_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 1201,
+            "upstream": [
+              1200
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_global"
+        ],
+        "id": "update",
+        "kind": {
+          "WasmVoid": {
+            "arg": 1201,
+            "func": "sgd_update"
+          }
+        }
+      },
+      {
+        "deps": [
+          "update"
+        ],
+        "id": "validate",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864420,
+            "func": "sgd_validate"
+          }
+        }
+      },
+      {
+        "deps": [
+          "validate"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/ml_training_ap_result.txt",
+            "slot": 1
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_0",
+          "train_9",
+          "train_18",
+          "train_27",
+          "train_36",
+          "train_45",
+          "train_54",
+          "train_63",
+          "train_72",
+          "train_81",
+          "train_90",
+          "train_99",
+          "train_108",
+          "train_117"
+        ],
+        "id": "aggregate_train_local_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 2,
+            "upstream": [
+              300,
+              309,
+              318,
+              327,
+              336,
+              345,
+              354,
+              363,
+              372,
+              381,
+              390,
+              399,
+              408,
+              417
+            ]
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "deps": [],
+        "id": "load_1",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml_training_6m.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_1"
+        ],
+        "id": "partition_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864330,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6619147,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_10",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7208980,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_19",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7798813,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_28",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8388646,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_37",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8978479,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_46",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9568312,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_55",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10158145,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_64",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10747978,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_73",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11337811,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_82",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11927644,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_91",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12517477,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_100",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13107310,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_109",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13697143,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_1"
+        ],
+        "id": "encode_118",
+        "kind": {
+          "WasmVoid": {
+            "arg": 14286976,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_1"
+        ],
+        "id": "train_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19726437,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_10"
+        ],
+        "id": "train_10",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20316270,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_19"
+        ],
+        "id": "train_19",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20906103,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_28"
+        ],
+        "id": "train_28",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21495936,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_37"
+        ],
+        "id": "train_37",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22085769,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_46"
+        ],
+        "id": "train_46",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22675602,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_55"
+        ],
+        "id": "train_55",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23265435,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_64"
+        ],
+        "id": "train_64",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23855268,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_73"
+        ],
+        "id": "train_73",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24445101,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_82"
+        ],
+        "id": "train_82",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25034934,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_91"
+        ],
+        "id": "train_91",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25624767,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_100"
+        ],
+        "id": "train_100",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26214600,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_109"
+        ],
+        "id": "train_109",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26804433,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_118"
+        ],
+        "id": "train_118",
+        "kind": {
+          "WasmVoid": {
+            "arg": 27394266,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_1",
+          "train_10",
+          "train_19",
+          "train_28",
+          "train_37",
+          "train_46",
+          "train_55",
+          "train_64",
+          "train_73",
+          "train_82",
+          "train_91",
+          "train_100",
+          "train_109",
+          "train_118"
+        ],
+        "id": "aggregate_train_local_1",
+        "kind": {
+          "Aggregate": {
+            "downstream": 3,
+            "upstream": [
+              301,
+              310,
+              319,
+              328,
+              337,
+              346,
+              355,
+              364,
+              373,
+              382,
+              391,
+              400,
+              409,
+              418
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_1"
+        ],
+        "id": "rs_aggregate_train_local_1_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 3,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "deps": [],
+        "id": "load_2",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml_training_6m.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_2"
+        ],
+        "id": "partition_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864330,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6684684,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_11",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7274517,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_20",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864350,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_29",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8454183,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_38",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9044016,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_47",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9633849,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_56",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10223682,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_65",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10813515,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_74",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11403348,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_83",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11993181,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_92",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12583014,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_101",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13172847,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_110",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13762680,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_2"
+        ],
+        "id": "encode_119",
+        "kind": {
+          "WasmVoid": {
+            "arg": 14352513,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_2"
+        ],
+        "id": "train_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19791974,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_11"
+        ],
+        "id": "train_11",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20381807,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_20"
+        ],
+        "id": "train_20",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20971640,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_29"
+        ],
+        "id": "train_29",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21561473,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_38"
+        ],
+        "id": "train_38",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22151306,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_47"
+        ],
+        "id": "train_47",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22741139,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_56"
+        ],
+        "id": "train_56",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23330972,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_65"
+        ],
+        "id": "train_65",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23920805,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_74"
+        ],
+        "id": "train_74",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24510638,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_83"
+        ],
+        "id": "train_83",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25100471,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_92"
+        ],
+        "id": "train_92",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25690304,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_101"
+        ],
+        "id": "train_101",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26280137,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_110"
+        ],
+        "id": "train_110",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26869970,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_119"
+        ],
+        "id": "train_119",
+        "kind": {
+          "WasmVoid": {
+            "arg": 27459803,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_2",
+          "train_11",
+          "train_20",
+          "train_29",
+          "train_38",
+          "train_47",
+          "train_56",
+          "train_65",
+          "train_74",
+          "train_83",
+          "train_92",
+          "train_101",
+          "train_110",
+          "train_119"
+        ],
+        "id": "aggregate_train_local_2",
+        "kind": {
+          "Aggregate": {
+            "downstream": 4,
+            "upstream": [
+              302,
+              311,
+              320,
+              329,
+              338,
+              347,
+              356,
+              365,
+              374,
+              383,
+              392,
+              401,
+              410,
+              419
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_2"
+        ],
+        "id": "rs_aggregate_train_local_2_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 4,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "deps": [],
+        "id": "load_3",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml_training_6m.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_3"
+        ],
+        "id": "partition_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864330,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6750221,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_12",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7340054,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_21",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7929887,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_30",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8519720,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_39",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9109553,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_48",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9699386,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_57",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10289219,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_66",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10879052,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_75",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11468885,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_84",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12058718,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_93",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12648551,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_102",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13238384,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_3"
+        ],
+        "id": "encode_111",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13828217,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_3"
+        ],
+        "id": "train_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19857511,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_12"
+        ],
+        "id": "train_12",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20447344,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_21"
+        ],
+        "id": "train_21",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21037177,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_30"
+        ],
+        "id": "train_30",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21627010,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_39"
+        ],
+        "id": "train_39",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22216843,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_48"
+        ],
+        "id": "train_48",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22806676,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_57"
+        ],
+        "id": "train_57",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23396509,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_66"
+        ],
+        "id": "train_66",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23986342,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_75"
+        ],
+        "id": "train_75",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24576175,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_84"
+        ],
+        "id": "train_84",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25166008,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_93"
+        ],
+        "id": "train_93",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25755841,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_102"
+        ],
+        "id": "train_102",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26345674,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_111"
+        ],
+        "id": "train_111",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26935507,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_3",
+          "train_12",
+          "train_21",
+          "train_30",
+          "train_39",
+          "train_48",
+          "train_57",
+          "train_66",
+          "train_75",
+          "train_84",
+          "train_93",
+          "train_102",
+          "train_111"
+        ],
+        "id": "aggregate_train_local_3",
+        "kind": {
+          "Aggregate": {
+            "downstream": 5,
+            "upstream": [
+              303,
+              312,
+              321,
+              330,
+              339,
+              348,
+              357,
+              366,
+              375,
+              384,
+              393,
+              402,
+              411
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_3"
+        ],
+        "id": "rs_aggregate_train_local_3_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 5,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "4": [
+      {
+        "deps": [],
+        "id": "load_4",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml_training_6m.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_4"
+        ],
+        "id": "partition_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864330,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6815758,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7405591,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_22",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7995424,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_31",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8585257,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_40",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9175090,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_49",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9764923,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_58",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10354756,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_67",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10944589,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_76",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11534422,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_85",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12124255,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_94",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12714088,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_103",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13303921,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_4"
+        ],
+        "id": "encode_112",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13893754,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_4"
+        ],
+        "id": "train_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19923048,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_13"
+        ],
+        "id": "train_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20512881,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_22"
+        ],
+        "id": "train_22",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21102714,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_31"
+        ],
+        "id": "train_31",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21692547,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_40"
+        ],
+        "id": "train_40",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22282380,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_49"
+        ],
+        "id": "train_49",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22872213,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_58"
+        ],
+        "id": "train_58",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23462046,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_67"
+        ],
+        "id": "train_67",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24051879,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_76"
+        ],
+        "id": "train_76",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24641712,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_85"
+        ],
+        "id": "train_85",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25231545,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_94"
+        ],
+        "id": "train_94",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25821378,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_103"
+        ],
+        "id": "train_103",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26411211,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_112"
+        ],
+        "id": "train_112",
+        "kind": {
+          "WasmVoid": {
+            "arg": 27001044,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_4",
+          "train_13",
+          "train_22",
+          "train_31",
+          "train_40",
+          "train_49",
+          "train_58",
+          "train_67",
+          "train_76",
+          "train_85",
+          "train_94",
+          "train_103",
+          "train_112"
+        ],
+        "id": "aggregate_train_local_4",
+        "kind": {
+          "Aggregate": {
+            "downstream": 6,
+            "upstream": [
+              304,
+              313,
+              322,
+              331,
+              340,
+              349,
+              358,
+              367,
+              376,
+              385,
+              394,
+              403,
+              412
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_4"
+        ],
+        "id": "rs_aggregate_train_local_4_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 6,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "5": [
+      {
+        "deps": [],
+        "id": "load_5",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml_training_6m.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_5"
+        ],
+        "id": "partition_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864330,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6881295,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7471128,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_23",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8060961,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_32",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8650794,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_41",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9240627,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_50",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9830460,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_59",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10420293,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_68",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11010126,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_77",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11599959,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_86",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12189792,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_95",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12779625,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_104",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13369458,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_5"
+        ],
+        "id": "encode_113",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13959291,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_5"
+        ],
+        "id": "train_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 19988585,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_14"
+        ],
+        "id": "train_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20578418,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_23"
+        ],
+        "id": "train_23",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21168251,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_32"
+        ],
+        "id": "train_32",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21758084,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_41"
+        ],
+        "id": "train_41",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22347917,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_50"
+        ],
+        "id": "train_50",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22937750,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_59"
+        ],
+        "id": "train_59",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23527583,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_68"
+        ],
+        "id": "train_68",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24117416,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_77"
+        ],
+        "id": "train_77",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24707249,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_86"
+        ],
+        "id": "train_86",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25297082,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_95"
+        ],
+        "id": "train_95",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25886915,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_104"
+        ],
+        "id": "train_104",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26476748,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_113"
+        ],
+        "id": "train_113",
+        "kind": {
+          "WasmVoid": {
+            "arg": 27066581,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_5",
+          "train_14",
+          "train_23",
+          "train_32",
+          "train_41",
+          "train_50",
+          "train_59",
+          "train_68",
+          "train_77",
+          "train_86",
+          "train_95",
+          "train_104",
+          "train_113"
+        ],
+        "id": "aggregate_train_local_5",
+        "kind": {
+          "Aggregate": {
+            "downstream": 7,
+            "upstream": [
+              305,
+              314,
+              323,
+              332,
+              341,
+              350,
+              359,
+              368,
+              377,
+              386,
+              395,
+              404,
+              413
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_5"
+        ],
+        "id": "rs_aggregate_train_local_5_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 7,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "6": [
+      {
+        "deps": [],
+        "id": "load_6",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml_training_6m.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_6"
+        ],
+        "id": "partition_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864330,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 6946832,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7536665,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_24",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8126498,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_33",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8716331,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_42",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9306164,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_51",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9895997,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_60",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10485830,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_69",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11075663,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_78",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11665496,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_87",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12255329,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_96",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12845162,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_105",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13434995,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_6"
+        ],
+        "id": "encode_114",
+        "kind": {
+          "WasmVoid": {
+            "arg": 14024828,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_6"
+        ],
+        "id": "train_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20054122,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_15"
+        ],
+        "id": "train_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20643955,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_24"
+        ],
+        "id": "train_24",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21233788,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_33"
+        ],
+        "id": "train_33",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21823621,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_42"
+        ],
+        "id": "train_42",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22413454,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_51"
+        ],
+        "id": "train_51",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23003287,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_60"
+        ],
+        "id": "train_60",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23593120,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_69"
+        ],
+        "id": "train_69",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24182953,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_78"
+        ],
+        "id": "train_78",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24772786,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_87"
+        ],
+        "id": "train_87",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25362619,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_96"
+        ],
+        "id": "train_96",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25952452,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_105"
+        ],
+        "id": "train_105",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26542285,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_114"
+        ],
+        "id": "train_114",
+        "kind": {
+          "WasmVoid": {
+            "arg": 27132118,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_6",
+          "train_15",
+          "train_24",
+          "train_33",
+          "train_42",
+          "train_51",
+          "train_60",
+          "train_69",
+          "train_78",
+          "train_87",
+          "train_96",
+          "train_105",
+          "train_114"
+        ],
+        "id": "aggregate_train_local_6",
+        "kind": {
+          "Aggregate": {
+            "downstream": 8,
+            "upstream": [
+              306,
+              315,
+              324,
+              333,
+              342,
+              351,
+              360,
+              369,
+              378,
+              387,
+              396,
+              405,
+              414
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_6"
+        ],
+        "id": "rs_aggregate_train_local_6_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 8,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "7": [
+      {
+        "deps": [],
+        "id": "load_7",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml_training_6m.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_7"
+        ],
+        "id": "partition_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864330,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7012369,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_16",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7602202,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_25",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8192035,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_34",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8781868,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_43",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9371701,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_52",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9961534,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_61",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10551367,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_70",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11141200,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_79",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11731033,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_88",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12320866,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_97",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12910699,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_106",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13500532,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_7"
+        ],
+        "id": "encode_115",
+        "kind": {
+          "WasmVoid": {
+            "arg": 14090365,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_7"
+        ],
+        "id": "train_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20119659,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_16"
+        ],
+        "id": "train_16",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20709492,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_25"
+        ],
+        "id": "train_25",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21299325,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_34"
+        ],
+        "id": "train_34",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21889158,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_43"
+        ],
+        "id": "train_43",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22478991,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_52"
+        ],
+        "id": "train_52",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23068824,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_61"
+        ],
+        "id": "train_61",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23658657,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_70"
+        ],
+        "id": "train_70",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24248490,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_79"
+        ],
+        "id": "train_79",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24838323,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_88"
+        ],
+        "id": "train_88",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25428156,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_97"
+        ],
+        "id": "train_97",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26017989,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_106"
+        ],
+        "id": "train_106",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26607822,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_115"
+        ],
+        "id": "train_115",
+        "kind": {
+          "WasmVoid": {
+            "arg": 27197655,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_7",
+          "train_16",
+          "train_25",
+          "train_34",
+          "train_43",
+          "train_52",
+          "train_61",
+          "train_70",
+          "train_79",
+          "train_88",
+          "train_97",
+          "train_106",
+          "train_115"
+        ],
+        "id": "aggregate_train_local_7",
+        "kind": {
+          "Aggregate": {
+            "downstream": 9,
+            "upstream": [
+              307,
+              316,
+              325,
+              334,
+              343,
+              352,
+              361,
+              370,
+              379,
+              388,
+              397,
+              406,
+              415
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_7"
+        ],
+        "id": "rs_aggregate_train_local_7_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 9,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "8": [
+      {
+        "deps": [],
+        "id": "load_8",
+        "kind": {
+          "Input": {
+            "path": "TestData/ml_training_6m.csv",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_8"
+        ],
+        "id": "partition_8",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7864330,
+            "func": "sgd_partition"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_8",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7077906,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_17",
+        "kind": {
+          "WasmVoid": {
+            "arg": 7667739,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_26",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8257572,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_35",
+        "kind": {
+          "WasmVoid": {
+            "arg": 8847405,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_44",
+        "kind": {
+          "WasmVoid": {
+            "arg": 9437238,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_53",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10027071,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_62",
+        "kind": {
+          "WasmVoid": {
+            "arg": 10616904,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_71",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11206737,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_80",
+        "kind": {
+          "WasmVoid": {
+            "arg": 11796570,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_89",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12386403,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_98",
+        "kind": {
+          "WasmVoid": {
+            "arg": 12976236,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_107",
+        "kind": {
+          "WasmVoid": {
+            "arg": 13566069,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "partition_8"
+        ],
+        "id": "encode_116",
+        "kind": {
+          "WasmVoid": {
+            "arg": 14155902,
+            "func": "sgd_encode"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_8"
+        ],
+        "id": "train_8",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20185196,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_17"
+        ],
+        "id": "train_17",
+        "kind": {
+          "WasmVoid": {
+            "arg": 20775029,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_26"
+        ],
+        "id": "train_26",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21364862,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_35"
+        ],
+        "id": "train_35",
+        "kind": {
+          "WasmVoid": {
+            "arg": 21954695,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_44"
+        ],
+        "id": "train_44",
+        "kind": {
+          "WasmVoid": {
+            "arg": 22544528,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_53"
+        ],
+        "id": "train_53",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23134361,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_62"
+        ],
+        "id": "train_62",
+        "kind": {
+          "WasmVoid": {
+            "arg": 23724194,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_71"
+        ],
+        "id": "train_71",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24314027,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_80"
+        ],
+        "id": "train_80",
+        "kind": {
+          "WasmVoid": {
+            "arg": 24903860,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_89"
+        ],
+        "id": "train_89",
+        "kind": {
+          "WasmVoid": {
+            "arg": 25493693,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_98"
+        ],
+        "id": "train_98",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26083526,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_107"
+        ],
+        "id": "train_107",
+        "kind": {
+          "WasmVoid": {
+            "arg": 26673359,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "encode_116"
+        ],
+        "id": "train_116",
+        "kind": {
+          "WasmVoid": {
+            "arg": 27263192,
+            "func": "sgd_grad"
+          }
+        }
+      },
+      {
+        "deps": [
+          "train_8",
+          "train_17",
+          "train_26",
+          "train_35",
+          "train_44",
+          "train_53",
+          "train_62",
+          "train_71",
+          "train_80",
+          "train_89",
+          "train_98",
+          "train_107",
+          "train_116"
+        ],
+        "id": "aggregate_train_local_8",
+        "kind": {
+          "Aggregate": {
+            "downstream": 10,
+            "upstream": [
+              308,
+              317,
+              326,
+              335,
+              344,
+              353,
+              362,
+              371,
+              380,
+              389,
+              398,
+              407,
+              416
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "aggregate_train_local_8"
+        ],
+        "id": "rs_aggregate_train_local_8_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 10,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/ml_training_6m.csv",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_sgd_ap",
+  "transfer": true
+}

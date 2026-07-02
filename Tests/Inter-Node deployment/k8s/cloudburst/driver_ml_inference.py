@@ -28,6 +28,8 @@ import redis
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import infer_core
+from mem_probe import MemSampler
+import exec_pool
 
 DONE_TIMEOUT = 300
 MAX_REDISPATCH = 8
@@ -68,7 +70,7 @@ def run_wave(R, task_q, tasks, done_key, label):
     return busy
 
 
-def run_once(R, shards, C, F, Wm, W, task_q):
+def run_once(R, shards, C, F, Wm, W, task_q, cold=False):
     uid = uuid.uuid4().hex
     done = 'cb:mlinfer:' + uid
     t0 = time.time()
@@ -84,6 +86,8 @@ def run_once(R, shards, C, F, Wm, W, task_q):
             {'op': 'ml_infer', 'idx': i, 'shard_key': '%s_shard_%d' % (uid, i),
              'model_key': '%s_model' % uid, 'c': C, 'f': F,
              'result_key': rk, 'done_key': done})))
+    if cold:                                  # cold start: launch executors ON the infer wave
+        exec_pool.launch_on_wave(W)
     busy = run_wave(R, task_q, tasks, done, 'ml_infer')
     a0 = time.time()
     correct = total = predsum = 0
@@ -102,7 +106,9 @@ def main():
     ap.add_argument('--data', default='TestData/ml_inference_6m.csv')
     ap.add_argument('--model', default='TestData/ml_inference_model.csv')
     ap.add_argument('--workers', type=int, default=60)
-    ap.add_argument('--reps', type=int, default=15)
+    ap.add_argument('--warm-reps', type=int, default=12, help='warm reps (pool pre-launched)')
+    ap.add_argument('--cold-reps', type=int, default=3, help='cold reps (executors launched on-wave)')
+    ap.add_argument('--reps', type=int, default=None, help='ignored (kept for back-compat)')
     ap.add_argument('--redis-host', default=os.environ.get('REDIS_HOST', '10.10.1.2'))
     ap.add_argument('--redis-port', type=int, default=int(os.environ.get('REDIS_PORT', '30679')))
     ap.add_argument('--task-queue', default='cb:tasks')
@@ -120,37 +126,61 @@ def main():
         raw = f.read()
     N = raw.count(b'\n') + (0 if raw.endswith(b'\n') else 1)
     shards = split_aligned(raw, a.workers)
-    print('[cloudburst-mlinfer] samples=%d C=%d F=%d workers=%d reps=%d' % (N, C, F, a.workers, a.reps), flush=True)
+    print('[cloudburst-mlinfer] samples=%d C=%d F=%d workers=%d warm=%d cold=%d' %
+          (N, C, F, a.workers, a.warm_reps, a.cold_reps), flush=True)
 
-    mk, tj = [], []
+    mk_warm, mk_cold, tj = [], [], []
     cks = acc = None
     success = True
-    for r in range(a.reps):
-        m, j, p, ac = run_once(R, shards, C, F, Wm, a.workers, a.task_queue)
-        mk.append(m); tj.append(j)
+    mem = MemSampler(a.redis_host, a.redis_port); mem.start()   # peak-memory-cost sampler
+
+    def _rep(r, cold):
+        nonlocal cks, acc, success
+        m, j, p, ac = run_once(R, shards, C, F, Wm, a.workers, a.task_queue, cold=cold)
+        tj.append(j)
         if cks is None:
             cks, acc = p, ac
         elif p != cks:
-            print('[cloudburst-mlinfer] GATE FAIL rep%d: %d != %d' % (r, p, cks)); success = False
-        print('[cloudburst-mlinfer] rep%d makespan=%.0f ms total_job=%.0f ms prediction_checksum=%d acc=%.2f%%' %
-              (r, m, j, p, ac), flush=True)
+            print('[cloudburst-mlinfer] GATE FAIL %s rep%d: %d != %d' %
+                  ('cold' if cold else 'warm', r, p, cks)); success = False
+        print('[cloudburst-mlinfer] %s rep%d makespan=%.0f ms total_job=%.0f ms prediction_checksum=%d acc=%.2f%%' %
+              ('cold' if cold else 'warm', r, m, j, p, ac), flush=True)
+        return m
+
+    for r in range(a.cold_reps):
+        exec_pool.teardown()
+        mk_cold.append(_rep(r, True))
+    exec_pool.launch_on_wave(a.workers)
+    for r in range(a.warm_reps):
+        mk_warm.append(_rep(r, False))
+    exec_pool.teardown()
+
+    mem.stop.set(); mem.join()
+    mem_total_mb, mem_max_mb, redis_peak_mb = mem.result()
     if a.expect is not None and cks != a.expect:
         print('[cloudburst-mlinfer] GATE FAIL: %d != expected %d' % (cks, a.expect)); success = False
-    mk_m = statistics.mean(mk); mk_s = statistics.pstdev(mk) if len(mk) > 1 else 0.0
+    mk_m = statistics.mean(mk_warm) if mk_warm else 0.0
+    mk_s = statistics.pstdev(mk_warm) if len(mk_warm) > 1 else 0.0
+    cold_mean = statistics.mean(mk_cold) if mk_cold else 0.0
+    cold_std = statistics.pstdev(mk_cold) if len(mk_cold) > 1 else 0.0
     tj_m = statistics.mean(tj)
-    print('[cloudburst-mlinfer] === samples=%d workers=%d makespan=%.0f ± %.1f ms total_job=%.0f ms '
-          'acc=%.2f%% prediction_checksum=%d %s ===' %
-          (N, a.workers, mk_m, mk_s, tj_m, acc, cks, 'OK' if success else 'GATE-FAIL'))
+    print('[cloudburst-mlinfer] === samples=%d workers=%d warm_makespan=%.0f ± %.1f ms '
+          'cold_makespan=%.0f ± %.1f ms total_job=%.0f ms acc=%.2f%% prediction_checksum=%d %s ===' %
+          (N, a.workers, mk_m, mk_s, cold_mean, cold_std, tj_m, acc, cks,
+           'OK' if success else 'GATE-FAIL'))
     if a.csv:
         os.makedirs(os.path.dirname(os.path.abspath(a.csv)), exist_ok=True)
         new = not os.path.exists(a.csv)
         with open(a.csv, 'a') as f:
             if new:
                 f.write('samples,workers,nodes_used,makespan_mean_ms,makespan_std_ms,'
-                        'total_job_mean_ms,accuracy_pct,prediction_checksum,expect,success,reps\n')
-            f.write('%d,%d,4,%.0f,%.1f,%.0f,%.2f,%d,%d,%s,%d\n' %
+                        'total_job_mean_ms,accuracy_pct,prediction_checksum,expect,success,reps,'
+                        'mem_max_mb,mem_total_mb,redis_peak_mb,'
+                        'cold_makespan_mean_ms,cold_makespan_std_ms\n')
+            f.write('%d,%d,8,%.0f,%.1f,%.0f,%.2f,%d,%d,%s,%d,%.0f,%.0f,%.0f,%.0f,%.1f\n' %
                     (N, a.workers, mk_m, mk_s, tj_m, round(acc, 2), cks,
-                     a.expect if a.expect is not None else cks, success, a.reps))
+                     a.expect if a.expect is not None else cks, success, a.warm_reps,
+                     mem_max_mb, mem_total_mb, redis_peak_mb, cold_mean, cold_std))
     sys.exit(0 if success else 1)
 
 

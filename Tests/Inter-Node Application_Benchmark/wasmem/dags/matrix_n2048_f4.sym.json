@@ -1,7 +1,7 @@
 {
   "shm_path_prefix": "/dev/shm/rdma_matrix_ap",
   "log_level": "info",
-  "total_nodes": 4,
+  "total_nodes": 9,
   "transfer": true,
   "placement_policy": "balanced",
   "nodes": [
@@ -44,7 +44,7 @@
         "Func": {
           "func": "mat_tile",
           "arg": 10,
-          "wasm_arg": 149504
+          "wasm_arg": 280576
         }
       }
     },
@@ -57,7 +57,7 @@
         "Func": {
           "func": "mat_block",
           "arg": 100,
-          "wasm_arg": 149504
+          "wasm_arg": 280576
         }
       },
       "node_id": 0,
@@ -72,7 +72,7 @@
         "Func": {
           "func": "mat_block",
           "arg": 101,
-          "wasm_arg": 673792
+          "wasm_arg": 2377728
         }
       },
       "node_id": 1,
@@ -87,7 +87,7 @@
         "Func": {
           "func": "mat_block",
           "arg": 102,
-          "wasm_arg": 16926720
+          "wasm_arg": 67389440
         }
       },
       "node_id": 2,
@@ -102,7 +102,7 @@
         "Func": {
           "func": "mat_block",
           "arg": 103,
-          "wasm_arg": 17451008
+          "wasm_arg": 69486592
         }
       },
       "node_id": 3,

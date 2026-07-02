@@ -39,6 +39,8 @@ import cloudpickle as cp
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import ts_ops
+from mem_probe import MemSampler
+import exec_pool
 
 # Same map-stage robustness knobs as driver.py, but DONE_TIMEOUT is much larger here:
 # TeraSort runs at fanout=4 (vs WordCount's 60), so each task moves ~1/4 of the dataset
@@ -85,7 +87,7 @@ def run_wave(R, task_q, tasks, done_key, label):
     return busy
 
 
-def run_once(R, records_path, n, task_q):
+def run_once(R, records_path, n, task_q, cold=False):
     uid = uuid.uuid4().hex
     pfx = '%s_bucket' % uid
     done_p, done_m = 'cb:tsdone:p:' + uid, 'cb:tsdone:m:' + uid
@@ -104,6 +106,8 @@ def run_once(R, records_path, n, task_q):
         {'op': 'ts_partition', 'idx': i, 'n': n, 'chunk_key': '%s_chunk_%d' % (uid, i),
          'bucket_prefix': pfx, 'result_key': '%s_pdone_%d' % (uid, i),
          'done_key': done_p})) for i in range(n)]
+    if cold:                                  # cold start: launch executors ON the first (partition) wave
+        exec_pool.launch_on_wave(n)
     pbusy = run_wave(R, task_q, ptasks, done_p, 'partition')
 
     # --- merge wave (gather + sort) ---
@@ -138,7 +142,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--records', default='TestData/terasort_1.2gb.txt')
     ap.add_argument('--fanout', type=int, default=4, help='shuffle width (N partitioners = N mergers)')
-    ap.add_argument('--reps', type=int, default=15)
+    ap.add_argument('--warm-reps', type=int, default=12, help='warm reps (pool pre-launched)')
+    ap.add_argument('--cold-reps', type=int, default=3, help='cold reps (executors launched on-wave)')
+    ap.add_argument('--reps', type=int, default=None, help='ignored (kept for back-compat)')
     ap.add_argument('--redis-host', default=os.environ.get('REDIS_HOST', '10.10.1.2'))
     ap.add_argument('--redis-port', type=int, default=int(os.environ.get('REDIS_PORT', '30679')))
     ap.add_argument('--task-queue', default='cb:tasks')
@@ -160,39 +166,54 @@ def main():
         sys.exit('redis unreachable at %s:%d (%r)' % (a.redis_host, a.redis_port, e))
 
     size_mb = round(os.path.getsize(a.records) / (1024 * 1024))
-    print('[cloudburst-ts] records=%s (%d MB) fanout=%d reps=%d redis=%s:%d' %
-          (a.records, size_mb, a.fanout, a.reps, a.redis_host, a.redis_port), flush=True)
+    print('[cloudburst-ts] records=%s (%d MB) fanout=%d warm=%d cold=%d redis=%s:%d' %
+          (a.records, size_mb, a.fanout, a.warm_reps, a.cold_reps, a.redis_host, a.redis_port), flush=True)
 
-    mk_ms, tj_ms = [], []
+    mk_warm, mk_cold, tj_ms = [], [], []
     gate_seen = None
     success = True
-    for r in range(a.reps):
-        m, tj, rec, ks, srt = run_once(R, a.records, a.fanout, a.task_queue)
-        mk_ms.append(m)
+    mem = MemSampler(a.redis_host, a.redis_port); mem.start()   # peak-memory-cost sampler
+
+    def _rep(r, cold):
+        nonlocal gate_seen, success
+        m, tj, rec, ks, srt = run_once(R, a.records, a.fanout, a.task_queue, cold=cold)
         tj_ms.append(tj)
         g = (rec, ks, srt)
         if gate_seen is None:
             gate_seen = g
         elif g != gate_seen:
-            print('[cloudburst-ts] GATE FAIL rep%d: %s != %s' % (r, g, gate_seen))
-            success = False
+            print('[cloudburst-ts] GATE FAIL %s rep%d: %s != %s' %
+                  ('cold' if cold else 'warm', r, g, gate_seen)); success = False
         if srt != 1:
-            print('[cloudburst-ts] SORT FAIL rep%d' % r)
-            success = False
-        print('[cloudburst-ts] rep%d makespan=%.0f ms total_job=%.0f ms records=%d keysum=%d sorted=%d' %
-              (r, m, tj, rec, ks, srt), flush=True)
+            print('[cloudburst-ts] SORT FAIL %s rep%d' % ('cold' if cold else 'warm', r)); success = False
+        print('[cloudburst-ts] %s rep%d makespan=%.0f ms total_job=%.0f ms records=%d keysum=%d sorted=%d' %
+              ('cold' if cold else 'warm', r, m, tj, rec, ks, srt), flush=True)
+        return m
+
+    for r in range(a.cold_reps):
+        exec_pool.teardown()
+        mk_cold.append(_rep(r, True))
+    exec_pool.launch_on_wave(a.fanout)
+    for r in range(a.warm_reps):
+        mk_warm.append(_rep(r, False))
+    exec_pool.teardown()
+
+    mem.stop.set(); mem.join()
+    mem_total_mb, mem_max_mb, redis_peak_mb = mem.result()
 
     if expect is not None and gate_seen != expect:
         print('[cloudburst-ts] GATE FAIL: %s != expected %s' % (gate_seen, expect))
         success = False
 
-    mk_mean = statistics.mean(mk_ms)
-    mk_std = statistics.pstdev(mk_ms) if len(mk_ms) > 1 else 0.0
+    mk_mean = statistics.mean(mk_warm) if mk_warm else 0.0
+    mk_std = statistics.pstdev(mk_warm) if len(mk_warm) > 1 else 0.0
+    cold_mean = statistics.mean(mk_cold) if mk_cold else 0.0
+    cold_std = statistics.pstdev(mk_cold) if len(mk_cold) > 1 else 0.0
     tj_mean = statistics.mean(tj_ms)
     rec, ks, srt = gate_seen
-    print('[cloudburst-ts] === size=%d MB fanout=%d makespan=%.0f ± %.1f ms total_job=%.0f ms '
-          'records=%d keysum=%d sorted=%d %s ===' %
-          (size_mb, a.fanout, mk_mean, mk_std, tj_mean, rec, ks, srt,
+    print('[cloudburst-ts] === size=%d MB fanout=%d warm_makespan=%.0f ± %.1f ms '
+          'cold_makespan=%.0f ± %.1f ms total_job=%.0f ms records=%d keysum=%d sorted=%d %s ===' %
+          (size_mb, a.fanout, mk_mean, mk_std, cold_mean, cold_std, tj_mean, rec, ks, srt,
            'OK' if success else 'GATE-FAIL'))
 
     if a.csv:
@@ -202,10 +223,13 @@ def main():
         with open(a.csv, 'a') as f:
             if new:
                 f.write('size_mb,workers,nodes_used,makespan_mean_ms,makespan_std_ms,'
-                        'total_job_mean_ms,records,keysum,sorted,expect,success,reps\n')
-            f.write('%d,%d,4,%.0f,%.1f,%.0f,%d,%d,%d,%s,%s,%d\n' %
+                        'total_job_mean_ms,records,keysum,sorted,expect,success,reps,'
+                        'mem_max_mb,mem_total_mb,redis_peak_mb,'
+                        'cold_makespan_mean_ms,cold_makespan_std_ms\n')
+            f.write('%d,%d,8,%.0f,%.1f,%.0f,%d,%d,%d,%s,%s,%d,%.0f,%.0f,%.0f,%.0f,%.1f\n' %
                     (size_mb, a.fanout, mk_mean, mk_std, tj_mean, rec, ks, srt,
-                     exp_str, success, a.reps))
+                     exp_str, success, a.warm_reps,
+                     mem_max_mb, mem_total_mb, redis_peak_mb, cold_mean, cold_std))
     sys.exit(0 if success else 1)
 
 

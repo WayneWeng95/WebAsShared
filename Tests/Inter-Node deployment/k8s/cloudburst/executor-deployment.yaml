@@ -1,8 +1,11 @@
-# Cloudburst executor pool — `replicas` worker pods, evenly spread across the 4
-# nodes (topologySpread maxSkew 1), each pulling wc_mapper tasks off the shared
-# Redis queue. fanout 60 → 60 replicas = 15/node (1 executor per mapper, matching
-# the wasmem/faasm fan width). imagePullPolicy IfNotPresent — image is imported into
-# every node's containerd (07-load-images-style ctr import), not pulled from a registry.
+# Cloudburst executor pool — `replicas` worker pods spread across the 8 WORKER nodes
+# ONLY (node-0 is the Redis holder + coordinator, excluded via nodeAffinity below), each
+# pulling tasks off the shared Redis queue. The 9-node cluster caps each physical worker
+# at 16 executors → 8 × 16 = 128 slots, so replicas=128 with a HARD topologySpread
+# (DoNotSchedule, maxSkew 1) lands exactly 16/node and never overflows a worker. Workloads
+# with a smaller fan (e.g. terasort fanout 4) simply leave the extra pods idle.
+# imagePullPolicy IfNotPresent — image is imported into every node's containerd
+# (07-load-images-style ctr import), not pulled from a registry.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -10,17 +13,27 @@ metadata:
   namespace: baselines
   labels: { app: cloudburst-executor }
 spec:
-  replicas: 60
+  replicas: 128
   selector:
     matchLabels: { app: cloudburst-executor }
   template:
     metadata:
       labels: { app: cloudburst-executor }
     spec:
+      # node-0 is control-plane + Redis/coordinator only — keep every executor OFF it so
+      # the KVS/driver node isn't also carrying worker load (matches RMMap's 8-worker layout).
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: node-role.kubernetes.io/control-plane
+                    operator: DoesNotExist
+      # HARD 16/node cap: 8 eligible workers × maxSkew 1 × DoNotSchedule → 16 pods each.
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: ScheduleAnyway
+          whenUnsatisfiable: DoNotSchedule
           labelSelector:
             matchLabels: { app: cloudburst-executor }
       containers:
@@ -31,9 +44,12 @@ spec:
             - { name: REDIS_HOST, value: redis.baselines.svc.cluster.local }
             - { name: REDIS_PORT, value: "6379" }
             - { name: CB_TASK_QUEUE, value: "cb:tasks" }
-          # FAIRNESS CAP: every baseline worker pod is held to 1 CPU + 2 GiB RAM, matching
-          # the per-worker budget our framework gives each fanned-out executor. (TeraSort's
-          # ~1.3 GB partition peak still fits under 2Gi; WordCount at fanout 60 is ~67 MB.)
+          # FAIRNESS CAP: 1 CPU per worker pod. Memory 4Gi here because this cluster pool
+          # also runs the CONVERGENCE stages — FINRA's 3 stateful full-trades rules, TeraSort's
+          # merge/gather, matrix assemble — where a pod ingests full (not sharded) data and a
+          # 2Gi cap OOM-kills it (long-lived pods also accumulate RSS across tasks). Single
+          # fan-out executors elsewhere stay 2Gi (see executor-single-node.yaml); the shared
+          # queue means any pod here may draw a convergence task, so the whole pool is sized 4Gi.
           resources:
             requests: { cpu: "200m", memory: "256Mi" }
-            limits: { cpu: "1", memory: "2Gi" }
+            limits: { cpu: "1", memory: "4Gi" }

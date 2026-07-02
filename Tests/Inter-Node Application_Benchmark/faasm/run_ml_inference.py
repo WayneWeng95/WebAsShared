@@ -67,7 +67,7 @@ def main():
     ap.add_argument("--csv", default=os.path.join(HERE, "results_ml_inference.csv"))
     args = ap.parse_args()
 
-    nodes = nodes[:max(1, min(args.nodes, len(nodes)))]
+    nodes = fl.map_nodes(nodes, args.nodes)   # compute faaslets on WORKER nodes only (node-0 = coordinator)
     W = args.workers
     port = int(env.get("AGENT_PORT", "9600"))
     rh, rp = env["REDIS_HOST"], int(env.get("REDIS_PORT", "6379"))

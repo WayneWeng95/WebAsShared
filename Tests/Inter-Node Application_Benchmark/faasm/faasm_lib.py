@@ -28,6 +28,33 @@ def load_env():
     return env, nodes, ROOT
 
 
+# node 0 (COORD_IP) is the coordinator: it runs the reduce faaslet but is NOT a worker.
+# Map faaslets place over the 8 WORKER nodes only, ≤16 per node — the same cap Cloudburst
+# gets from topologySpread and RMMap from its 8-node round-robin.
+CAP_PER_NODE = 16
+
+
+def worker_nodes(nodes):
+    """The worker IPs only (coordinator nodes[0] excluded) — where map faaslets fan out."""
+    return nodes[1:]
+
+
+def map_nodes(all_nodes, k):
+    """The first k WORKER nodes for map/compute faaslet placement (coordinator all_nodes[0]
+    excluded — node-0 stays coordinator-only). k is clamped to the worker count."""
+    w = worker_nodes(all_nodes)
+    return w[:max(1, min(k, len(w)))]
+
+
+def check_cap(n_faaslets, place_nodes):
+    """Hard 16/node cap: raise if round-robin of n_faaslets over place_nodes would land more
+    than CAP_PER_NODE on any node (matches Cloudburst's topologySpread / RMMap's guard)."""
+    import math
+    if place_nodes and math.ceil(n_faaslets / len(place_nodes)) > CAP_PER_NODE:
+        raise SystemExit("faasm 16/node cap: %d faaslets over %d nodes > %d/node"
+                         % (n_faaslets, len(place_nodes), CAP_PER_NODE))
+
+
 def call(host, port, path, obj=None, timeout=3600):
     data = json.dumps(obj).encode() if obj is not None else None
     req = urllib.request.Request(f"http://{host}:{port}{path}", data=data,
@@ -54,6 +81,13 @@ def run_faaslets(specs, port, t0=None):
     the driver *before* it stages input into Redis) to make the window end-to-end —
     input upload + agent dispatch + Faaslet compute + Redis state I/O; if omitted the
     clock starts here (dispatch only, upload excluded)."""
+    # hard 16/node cap: no node may host more than CAP_PER_NODE faaslets at once.
+    _per = {}
+    for s in specs:
+        _per[s["node"]] = _per.get(s["node"], 0) + 1
+    _over = {nd: c for nd, c in _per.items() if c > CAP_PER_NODE}
+    if _over:
+        raise SystemExit("faasm 16/node cap exceeded: %s" % _over)
     launched = []
     if t0 is None:
         t0 = time.time()

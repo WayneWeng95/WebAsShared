@@ -1,0 +1,2 @@
+size_mb,mappers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,occurrences,expect,success,reps,mem_max_mb,mem_total_mb,redis_peak_mb,cold_makespan_mean_ms,cold_makespan_std_ms
+4096,120,8,20972,352.8,584026,676710552,676710552,True,12,12774,55898,6143,28620,423.8

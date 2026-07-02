@@ -4,11 +4,11 @@
     "0": [
       {
         "deps": [],
-        "id": "rr_aggregate_local_3_from_3",
+        "id": "rr_aggregate_local_1_from_1",
         "kind": {
           "RemoteRecv": {
-            "peer": 3,
-            "slot": 604,
+            "peer": 1,
+            "slot": 602,
             "slot_kind": "Stream"
           }
         }
@@ -26,11 +26,11 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_local_1_from_1",
+        "id": "rr_aggregate_local_3_from_3",
         "kind": {
           "RemoteRecv": {
-            "peer": 1,
-            "slot": 602,
+            "peer": 3,
+            "slot": 604,
             "slot_kind": "Stream"
           }
         }
@@ -69,7 +69,7 @@
         "id": "tile_0",
         "kind": {
           "WasmVoid": {
-            "arg": 148480,
+            "arg": 279552,
             "func": "mat_tile"
           }
         }
@@ -81,7 +81,7 @@
         "id": "block_0_0",
         "kind": {
           "WasmVoid": {
-            "arg": 148480,
+            "arg": 279552,
             "func": "mat_block"
           }
         }
@@ -194,7 +194,7 @@
         "id": "tile_1",
         "kind": {
           "WasmVoid": {
-            "arg": 148480,
+            "arg": 279552,
             "func": "mat_tile"
           }
         }
@@ -206,7 +206,7 @@
         "id": "block_0_1",
         "kind": {
           "WasmVoid": {
-            "arg": 672768,
+            "arg": 2376704,
             "func": "mat_block"
           }
         }
@@ -274,7 +274,7 @@
         "id": "tile_2",
         "kind": {
           "WasmVoid": {
-            "arg": 148480,
+            "arg": 279552,
             "func": "mat_tile"
           }
         }
@@ -286,7 +286,7 @@
         "id": "block_1_0",
         "kind": {
           "WasmVoid": {
-            "arg": 16925696,
+            "arg": 67388416,
             "func": "mat_block"
           }
         }
@@ -354,7 +354,7 @@
         "id": "tile_3",
         "kind": {
           "WasmVoid": {
-            "arg": 148480,
+            "arg": 279552,
             "func": "mat_tile"
           }
         }
@@ -366,7 +366,7 @@
         "id": "block_1_1",
         "kind": {
           "WasmVoid": {
-            "arg": 17449984,
+            "arg": 69485568,
             "func": "mat_block"
           }
         }
@@ -395,6 +395,211 @@
             "peer": 0,
             "slot": 5,
             "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "4": [
+      {
+        "deps": [],
+        "id": "load_a_4",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/A_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_b_4",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/B_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 2
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_a_4",
+          "load_b_4"
+        ],
+        "id": "tile_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 279552,
+            "func": "mat_tile"
+          }
+        }
+      }
+    ],
+    "5": [
+      {
+        "deps": [],
+        "id": "load_a_5",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/A_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_b_5",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/B_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 2
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_a_5",
+          "load_b_5"
+        ],
+        "id": "tile_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 279552,
+            "func": "mat_tile"
+          }
+        }
+      }
+    ],
+    "6": [
+      {
+        "deps": [],
+        "id": "load_a_6",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/A_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_b_6",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/B_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 2
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_a_6",
+          "load_b_6"
+        ],
+        "id": "tile_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 279552,
+            "func": "mat_tile"
+          }
+        }
+      }
+    ],
+    "7": [
+      {
+        "deps": [],
+        "id": "load_a_7",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/A_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_b_7",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/B_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 2
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_a_7",
+          "load_b_7"
+        ],
+        "id": "tile_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 279552,
+            "func": "mat_tile"
+          }
+        }
+      }
+    ],
+    "8": [
+      {
+        "deps": [],
+        "id": "load_a_8",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/A_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_b_8",
+        "kind": {
+          "Input": {
+            "binary": true,
+            "path": "TestData/matrix/B_1024.bin",
+            "prefetch": true,
+            "replicate": true,
+            "slot": 2
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_a_8",
+          "load_b_8"
+        ],
+        "id": "tile_8",
+        "kind": {
+          "WasmVoid": {
+            "arg": 279552,
+            "func": "mat_tile"
           }
         }
       }
