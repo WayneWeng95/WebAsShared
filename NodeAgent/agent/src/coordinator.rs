@@ -356,6 +356,22 @@ fn handle_submit(
         m
     };
 
+    // Per (physical) worker, the data-parallel slice [lo,hi] of each input it reads,
+    // so staging can RDMA-WRITE only that worker's line-aligned window instead of the
+    // whole file (removes the whole-file broadcast + the 4 GiB whole-file MR ceiling).
+    let slices_by_physical: std::collections::HashMap<u32, std::collections::HashMap<String, [f64; 2]>> = {
+        let mut m: std::collections::HashMap<u32, std::collections::HashMap<String, [f64; 2]>> =
+            std::collections::HashMap::new();
+        for (logical, sl) in cluster_dag.input_slices_by_node() {
+            let physical = match logical_to_physical {
+                Some(map) => map.get(logical as usize).copied().unwrap_or(logical),
+                None => logical,
+            };
+            m.entry(physical).or_default().extend(sl);
+        }
+        m
+    };
+
     // Stage shared input files to workers before splitting and assigning jobs.
     // Try RDMA first; fall back to TCP on error (e.g. no RDMA hardware).
     if !cluster_dag.shared_inputs.is_empty() {
@@ -365,6 +381,7 @@ fn handle_submit(
             config.node_id,
             &cluster_dag.shared_inputs,
             &needed_by_physical,
+            &slices_by_physical,
             &job_id,
         );
         drop(s);
@@ -376,6 +393,7 @@ fn handle_submit(
                 config.node_id,
                 &cluster_dag.shared_inputs,
                 &needed_by_physical,
+                &slices_by_physical,
                 &job_id,
             )?;
             drop(s);
@@ -403,7 +421,7 @@ fn handle_submit(
     // Rekey logical → physical so AssignJob delivery, the local-executor lookup,
     // and result collection all address the real node ids. (Identity map when
     // the DAG was already physical.)
-    let per_node_dags: HashMap<u32, String> = match logical_to_physical {
+    let mut per_node_dags: HashMap<u32, String> = match logical_to_physical {
         Some(map) => per_node_dags_logical
             .into_iter()
             .map(|(logical, dag)| {
@@ -413,6 +431,38 @@ fn handle_submit(
             .collect(),
         None => per_node_dags_logical,
     };
+
+    // Per-slice staging pre-wrote each REMOTE worker's line-aligned slice into its staged
+    // copy of the file, so those workers must load the WHOLE staged file — rewrite their
+    // shared-input Input `slice` to [0,1]. node-0 (self) isn't staged: it keeps its slice and
+    // reads its own window from the intact local file (result identical to before).
+    if !cluster_dag.shared_inputs.is_empty() {
+        let shared_paths: std::collections::HashSet<String> =
+            cluster_dag.shared_inputs.iter().map(|s| s.path.clone()).collect();
+        for (id, dag_json) in per_node_dags.iter_mut() {
+            if *id == config.node_id { continue; }
+            let mut v: serde_json::Value = match serde_json::from_str(dag_json) { Ok(v) => v, Err(_) => continue };
+            let mut changed = false;
+            if let Some(nodes) = v.get_mut("nodes").and_then(|n| n.as_array_mut()) {
+                for node in nodes {
+                    if let Some(inp) = node.get_mut("kind")
+                        .and_then(|k| k.get_mut("Input"))
+                        .and_then(|i| i.as_object_mut())
+                    {
+                        let is_shared = inp.get("path").and_then(|p| p.as_str())
+                            .map(|p| shared_paths.contains(p)).unwrap_or(false);
+                        if is_shared {
+                            inp.insert("slice".to_string(), serde_json::json!([0.0, 1.0]));
+                            changed = true;
+                        }
+                    }
+                }
+            }
+            if changed {
+                if let Ok(s) = serde_json::to_string_pretty(&v) { *dag_json = s; }
+            }
+        }
+    }
 
     // Workers that actually receive a per-node DAG this run (excluding self).
     // Result collection must wait for EXACTLY these — not every connected node —
@@ -903,11 +953,30 @@ fn rand_psn() -> u32 {
 /// worker, exchanges QP metadata over the existing TCP control channel, then
 /// signals workers to RDMA-READ the data.  Returns `Err` if RDMA is
 /// unavailable (caller falls back to TCP StageFiles).
+/// Line-aligned byte window `[start,end)` for fraction `[lo,hi]` over `data` — byte-for-byte
+/// the math `SlotLoader::load_slice` uses (floor(f·total), then advance to the next line start).
+/// Staging only this window (instead of the whole file) is result-identical to what the executor
+/// would have loaded, while moving only ~1/N of the bytes. Returns (0,0) for an empty window.
+fn line_aligned_window(data: &[u8], lo: f64, hi: f64) -> (usize, usize) {
+    let total = data.len();
+    if total == 0 { return (0, 0); }
+    let frac = |f: f64| ((f.clamp(0.0, 1.0)) * total as f64).floor() as usize;
+    let next_ls = |p: usize| -> usize {
+        if p == 0 { 0 } else if p >= total { total }
+        else { match data[p..].iter().position(|&b| b == b'\n') { Some(r) => p + r + 1, None => total } }
+    };
+    let (rs, re) = (frac(lo), frac(hi));
+    let start = next_ls(rs);
+    let end = if re >= total { total } else { next_ls(re) };
+    if start >= end { (0, 0) } else { (start, end) }
+}
+
 fn stage_shared_inputs_rdma(
     workers: &mut HashMap<u32, WorkerConn>,
     own_node_id: u32,
     shared_inputs: &[crate::cluster_dag::SharedInput],
     needed: &HashMap<u32, std::collections::HashSet<String>>,
+    slices: &HashMap<u32, std::collections::HashMap<String, [f64; 2]>>,
     job_id: &str,
 ) -> Result<()> {
     let all_remote: Vec<u32> = workers
@@ -947,15 +1016,22 @@ fn stage_shared_inputs_rdma(
     // the source buffer (global_off). Workers that load nothing get no offer at all.
     struct WFile { path: String, global_off: usize, local_off: usize, len: usize }
     let empty = std::collections::HashSet::new();
+    let empty_sl = std::collections::HashMap::new();
     let mut per_worker: HashMap<u32, Vec<WFile>> = HashMap::new();
     for &id in &all_remote {
         let want = needed.get(&id).unwrap_or(&empty);
+        let wsl = slices.get(&id).unwrap_or(&empty_sl);
         let mut local = 0usize;
         let mut v = Vec::new();
         for e in &entries {
             if want.contains(&e.path) {
-                v.push(WFile { path: e.path.clone(), global_off: e.offset, local_off: local, len: e.len });
-                local += e.len;
+                // Stage only this worker's line-aligned slice window of the file.
+                let [lo, hi] = wsl.get(&e.path).copied().unwrap_or([0.0, 1.0]);
+                let (s, en) = line_aligned_window(&flat[e.offset..e.offset + e.len], lo, hi);
+                let slen = en - s;
+                if slen == 0 { continue; }
+                v.push(WFile { path: e.path.clone(), global_off: e.offset + s, local_off: local, len: slen });
+                local += slen;
             }
         }
         if !v.is_empty() {
@@ -1152,6 +1228,7 @@ fn stage_shared_inputs_tcp(
     own_node_id: u32,
     shared_inputs: &[crate::cluster_dag::SharedInput],
     needed: &HashMap<u32, std::collections::HashSet<String>>,
+    slices: &HashMap<u32, std::collections::HashMap<String, [f64; 2]>>,
     job_id: &str,
 ) -> Result<()> {
     // Read each coordinator-owned file once.
@@ -1166,14 +1243,21 @@ fn stage_shared_inputs_tcp(
 
     let remote_ids: Vec<u32> = workers.keys().filter(|&&id| id != own_node_id).cloned().collect();
     let empty = std::collections::HashSet::new();
+    let empty_sl = std::collections::HashMap::new();
     let mut pending: std::collections::HashSet<u32> = std::collections::HashSet::new();
 
     for &id in &remote_ids {
         let want = needed.get(&id).unwrap_or(&empty);
+        let wsl = slices.get(&id).unwrap_or(&empty_sl);
         let files: Vec<StagedFile> = data_by_path
             .iter()
             .filter(|(pth, _)| want.contains(*pth))
-            .map(|(pth, d)| StagedFile { rel_path: pth.clone(), data: d.clone() })
+            .map(|(pth, d)| {
+                // Send only this worker's line-aligned slice window (same math as RDMA / load_slice).
+                let [lo, hi] = wsl.get(pth).copied().unwrap_or([0.0, 1.0]);
+                let (s, en) = line_aligned_window(d, lo, hi);
+                StagedFile { rel_path: pth.clone(), data: d[s..en].to_vec() }
+            })
             .collect();
         if files.is_empty() { continue; }
         let payload = StageFilesPayload { job_id: job_id.to_string(), files };

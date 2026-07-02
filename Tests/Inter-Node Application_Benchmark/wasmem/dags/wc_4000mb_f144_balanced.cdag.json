@@ -4,55 +4,11 @@
     "0": [
       {
         "deps": [],
-        "id": "rr_aggregate_6_from_6",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 6,
-            "slot": 179,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_3_from_3",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 3,
-            "slot": 176,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
         "id": "rr_aggregate_5_from_5",
         "kind": {
           "RemoteRecv": {
             "peer": 5,
-            "slot": 178,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_1_from_1",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 1,
-            "slot": 174,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_2_from_2",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 2,
-            "slot": 175,
+            "slot": 180,
             "slot_kind": "Stream"
           }
         }
@@ -63,18 +19,18 @@
         "kind": {
           "RemoteRecv": {
             "peer": 8,
-            "slot": 181,
+            "slot": 183,
             "slot_kind": "Stream"
           }
         }
       },
       {
         "deps": [],
-        "id": "rr_aggregate_4_from_4",
+        "id": "rr_aggregate_3_from_3",
         "kind": {
           "RemoteRecv": {
-            "peer": 4,
-            "slot": 177,
+            "peer": 3,
+            "slot": 178,
             "slot_kind": "Stream"
           }
         }
@@ -85,7 +41,51 @@
         "kind": {
           "RemoteRecv": {
             "peer": 7,
-            "slot": 180,
+            "slot": 182,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_1_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 176,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_6_from_6",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 6,
+            "slot": 181,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 177,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_4_from_4",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 4,
+            "slot": 179,
             "slot_kind": "Stream"
           }
         }
@@ -95,11 +95,11 @@
         "id": "load_0",
         "kind": {
           "Input": {
-            "path": "TestData/corpus_xlarge.txt",
+            "path": "TestData/corpus_wc_4000mb.txt",
             "prefetch": true,
             "slice": [
               0.0,
-              0.11666666666666667
+              0.1111111111111111
             ],
             "slot": 0
           }
@@ -112,7 +112,7 @@
         "id": "distribute_0",
         "kind": {
           "WasmVoid": {
-            "arg": 917554,
+            "arg": 1048626,
             "func": "wc_distribute"
           }
         }
@@ -287,6 +287,30 @@
       },
       {
         "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_0"
+        ],
+        "id": "map_n_0_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
           "map_n_0_0",
           "map_n_0_1",
           "map_n_0_2",
@@ -300,12 +324,14 @@
           "map_n_0_10",
           "map_n_0_11",
           "map_n_0_12",
-          "map_n_0_13"
+          "map_n_0_13",
+          "map_n_0_14",
+          "map_n_0_15"
         ],
         "id": "aggregate_0",
         "kind": {
           "Aggregate": {
-            "downstream": 164,
+            "downstream": 166,
             "upstream": [
               150,
               151,
@@ -320,7 +346,9 @@
               160,
               161,
               162,
-              163
+              163,
+              164,
+              165
             ]
           }
         }
@@ -340,17 +368,17 @@
         "id": "aggregate_global",
         "kind": {
           "Aggregate": {
-            "downstream": 173,
+            "downstream": 175,
             "upstream": [
-              164,
-              174,
-              175,
+              166,
               176,
               177,
               178,
               179,
               180,
-              181
+              181,
+              182,
+              183
             ]
           }
         }
@@ -362,7 +390,7 @@
         "id": "reduce",
         "kind": {
           "WasmVoid": {
-            "arg": 173,
+            "arg": 175,
             "func": "wc_reduce"
           }
         }
@@ -394,7 +422,9 @@
           "map_n_0_10",
           "map_n_0_11",
           "map_n_0_12",
-          "map_n_0_13"
+          "map_n_0_13",
+          "map_n_0_14",
+          "map_n_0_15"
         ],
         "id": "free_distribute_0_m0",
         "kind": {
@@ -413,7 +443,9 @@
               60,
               61,
               62,
-              63
+              63,
+              64,
+              65
             ]
           }
         }
@@ -425,11 +457,11 @@
         "id": "load_1",
         "kind": {
           "Input": {
-            "path": "TestData/corpus_xlarge.txt",
+            "path": "TestData/corpus_wc_4000mb.txt",
             "prefetch": true,
             "slice": [
-              0.11666666666666667,
-              0.23333333333333334
+              0.1111111111111111,
+              0.2222222222222222
             ],
             "slot": 0
           }
@@ -442,7 +474,7 @@
         "id": "distribute_1",
         "kind": {
           "WasmVoid": {
-            "arg": 917554,
+            "arg": 1048626,
             "func": "wc_distribute"
           }
         }
@@ -617,6 +649,30 @@
       },
       {
         "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_1"
+        ],
+        "id": "map_n_1_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
           "map_n_1_0",
           "map_n_1_1",
           "map_n_1_2",
@@ -630,12 +686,14 @@
           "map_n_1_10",
           "map_n_1_11",
           "map_n_1_12",
-          "map_n_1_13"
+          "map_n_1_13",
+          "map_n_1_14",
+          "map_n_1_15"
         ],
         "id": "aggregate_1",
         "kind": {
           "Aggregate": {
-            "downstream": 165,
+            "downstream": 167,
             "upstream": [
               150,
               151,
@@ -650,7 +708,9 @@
               160,
               161,
               162,
-              163
+              163,
+              164,
+              165
             ]
           }
         }
@@ -670,7 +730,9 @@
           "map_n_1_10",
           "map_n_1_11",
           "map_n_1_12",
-          "map_n_1_13"
+          "map_n_1_13",
+          "map_n_1_14",
+          "map_n_1_15"
         ],
         "id": "free_distribute_1_m1",
         "kind": {
@@ -689,7 +751,9 @@
               60,
               61,
               62,
-              63
+              63,
+              64,
+              65
             ]
           }
         }
@@ -702,7 +766,7 @@
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 165,
+            "slot": 167,
             "slot_kind": "Stream"
           }
         }
@@ -714,11 +778,11 @@
         "id": "load_2",
         "kind": {
           "Input": {
-            "path": "TestData/corpus_xlarge.txt",
+            "path": "TestData/corpus_wc_4000mb.txt",
             "prefetch": true,
             "slice": [
-              0.23333333333333334,
-              0.35
+              0.2222222222222222,
+              0.3333333333333333
             ],
             "slot": 0
           }
@@ -731,7 +795,7 @@
         "id": "distribute_2",
         "kind": {
           "WasmVoid": {
-            "arg": 917554,
+            "arg": 1048626,
             "func": "wc_distribute"
           }
         }
@@ -906,6 +970,30 @@
       },
       {
         "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_2"
+        ],
+        "id": "map_n_2_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
           "map_n_2_0",
           "map_n_2_1",
           "map_n_2_2",
@@ -919,12 +1007,14 @@
           "map_n_2_10",
           "map_n_2_11",
           "map_n_2_12",
-          "map_n_2_13"
+          "map_n_2_13",
+          "map_n_2_14",
+          "map_n_2_15"
         ],
         "id": "aggregate_2",
         "kind": {
           "Aggregate": {
-            "downstream": 166,
+            "downstream": 168,
             "upstream": [
               150,
               151,
@@ -939,7 +1029,9 @@
               160,
               161,
               162,
-              163
+              163,
+              164,
+              165
             ]
           }
         }
@@ -959,7 +1051,9 @@
           "map_n_2_10",
           "map_n_2_11",
           "map_n_2_12",
-          "map_n_2_13"
+          "map_n_2_13",
+          "map_n_2_14",
+          "map_n_2_15"
         ],
         "id": "free_distribute_2_m2",
         "kind": {
@@ -978,7 +1072,9 @@
               60,
               61,
               62,
-              63
+              63,
+              64,
+              65
             ]
           }
         }
@@ -991,7 +1087,7 @@
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 166,
+            "slot": 168,
             "slot_kind": "Stream"
           }
         }
@@ -1003,11 +1099,11 @@
         "id": "load_3",
         "kind": {
           "Input": {
-            "path": "TestData/corpus_xlarge.txt",
+            "path": "TestData/corpus_wc_4000mb.txt",
             "prefetch": true,
             "slice": [
-              0.35,
-              0.4583333333333333
+              0.3333333333333333,
+              0.4444444444444444
             ],
             "slot": 0
           }
@@ -1020,7 +1116,7 @@
         "id": "distribute_3",
         "kind": {
           "WasmVoid": {
-            "arg": 852018,
+            "arg": 1048626,
             "func": "wc_distribute"
           }
         }
@@ -1183,6 +1279,42 @@
       },
       {
         "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_3"
+        ],
+        "id": "map_n_3_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
           "map_n_3_0",
           "map_n_3_1",
           "map_n_3_2",
@@ -1195,12 +1327,15 @@
           "map_n_3_9",
           "map_n_3_10",
           "map_n_3_11",
-          "map_n_3_12"
+          "map_n_3_12",
+          "map_n_3_13",
+          "map_n_3_14",
+          "map_n_3_15"
         ],
         "id": "aggregate_3",
         "kind": {
           "Aggregate": {
-            "downstream": 167,
+            "downstream": 169,
             "upstream": [
               150,
               151,
@@ -1214,7 +1349,10 @@
               159,
               160,
               161,
-              162
+              162,
+              163,
+              164,
+              165
             ]
           }
         }
@@ -1233,7 +1371,10 @@
           "map_n_3_9",
           "map_n_3_10",
           "map_n_3_11",
-          "map_n_3_12"
+          "map_n_3_12",
+          "map_n_3_13",
+          "map_n_3_14",
+          "map_n_3_15"
         ],
         "id": "free_distribute_3_m3",
         "kind": {
@@ -1251,7 +1392,10 @@
               59,
               60,
               61,
-              62
+              62,
+              63,
+              64,
+              65
             ]
           }
         }
@@ -1264,7 +1408,7 @@
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 167,
+            "slot": 169,
             "slot_kind": "Stream"
           }
         }
@@ -1276,11 +1420,11 @@
         "id": "load_4",
         "kind": {
           "Input": {
-            "path": "TestData/corpus_xlarge.txt",
+            "path": "TestData/corpus_wc_4000mb.txt",
             "prefetch": true,
             "slice": [
-              0.4583333333333333,
-              0.5666666666666667
+              0.4444444444444444,
+              0.5555555555555556
             ],
             "slot": 0
           }
@@ -1293,7 +1437,7 @@
         "id": "distribute_4",
         "kind": {
           "WasmVoid": {
-            "arg": 852018,
+            "arg": 1048626,
             "func": "wc_distribute"
           }
         }
@@ -1456,6 +1600,42 @@
       },
       {
         "deps": [
+          "distribute_4"
+        ],
+        "id": "map_n_4_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_4"
+        ],
+        "id": "map_n_4_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_4"
+        ],
+        "id": "map_n_4_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
           "map_n_4_0",
           "map_n_4_1",
           "map_n_4_2",
@@ -1468,12 +1648,15 @@
           "map_n_4_9",
           "map_n_4_10",
           "map_n_4_11",
-          "map_n_4_12"
+          "map_n_4_12",
+          "map_n_4_13",
+          "map_n_4_14",
+          "map_n_4_15"
         ],
         "id": "aggregate_4",
         "kind": {
           "Aggregate": {
-            "downstream": 168,
+            "downstream": 170,
             "upstream": [
               150,
               151,
@@ -1487,7 +1670,10 @@
               159,
               160,
               161,
-              162
+              162,
+              163,
+              164,
+              165
             ]
           }
         }
@@ -1506,7 +1692,10 @@
           "map_n_4_9",
           "map_n_4_10",
           "map_n_4_11",
-          "map_n_4_12"
+          "map_n_4_12",
+          "map_n_4_13",
+          "map_n_4_14",
+          "map_n_4_15"
         ],
         "id": "free_distribute_4_m4",
         "kind": {
@@ -1524,7 +1713,10 @@
               59,
               60,
               61,
-              62
+              62,
+              63,
+              64,
+              65
             ]
           }
         }
@@ -1537,7 +1729,7 @@
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 168,
+            "slot": 170,
             "slot_kind": "Stream"
           }
         }
@@ -1549,11 +1741,11 @@
         "id": "load_5",
         "kind": {
           "Input": {
-            "path": "TestData/corpus_xlarge.txt",
+            "path": "TestData/corpus_wc_4000mb.txt",
             "prefetch": true,
             "slice": [
-              0.5666666666666667,
-              0.675
+              0.5555555555555556,
+              0.6666666666666666
             ],
             "slot": 0
           }
@@ -1566,7 +1758,7 @@
         "id": "distribute_5",
         "kind": {
           "WasmVoid": {
-            "arg": 852018,
+            "arg": 1048626,
             "func": "wc_distribute"
           }
         }
@@ -1729,6 +1921,42 @@
       },
       {
         "deps": [
+          "distribute_5"
+        ],
+        "id": "map_n_5_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_5"
+        ],
+        "id": "map_n_5_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_5"
+        ],
+        "id": "map_n_5_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
           "map_n_5_0",
           "map_n_5_1",
           "map_n_5_2",
@@ -1741,12 +1969,15 @@
           "map_n_5_9",
           "map_n_5_10",
           "map_n_5_11",
-          "map_n_5_12"
+          "map_n_5_12",
+          "map_n_5_13",
+          "map_n_5_14",
+          "map_n_5_15"
         ],
         "id": "aggregate_5",
         "kind": {
           "Aggregate": {
-            "downstream": 169,
+            "downstream": 171,
             "upstream": [
               150,
               151,
@@ -1760,7 +1991,10 @@
               159,
               160,
               161,
-              162
+              162,
+              163,
+              164,
+              165
             ]
           }
         }
@@ -1779,7 +2013,10 @@
           "map_n_5_9",
           "map_n_5_10",
           "map_n_5_11",
-          "map_n_5_12"
+          "map_n_5_12",
+          "map_n_5_13",
+          "map_n_5_14",
+          "map_n_5_15"
         ],
         "id": "free_distribute_5_m5",
         "kind": {
@@ -1797,7 +2034,10 @@
               59,
               60,
               61,
-              62
+              62,
+              63,
+              64,
+              65
             ]
           }
         }
@@ -1810,7 +2050,7 @@
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 169,
+            "slot": 171,
             "slot_kind": "Stream"
           }
         }
@@ -1822,11 +2062,11 @@
         "id": "load_6",
         "kind": {
           "Input": {
-            "path": "TestData/corpus_xlarge.txt",
+            "path": "TestData/corpus_wc_4000mb.txt",
             "prefetch": true,
             "slice": [
-              0.675,
-              0.7833333333333333
+              0.6666666666666666,
+              0.7777777777777778
             ],
             "slot": 0
           }
@@ -1839,7 +2079,7 @@
         "id": "distribute_6",
         "kind": {
           "WasmVoid": {
-            "arg": 852018,
+            "arg": 1048626,
             "func": "wc_distribute"
           }
         }
@@ -2002,6 +2242,42 @@
       },
       {
         "deps": [
+          "distribute_6"
+        ],
+        "id": "map_n_6_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_6"
+        ],
+        "id": "map_n_6_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_6"
+        ],
+        "id": "map_n_6_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
           "map_n_6_0",
           "map_n_6_1",
           "map_n_6_2",
@@ -2014,12 +2290,15 @@
           "map_n_6_9",
           "map_n_6_10",
           "map_n_6_11",
-          "map_n_6_12"
+          "map_n_6_12",
+          "map_n_6_13",
+          "map_n_6_14",
+          "map_n_6_15"
         ],
         "id": "aggregate_6",
         "kind": {
           "Aggregate": {
-            "downstream": 170,
+            "downstream": 172,
             "upstream": [
               150,
               151,
@@ -2033,7 +2312,10 @@
               159,
               160,
               161,
-              162
+              162,
+              163,
+              164,
+              165
             ]
           }
         }
@@ -2052,7 +2334,10 @@
           "map_n_6_9",
           "map_n_6_10",
           "map_n_6_11",
-          "map_n_6_12"
+          "map_n_6_12",
+          "map_n_6_13",
+          "map_n_6_14",
+          "map_n_6_15"
         ],
         "id": "free_distribute_6_m6",
         "kind": {
@@ -2070,7 +2355,10 @@
               59,
               60,
               61,
-              62
+              62,
+              63,
+              64,
+              65
             ]
           }
         }
@@ -2083,7 +2371,7 @@
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 170,
+            "slot": 172,
             "slot_kind": "Stream"
           }
         }
@@ -2095,11 +2383,11 @@
         "id": "load_7",
         "kind": {
           "Input": {
-            "path": "TestData/corpus_xlarge.txt",
+            "path": "TestData/corpus_wc_4000mb.txt",
             "prefetch": true,
             "slice": [
-              0.7833333333333333,
-              0.8916666666666667
+              0.7777777777777778,
+              0.8888888888888888
             ],
             "slot": 0
           }
@@ -2112,7 +2400,7 @@
         "id": "distribute_7",
         "kind": {
           "WasmVoid": {
-            "arg": 852018,
+            "arg": 1048626,
             "func": "wc_distribute"
           }
         }
@@ -2275,6 +2563,42 @@
       },
       {
         "deps": [
+          "distribute_7"
+        ],
+        "id": "map_n_7_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_7"
+        ],
+        "id": "map_n_7_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_7"
+        ],
+        "id": "map_n_7_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
           "map_n_7_0",
           "map_n_7_1",
           "map_n_7_2",
@@ -2287,12 +2611,15 @@
           "map_n_7_9",
           "map_n_7_10",
           "map_n_7_11",
-          "map_n_7_12"
+          "map_n_7_12",
+          "map_n_7_13",
+          "map_n_7_14",
+          "map_n_7_15"
         ],
         "id": "aggregate_7",
         "kind": {
           "Aggregate": {
-            "downstream": 171,
+            "downstream": 173,
             "upstream": [
               150,
               151,
@@ -2306,7 +2633,10 @@
               159,
               160,
               161,
-              162
+              162,
+              163,
+              164,
+              165
             ]
           }
         }
@@ -2325,7 +2655,10 @@
           "map_n_7_9",
           "map_n_7_10",
           "map_n_7_11",
-          "map_n_7_12"
+          "map_n_7_12",
+          "map_n_7_13",
+          "map_n_7_14",
+          "map_n_7_15"
         ],
         "id": "free_distribute_7_m7",
         "kind": {
@@ -2343,7 +2676,10 @@
               59,
               60,
               61,
-              62
+              62,
+              63,
+              64,
+              65
             ]
           }
         }
@@ -2356,7 +2692,7 @@
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 171,
+            "slot": 173,
             "slot_kind": "Stream"
           }
         }
@@ -2368,10 +2704,10 @@
         "id": "load_8",
         "kind": {
           "Input": {
-            "path": "TestData/corpus_xlarge.txt",
+            "path": "TestData/corpus_wc_4000mb.txt",
             "prefetch": true,
             "slice": [
-              0.8916666666666667,
+              0.8888888888888888,
               1.0
             ],
             "slot": 0
@@ -2385,7 +2721,7 @@
         "id": "distribute_8",
         "kind": {
           "WasmVoid": {
-            "arg": 852018,
+            "arg": 1048626,
             "func": "wc_distribute"
           }
         }
@@ -2548,6 +2884,42 @@
       },
       {
         "deps": [
+          "distribute_8"
+        ],
+        "id": "map_n_8_13",
+        "kind": {
+          "WasmVoid": {
+            "arg": 63,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_8"
+        ],
+        "id": "map_n_8_14",
+        "kind": {
+          "WasmVoid": {
+            "arg": 64,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
+          "distribute_8"
+        ],
+        "id": "map_n_8_15",
+        "kind": {
+          "WasmVoid": {
+            "arg": 65,
+            "func": "wc_map"
+          }
+        }
+      },
+      {
+        "deps": [
           "map_n_8_0",
           "map_n_8_1",
           "map_n_8_2",
@@ -2560,12 +2932,15 @@
           "map_n_8_9",
           "map_n_8_10",
           "map_n_8_11",
-          "map_n_8_12"
+          "map_n_8_12",
+          "map_n_8_13",
+          "map_n_8_14",
+          "map_n_8_15"
         ],
         "id": "aggregate_8",
         "kind": {
           "Aggregate": {
-            "downstream": 172,
+            "downstream": 174,
             "upstream": [
               150,
               151,
@@ -2579,7 +2954,10 @@
               159,
               160,
               161,
-              162
+              162,
+              163,
+              164,
+              165
             ]
           }
         }
@@ -2598,7 +2976,10 @@
           "map_n_8_9",
           "map_n_8_10",
           "map_n_8_11",
-          "map_n_8_12"
+          "map_n_8_12",
+          "map_n_8_13",
+          "map_n_8_14",
+          "map_n_8_15"
         ],
         "id": "free_distribute_8_m8",
         "kind": {
@@ -2616,7 +2997,10 @@
               59,
               60,
               61,
-              62
+              62,
+              63,
+              64,
+              65
             ]
           }
         }
@@ -2629,7 +3013,7 @@
         "kind": {
           "RemoteSend": {
             "peer": 0,
-            "slot": 172,
+            "slot": 174,
             "slot_kind": "Stream"
           }
         }
@@ -2638,7 +3022,7 @@
   },
   "shared_inputs": [
     {
-      "path": "TestData/corpus_xlarge.txt",
+      "path": "TestData/corpus_wc_4000mb.txt",
       "source_node": 0
     }
   ],

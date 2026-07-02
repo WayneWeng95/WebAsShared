@@ -220,4 +220,34 @@ impl ClusterDag {
         }
         map
     }
+
+    /// For each (logical) node id, the per-file data-parallel `slice` ([lo,hi]
+    /// fractions) its `Input` nodes declare — defaulting to the whole file [0,1]
+    /// when absent. The coordinator uses this to RDMA-stage each worker ONLY its
+    /// line-aligned slice window (not the whole file), then rewrites the slice to
+    /// [0,1] so the executor loads the whole (already-sliced) staged file.
+    pub fn input_slices_by_node(&self) -> HashMap<u32, HashMap<String, [f64; 2]>> {
+        let mut map: HashMap<u32, HashMap<String, [f64; 2]>> = HashMap::new();
+        for (node_id_str, nodes) in &self.node_dags {
+            let node_id: u32 = match node_id_str.parse() { Ok(v) => v, Err(_) => continue };
+            let m = map.entry(node_id).or_default();
+            for node in nodes {
+                if let Some(inp) = node.get("kind").and_then(|k| k.get("Input")) {
+                    if let Some(path) = inp.get("path").and_then(|p| p.as_str()) {
+                        // binary/chunk_bytes inputs ignore slice (load_slice is skipped) → keep whole.
+                        let binary = inp.get("binary").and_then(|b| b.as_bool()).unwrap_or(false);
+                        let has_chunk = inp.get("chunk_bytes").map(|c| !c.is_null()).unwrap_or(false);
+                        let slice = inp.get("slice").and_then(|s| s.as_array()).and_then(|a| {
+                            if a.len() == 2 {
+                                Some([a[0].as_f64().unwrap_or(0.0), a[1].as_f64().unwrap_or(1.0)])
+                            } else { None }
+                        });
+                        let win = if binary || has_chunk { [0.0, 1.0] } else { slice.unwrap_or([0.0, 1.0]) };
+                        m.insert(path.to_string(), win);
+                    }
+                }
+            }
+        }
+        map
+    }
 }
