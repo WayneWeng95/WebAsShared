@@ -1,2 +1,2 @@
 size_mb,workers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,records,keysum,sorted,expect,success,reps
-1200,4,8,15731,50.9,53018,12582912,8115998987,1,12582912|8115998987|1,True,3
+1536,4,8,25430,231.6,74729,16106127,10388596156,1,16106127|10388596156|1,True,3

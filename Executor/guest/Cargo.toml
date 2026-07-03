@@ -12,3 +12,7 @@ default = []
 
 [dependencies]
 common = { path = "../common" }
+# no_std hash map (foldhash default hasher — deterministic, no RNG) for word_count's
+# counter, matching the Python `dict`/`Counter` and C++ `std::unordered_map` used by the
+# other benchmark systems. Kept minimal: default-hasher only, no ahash/std.
+hashbrown = { version = "0.15", default-features = false, features = ["default-hasher", "inline-more"] }

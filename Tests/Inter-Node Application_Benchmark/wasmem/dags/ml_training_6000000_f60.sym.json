@@ -32,855 +32,15 @@
       }
     },
     {
-      "id": "encode_0",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 10,
-          "wasm_arg": 6553610
-        }
-      },
-      "node_id": 0
-    },
-    {
-      "id": "encode_1",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 11,
-          "wasm_arg": 6619147
-        }
-      },
-      "node_id": 1
-    },
-    {
-      "id": "encode_2",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 12,
-          "wasm_arg": 6684684
-        }
-      },
-      "node_id": 2
-    },
-    {
-      "id": "encode_3",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 13,
-          "wasm_arg": 6750221
-        }
-      },
-      "node_id": 3
-    },
-    {
-      "id": "encode_4",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 14,
-          "wasm_arg": 6815758
-        }
-      },
-      "node_id": 4
-    },
-    {
-      "id": "encode_5",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 15,
-          "wasm_arg": 6881295
-        }
-      },
-      "node_id": 5
-    },
-    {
-      "id": "encode_6",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 16,
-          "wasm_arg": 6946832
-        }
-      },
-      "node_id": 6
-    },
-    {
-      "id": "encode_7",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 17,
-          "wasm_arg": 7012369
-        }
-      },
-      "node_id": 7
-    },
-    {
-      "id": "encode_8",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 18,
-          "wasm_arg": 7077906
-        }
-      },
-      "node_id": 8
-    },
-    {
-      "id": "encode_9",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 19,
-          "wasm_arg": 7143443
-        }
-      },
-      "node_id": 0
-    },
-    {
-      "id": "encode_10",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 20,
-          "wasm_arg": 7208980
-        }
-      },
-      "node_id": 1
-    },
-    {
-      "id": "encode_11",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 21,
-          "wasm_arg": 7274517
-        }
-      },
-      "node_id": 2
-    },
-    {
-      "id": "encode_12",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 22,
-          "wasm_arg": 7340054
-        }
-      },
-      "node_id": 3
-    },
-    {
-      "id": "encode_13",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 23,
-          "wasm_arg": 7405591
-        }
-      },
-      "node_id": 4
-    },
-    {
-      "id": "encode_14",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 24,
-          "wasm_arg": 7471128
-        }
-      },
-      "node_id": 5
-    },
-    {
-      "id": "encode_15",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 25,
-          "wasm_arg": 7536665
-        }
-      },
-      "node_id": 6
-    },
-    {
-      "id": "encode_16",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 26,
-          "wasm_arg": 7602202
-        }
-      },
-      "node_id": 7
-    },
-    {
-      "id": "encode_17",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 27,
-          "wasm_arg": 7667739
-        }
-      },
-      "node_id": 8
-    },
-    {
-      "id": "encode_18",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 28,
-          "wasm_arg": 7733276
-        }
-      },
-      "node_id": 0
-    },
-    {
-      "id": "encode_19",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 29,
-          "wasm_arg": 7798813
-        }
-      },
-      "node_id": 1
-    },
-    {
-      "id": "encode_20",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 30,
-          "wasm_arg": 7864350
-        }
-      },
-      "node_id": 2
-    },
-    {
-      "id": "encode_21",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 31,
-          "wasm_arg": 7929887
-        }
-      },
-      "node_id": 3
-    },
-    {
-      "id": "encode_22",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 32,
-          "wasm_arg": 7995424
-        }
-      },
-      "node_id": 4
-    },
-    {
-      "id": "encode_23",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 33,
-          "wasm_arg": 8060961
-        }
-      },
-      "node_id": 5
-    },
-    {
-      "id": "encode_24",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 34,
-          "wasm_arg": 8126498
-        }
-      },
-      "node_id": 6
-    },
-    {
-      "id": "encode_25",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 35,
-          "wasm_arg": 8192035
-        }
-      },
-      "node_id": 7
-    },
-    {
-      "id": "encode_26",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 36,
-          "wasm_arg": 8257572
-        }
-      },
-      "node_id": 8
-    },
-    {
-      "id": "encode_27",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 37,
-          "wasm_arg": 8323109
-        }
-      },
-      "node_id": 0
-    },
-    {
-      "id": "encode_28",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 38,
-          "wasm_arg": 8388646
-        }
-      },
-      "node_id": 1
-    },
-    {
-      "id": "encode_29",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 39,
-          "wasm_arg": 8454183
-        }
-      },
-      "node_id": 2
-    },
-    {
-      "id": "encode_30",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 40,
-          "wasm_arg": 8519720
-        }
-      },
-      "node_id": 3
-    },
-    {
-      "id": "encode_31",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 41,
-          "wasm_arg": 8585257
-        }
-      },
-      "node_id": 4
-    },
-    {
-      "id": "encode_32",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 42,
-          "wasm_arg": 8650794
-        }
-      },
-      "node_id": 5
-    },
-    {
-      "id": "encode_33",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 43,
-          "wasm_arg": 8716331
-        }
-      },
-      "node_id": 6
-    },
-    {
-      "id": "encode_34",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 44,
-          "wasm_arg": 8781868
-        }
-      },
-      "node_id": 7
-    },
-    {
-      "id": "encode_35",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 45,
-          "wasm_arg": 8847405
-        }
-      },
-      "node_id": 8
-    },
-    {
-      "id": "encode_36",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 46,
-          "wasm_arg": 8912942
-        }
-      },
-      "node_id": 0
-    },
-    {
-      "id": "encode_37",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 47,
-          "wasm_arg": 8978479
-        }
-      },
-      "node_id": 1
-    },
-    {
-      "id": "encode_38",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 48,
-          "wasm_arg": 9044016
-        }
-      },
-      "node_id": 2
-    },
-    {
-      "id": "encode_39",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 49,
-          "wasm_arg": 9109553
-        }
-      },
-      "node_id": 3
-    },
-    {
-      "id": "encode_40",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 50,
-          "wasm_arg": 9175090
-        }
-      },
-      "node_id": 4
-    },
-    {
-      "id": "encode_41",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 51,
-          "wasm_arg": 9240627
-        }
-      },
-      "node_id": 5
-    },
-    {
-      "id": "encode_42",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 52,
-          "wasm_arg": 9306164
-        }
-      },
-      "node_id": 6
-    },
-    {
-      "id": "encode_43",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 53,
-          "wasm_arg": 9371701
-        }
-      },
-      "node_id": 7
-    },
-    {
-      "id": "encode_44",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 54,
-          "wasm_arg": 9437238
-        }
-      },
-      "node_id": 8
-    },
-    {
-      "id": "encode_45",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 55,
-          "wasm_arg": 9502775
-        }
-      },
-      "node_id": 0
-    },
-    {
-      "id": "encode_46",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 56,
-          "wasm_arg": 9568312
-        }
-      },
-      "node_id": 1
-    },
-    {
-      "id": "encode_47",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 57,
-          "wasm_arg": 9633849
-        }
-      },
-      "node_id": 2
-    },
-    {
-      "id": "encode_48",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 58,
-          "wasm_arg": 9699386
-        }
-      },
-      "node_id": 3
-    },
-    {
-      "id": "encode_49",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 59,
-          "wasm_arg": 9764923
-        }
-      },
-      "node_id": 4
-    },
-    {
-      "id": "encode_50",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 60,
-          "wasm_arg": 9830460
-        }
-      },
-      "node_id": 5
-    },
-    {
-      "id": "encode_51",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 61,
-          "wasm_arg": 9895997
-        }
-      },
-      "node_id": 6
-    },
-    {
-      "id": "encode_52",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 62,
-          "wasm_arg": 9961534
-        }
-      },
-      "node_id": 7
-    },
-    {
-      "id": "encode_53",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 63,
-          "wasm_arg": 10027071
-        }
-      },
-      "node_id": 8
-    },
-    {
-      "id": "encode_54",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 64,
-          "wasm_arg": 10092608
-        }
-      },
-      "node_id": 0
-    },
-    {
-      "id": "encode_55",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 65,
-          "wasm_arg": 10158145
-        }
-      },
-      "node_id": 1
-    },
-    {
-      "id": "encode_56",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 66,
-          "wasm_arg": 10223682
-        }
-      },
-      "node_id": 2
-    },
-    {
-      "id": "encode_57",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 67,
-          "wasm_arg": 10289219
-        }
-      },
-      "node_id": 3
-    },
-    {
-      "id": "encode_58",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 68,
-          "wasm_arg": 10354756
-        }
-      },
-      "node_id": 4
-    },
-    {
-      "id": "encode_59",
-      "deps": [
-        "partition"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_encode",
-          "arg": 69,
-          "wasm_arg": 10420293
-        }
-      },
-      "node_id": 5
-    },
-    {
       "id": "train_0",
       "deps": [
-        "encode_0"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 100,
-          "wasm_arg": 19660900
+          "func": "sgd_grad_text",
+          "arg": 10,
+          "wasm_arg": 19660810
         }
       },
       "node_id": 0,
@@ -889,13 +49,13 @@
     {
       "id": "train_1",
       "deps": [
-        "encode_1"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 101,
-          "wasm_arg": 19726437
+          "func": "sgd_grad_text",
+          "arg": 11,
+          "wasm_arg": 19726347
         }
       },
       "node_id": 1,
@@ -904,13 +64,13 @@
     {
       "id": "train_2",
       "deps": [
-        "encode_2"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 102,
-          "wasm_arg": 19791974
+          "func": "sgd_grad_text",
+          "arg": 12,
+          "wasm_arg": 19791884
         }
       },
       "node_id": 2,
@@ -919,13 +79,13 @@
     {
       "id": "train_3",
       "deps": [
-        "encode_3"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 103,
-          "wasm_arg": 19857511
+          "func": "sgd_grad_text",
+          "arg": 13,
+          "wasm_arg": 19857421
         }
       },
       "node_id": 3,
@@ -934,13 +94,13 @@
     {
       "id": "train_4",
       "deps": [
-        "encode_4"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 104,
-          "wasm_arg": 19923048
+          "func": "sgd_grad_text",
+          "arg": 14,
+          "wasm_arg": 19922958
         }
       },
       "node_id": 4,
@@ -949,13 +109,13 @@
     {
       "id": "train_5",
       "deps": [
-        "encode_5"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 105,
-          "wasm_arg": 19988585
+          "func": "sgd_grad_text",
+          "arg": 15,
+          "wasm_arg": 19988495
         }
       },
       "node_id": 5,
@@ -964,13 +124,13 @@
     {
       "id": "train_6",
       "deps": [
-        "encode_6"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 106,
-          "wasm_arg": 20054122
+          "func": "sgd_grad_text",
+          "arg": 16,
+          "wasm_arg": 20054032
         }
       },
       "node_id": 6,
@@ -979,13 +139,13 @@
     {
       "id": "train_7",
       "deps": [
-        "encode_7"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 107,
-          "wasm_arg": 20119659
+          "func": "sgd_grad_text",
+          "arg": 17,
+          "wasm_arg": 20119569
         }
       },
       "node_id": 7,
@@ -994,13 +154,13 @@
     {
       "id": "train_8",
       "deps": [
-        "encode_8"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 108,
-          "wasm_arg": 20185196
+          "func": "sgd_grad_text",
+          "arg": 18,
+          "wasm_arg": 20185106
         }
       },
       "node_id": 8,
@@ -1009,13 +169,13 @@
     {
       "id": "train_9",
       "deps": [
-        "encode_9"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 109,
-          "wasm_arg": 20250733
+          "func": "sgd_grad_text",
+          "arg": 19,
+          "wasm_arg": 20250643
         }
       },
       "node_id": 0,
@@ -1024,13 +184,13 @@
     {
       "id": "train_10",
       "deps": [
-        "encode_10"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 110,
-          "wasm_arg": 20316270
+          "func": "sgd_grad_text",
+          "arg": 20,
+          "wasm_arg": 20316180
         }
       },
       "node_id": 1,
@@ -1039,13 +199,13 @@
     {
       "id": "train_11",
       "deps": [
-        "encode_11"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 111,
-          "wasm_arg": 20381807
+          "func": "sgd_grad_text",
+          "arg": 21,
+          "wasm_arg": 20381717
         }
       },
       "node_id": 2,
@@ -1054,13 +214,13 @@
     {
       "id": "train_12",
       "deps": [
-        "encode_12"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 112,
-          "wasm_arg": 20447344
+          "func": "sgd_grad_text",
+          "arg": 22,
+          "wasm_arg": 20447254
         }
       },
       "node_id": 3,
@@ -1069,13 +229,13 @@
     {
       "id": "train_13",
       "deps": [
-        "encode_13"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 113,
-          "wasm_arg": 20512881
+          "func": "sgd_grad_text",
+          "arg": 23,
+          "wasm_arg": 20512791
         }
       },
       "node_id": 4,
@@ -1084,13 +244,13 @@
     {
       "id": "train_14",
       "deps": [
-        "encode_14"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 114,
-          "wasm_arg": 20578418
+          "func": "sgd_grad_text",
+          "arg": 24,
+          "wasm_arg": 20578328
         }
       },
       "node_id": 5,
@@ -1099,13 +259,13 @@
     {
       "id": "train_15",
       "deps": [
-        "encode_15"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 115,
-          "wasm_arg": 20643955
+          "func": "sgd_grad_text",
+          "arg": 25,
+          "wasm_arg": 20643865
         }
       },
       "node_id": 6,
@@ -1114,13 +274,13 @@
     {
       "id": "train_16",
       "deps": [
-        "encode_16"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 116,
-          "wasm_arg": 20709492
+          "func": "sgd_grad_text",
+          "arg": 26,
+          "wasm_arg": 20709402
         }
       },
       "node_id": 7,
@@ -1129,13 +289,13 @@
     {
       "id": "train_17",
       "deps": [
-        "encode_17"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 117,
-          "wasm_arg": 20775029
+          "func": "sgd_grad_text",
+          "arg": 27,
+          "wasm_arg": 20774939
         }
       },
       "node_id": 8,
@@ -1144,13 +304,13 @@
     {
       "id": "train_18",
       "deps": [
-        "encode_18"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 118,
-          "wasm_arg": 20840566
+          "func": "sgd_grad_text",
+          "arg": 28,
+          "wasm_arg": 20840476
         }
       },
       "node_id": 0,
@@ -1159,13 +319,13 @@
     {
       "id": "train_19",
       "deps": [
-        "encode_19"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 119,
-          "wasm_arg": 20906103
+          "func": "sgd_grad_text",
+          "arg": 29,
+          "wasm_arg": 20906013
         }
       },
       "node_id": 1,
@@ -1174,13 +334,13 @@
     {
       "id": "train_20",
       "deps": [
-        "encode_20"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 120,
-          "wasm_arg": 20971640
+          "func": "sgd_grad_text",
+          "arg": 30,
+          "wasm_arg": 20971550
         }
       },
       "node_id": 2,
@@ -1189,13 +349,13 @@
     {
       "id": "train_21",
       "deps": [
-        "encode_21"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 121,
-          "wasm_arg": 21037177
+          "func": "sgd_grad_text",
+          "arg": 31,
+          "wasm_arg": 21037087
         }
       },
       "node_id": 3,
@@ -1204,13 +364,13 @@
     {
       "id": "train_22",
       "deps": [
-        "encode_22"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 122,
-          "wasm_arg": 21102714
+          "func": "sgd_grad_text",
+          "arg": 32,
+          "wasm_arg": 21102624
         }
       },
       "node_id": 4,
@@ -1219,13 +379,13 @@
     {
       "id": "train_23",
       "deps": [
-        "encode_23"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 123,
-          "wasm_arg": 21168251
+          "func": "sgd_grad_text",
+          "arg": 33,
+          "wasm_arg": 21168161
         }
       },
       "node_id": 5,
@@ -1234,13 +394,13 @@
     {
       "id": "train_24",
       "deps": [
-        "encode_24"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 124,
-          "wasm_arg": 21233788
+          "func": "sgd_grad_text",
+          "arg": 34,
+          "wasm_arg": 21233698
         }
       },
       "node_id": 6,
@@ -1249,13 +409,13 @@
     {
       "id": "train_25",
       "deps": [
-        "encode_25"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 125,
-          "wasm_arg": 21299325
+          "func": "sgd_grad_text",
+          "arg": 35,
+          "wasm_arg": 21299235
         }
       },
       "node_id": 7,
@@ -1264,13 +424,13 @@
     {
       "id": "train_26",
       "deps": [
-        "encode_26"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 126,
-          "wasm_arg": 21364862
+          "func": "sgd_grad_text",
+          "arg": 36,
+          "wasm_arg": 21364772
         }
       },
       "node_id": 8,
@@ -1279,13 +439,13 @@
     {
       "id": "train_27",
       "deps": [
-        "encode_27"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 127,
-          "wasm_arg": 21430399
+          "func": "sgd_grad_text",
+          "arg": 37,
+          "wasm_arg": 21430309
         }
       },
       "node_id": 0,
@@ -1294,13 +454,13 @@
     {
       "id": "train_28",
       "deps": [
-        "encode_28"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 128,
-          "wasm_arg": 21495936
+          "func": "sgd_grad_text",
+          "arg": 38,
+          "wasm_arg": 21495846
         }
       },
       "node_id": 1,
@@ -1309,13 +469,13 @@
     {
       "id": "train_29",
       "deps": [
-        "encode_29"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 129,
-          "wasm_arg": 21561473
+          "func": "sgd_grad_text",
+          "arg": 39,
+          "wasm_arg": 21561383
         }
       },
       "node_id": 2,
@@ -1324,13 +484,13 @@
     {
       "id": "train_30",
       "deps": [
-        "encode_30"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 130,
-          "wasm_arg": 21627010
+          "func": "sgd_grad_text",
+          "arg": 40,
+          "wasm_arg": 21626920
         }
       },
       "node_id": 3,
@@ -1339,13 +499,13 @@
     {
       "id": "train_31",
       "deps": [
-        "encode_31"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 131,
-          "wasm_arg": 21692547
+          "func": "sgd_grad_text",
+          "arg": 41,
+          "wasm_arg": 21692457
         }
       },
       "node_id": 4,
@@ -1354,13 +514,13 @@
     {
       "id": "train_32",
       "deps": [
-        "encode_32"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 132,
-          "wasm_arg": 21758084
+          "func": "sgd_grad_text",
+          "arg": 42,
+          "wasm_arg": 21757994
         }
       },
       "node_id": 5,
@@ -1369,13 +529,13 @@
     {
       "id": "train_33",
       "deps": [
-        "encode_33"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 133,
-          "wasm_arg": 21823621
+          "func": "sgd_grad_text",
+          "arg": 43,
+          "wasm_arg": 21823531
         }
       },
       "node_id": 6,
@@ -1384,13 +544,13 @@
     {
       "id": "train_34",
       "deps": [
-        "encode_34"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 134,
-          "wasm_arg": 21889158
+          "func": "sgd_grad_text",
+          "arg": 44,
+          "wasm_arg": 21889068
         }
       },
       "node_id": 7,
@@ -1399,13 +559,13 @@
     {
       "id": "train_35",
       "deps": [
-        "encode_35"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 135,
-          "wasm_arg": 21954695
+          "func": "sgd_grad_text",
+          "arg": 45,
+          "wasm_arg": 21954605
         }
       },
       "node_id": 8,
@@ -1414,13 +574,13 @@
     {
       "id": "train_36",
       "deps": [
-        "encode_36"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 136,
-          "wasm_arg": 22020232
+          "func": "sgd_grad_text",
+          "arg": 46,
+          "wasm_arg": 22020142
         }
       },
       "node_id": 0,
@@ -1429,13 +589,13 @@
     {
       "id": "train_37",
       "deps": [
-        "encode_37"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 137,
-          "wasm_arg": 22085769
+          "func": "sgd_grad_text",
+          "arg": 47,
+          "wasm_arg": 22085679
         }
       },
       "node_id": 1,
@@ -1444,13 +604,13 @@
     {
       "id": "train_38",
       "deps": [
-        "encode_38"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 138,
-          "wasm_arg": 22151306
+          "func": "sgd_grad_text",
+          "arg": 48,
+          "wasm_arg": 22151216
         }
       },
       "node_id": 2,
@@ -1459,13 +619,13 @@
     {
       "id": "train_39",
       "deps": [
-        "encode_39"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 139,
-          "wasm_arg": 22216843
+          "func": "sgd_grad_text",
+          "arg": 49,
+          "wasm_arg": 22216753
         }
       },
       "node_id": 3,
@@ -1474,13 +634,13 @@
     {
       "id": "train_40",
       "deps": [
-        "encode_40"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 140,
-          "wasm_arg": 22282380
+          "func": "sgd_grad_text",
+          "arg": 50,
+          "wasm_arg": 22282290
         }
       },
       "node_id": 4,
@@ -1489,13 +649,13 @@
     {
       "id": "train_41",
       "deps": [
-        "encode_41"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 141,
-          "wasm_arg": 22347917
+          "func": "sgd_grad_text",
+          "arg": 51,
+          "wasm_arg": 22347827
         }
       },
       "node_id": 5,
@@ -1504,13 +664,13 @@
     {
       "id": "train_42",
       "deps": [
-        "encode_42"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 142,
-          "wasm_arg": 22413454
+          "func": "sgd_grad_text",
+          "arg": 52,
+          "wasm_arg": 22413364
         }
       },
       "node_id": 6,
@@ -1519,13 +679,13 @@
     {
       "id": "train_43",
       "deps": [
-        "encode_43"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 143,
-          "wasm_arg": 22478991
+          "func": "sgd_grad_text",
+          "arg": 53,
+          "wasm_arg": 22478901
         }
       },
       "node_id": 7,
@@ -1534,13 +694,13 @@
     {
       "id": "train_44",
       "deps": [
-        "encode_44"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 144,
-          "wasm_arg": 22544528
+          "func": "sgd_grad_text",
+          "arg": 54,
+          "wasm_arg": 22544438
         }
       },
       "node_id": 8,
@@ -1549,13 +709,13 @@
     {
       "id": "train_45",
       "deps": [
-        "encode_45"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 145,
-          "wasm_arg": 22610065
+          "func": "sgd_grad_text",
+          "arg": 55,
+          "wasm_arg": 22609975
         }
       },
       "node_id": 0,
@@ -1564,13 +724,13 @@
     {
       "id": "train_46",
       "deps": [
-        "encode_46"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 146,
-          "wasm_arg": 22675602
+          "func": "sgd_grad_text",
+          "arg": 56,
+          "wasm_arg": 22675512
         }
       },
       "node_id": 1,
@@ -1579,13 +739,13 @@
     {
       "id": "train_47",
       "deps": [
-        "encode_47"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 147,
-          "wasm_arg": 22741139
+          "func": "sgd_grad_text",
+          "arg": 57,
+          "wasm_arg": 22741049
         }
       },
       "node_id": 2,
@@ -1594,13 +754,13 @@
     {
       "id": "train_48",
       "deps": [
-        "encode_48"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 148,
-          "wasm_arg": 22806676
+          "func": "sgd_grad_text",
+          "arg": 58,
+          "wasm_arg": 22806586
         }
       },
       "node_id": 3,
@@ -1609,13 +769,13 @@
     {
       "id": "train_49",
       "deps": [
-        "encode_49"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 149,
-          "wasm_arg": 22872213
+          "func": "sgd_grad_text",
+          "arg": 59,
+          "wasm_arg": 22872123
         }
       },
       "node_id": 4,
@@ -1624,13 +784,13 @@
     {
       "id": "train_50",
       "deps": [
-        "encode_50"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 150,
-          "wasm_arg": 22937750
+          "func": "sgd_grad_text",
+          "arg": 60,
+          "wasm_arg": 22937660
         }
       },
       "node_id": 5,
@@ -1639,13 +799,13 @@
     {
       "id": "train_51",
       "deps": [
-        "encode_51"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 151,
-          "wasm_arg": 23003287
+          "func": "sgd_grad_text",
+          "arg": 61,
+          "wasm_arg": 23003197
         }
       },
       "node_id": 6,
@@ -1654,13 +814,13 @@
     {
       "id": "train_52",
       "deps": [
-        "encode_52"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 152,
-          "wasm_arg": 23068824
+          "func": "sgd_grad_text",
+          "arg": 62,
+          "wasm_arg": 23068734
         }
       },
       "node_id": 7,
@@ -1669,13 +829,13 @@
     {
       "id": "train_53",
       "deps": [
-        "encode_53"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 153,
-          "wasm_arg": 23134361
+          "func": "sgd_grad_text",
+          "arg": 63,
+          "wasm_arg": 23134271
         }
       },
       "node_id": 8,
@@ -1684,13 +844,13 @@
     {
       "id": "train_54",
       "deps": [
-        "encode_54"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 154,
-          "wasm_arg": 23199898
+          "func": "sgd_grad_text",
+          "arg": 64,
+          "wasm_arg": 23199808
         }
       },
       "node_id": 0,
@@ -1699,13 +859,13 @@
     {
       "id": "train_55",
       "deps": [
-        "encode_55"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 155,
-          "wasm_arg": 23265435
+          "func": "sgd_grad_text",
+          "arg": 65,
+          "wasm_arg": 23265345
         }
       },
       "node_id": 1,
@@ -1714,13 +874,13 @@
     {
       "id": "train_56",
       "deps": [
-        "encode_56"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 156,
-          "wasm_arg": 23330972
+          "func": "sgd_grad_text",
+          "arg": 66,
+          "wasm_arg": 23330882
         }
       },
       "node_id": 2,
@@ -1729,13 +889,13 @@
     {
       "id": "train_57",
       "deps": [
-        "encode_57"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 157,
-          "wasm_arg": 23396509
+          "func": "sgd_grad_text",
+          "arg": 67,
+          "wasm_arg": 23396419
         }
       },
       "node_id": 3,
@@ -1744,13 +904,13 @@
     {
       "id": "train_58",
       "deps": [
-        "encode_58"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 158,
-          "wasm_arg": 23462046
+          "func": "sgd_grad_text",
+          "arg": 68,
+          "wasm_arg": 23461956
         }
       },
       "node_id": 4,
@@ -1759,13 +919,13 @@
     {
       "id": "train_59",
       "deps": [
-        "encode_59"
+        "partition"
       ],
       "kind": {
         "Func": {
-          "func": "sgd_grad",
-          "arg": 159,
-          "wasm_arg": 23527583
+          "func": "sgd_grad_text",
+          "arg": 69,
+          "wasm_arg": 23527493
         }
       },
       "node_id": 5,
@@ -1823,22 +983,9 @@
       }
     },
     {
-      "id": "validate",
-      "deps": [
-        "update"
-      ],
-      "kind": {
-        "Func": {
-          "func": "sgd_validate",
-          "arg": 100,
-          "wasm_arg": 3932260
-        }
-      }
-    },
-    {
       "id": "save",
       "deps": [
-        "validate"
+        "update"
       ],
       "kind": {
         "Output": {

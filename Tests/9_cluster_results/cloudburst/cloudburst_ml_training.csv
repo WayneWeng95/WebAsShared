@@ -1,2 +1,2 @@
 samples,workers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,accuracy_pct,weight_checksum,expect,success,reps,mem_max_mb,mem_total_mb,redis_peak_mb,cold_makespan_mean_ms,cold_makespan_std_ms
-6000000,120,8,3527,108.2,122702,74.35,1232,1232,True,12,924,8059,706,10818,63.5
+10000000,120,8,6161,113.2,195782,74.35,1232,1232,True,12,1621,11738,1145,13378,150.6

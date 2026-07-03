@@ -94,17 +94,17 @@ def build_dag(W):
                            "wasm_arg": packed(DATA_BASE, W)}}},
     ]
 
+    # The FAN: one gradient worker per shard. Fused parse+gradient (`sgd_grad_text`)
+    # reads its TEXT shard directly (DATA_BASE+i) and accumulates the gradient in ONE
+    # pass — NO separate `encode` wave. The TIMED topology is thus partition→grad→agg→
+    # update, identical to the Cloudburst/RMMap/Faasm baselines (which parse in-worker).
+    # placement:"all" is a placeholder — gen_variants.py strips it and assigns an
+    # explicit node_id per policy; `partition` stays placement:"all" so each placed
+    # worker finds its text shard in local SHM.
     for i in range(W):
-        nodes.append({"id": f"encode_{i}", "placement": "all", "deps": ["partition"],
-                      "kind": {"Func": {"func": "sgd_encode", "arg": DATA_BASE + i,
-                                        "wasm_arg": packed(DATA_BASE + i, BIN_BASE + i)}}})
-
-    # The FAN: one gradient worker per shard. placement:"all" here is a placeholder —
-    # gen_variants.py strips it and assigns an explicit node_id per placement policy.
-    for i in range(W):
-        nodes.append({"id": f"train_{i}", "placement": "all", "deps": [f"encode_{i}"],
-                      "kind": {"Func": {"func": "sgd_grad", "arg": BIN_BASE + i,
-                                        "wasm_arg": packed(BIN_BASE + i, GRAD_BASE + i)}}})
+        nodes.append({"id": f"train_{i}", "placement": "all", "deps": ["partition"],
+                      "kind": {"Func": {"func": "sgd_grad_text", "arg": DATA_BASE + i,
+                                        "wasm_arg": packed(DATA_BASE + i, GRAD_BASE + i)}}})
 
     # AGGREGATOR: the upstream list declares each worker's grad output slot (64+i) so
     # the partitioner/gen_variants know where the guest writes; downstream is the
@@ -120,15 +120,13 @@ def build_dag(W):
         # Reducer: sum every worker's gradient, take ONE central step, append the
         # model. No arg → the partitioner auto-wires its input to aggregate_global's
         # downstream (exactly like finra's `merge`).
+        # Reducer: sum every worker's gradient, take ONE central step, append the model,
+        # and emit the weight_checksum gate + the final model. Accuracy is scored UNTIMED
+        # by the driver (matching the baselines) — no per-shard `sgd_validate` in the
+        # timed path.
         {"id": "update", "deps": ["aggregate_global"],
          "kind": {"Func": {"func": "sgd_update"}}},
-        # Validate reads all W binary shards (node 0 has them — encode is
-        # placement:all) plus the freshly-written model, and emits the
-        # weight_checksum gate + accuracy.
-        {"id": "validate", "deps": ["update"],
-         "kind": {"Func": {"func": "sgd_validate", "arg": BIN_BASE,
-                           "wasm_arg": packed(BIN_BASE, W)}}},
-        {"id": "save", "deps": ["validate"],
+        {"id": "save", "deps": ["update"],
          "kind": {"Output": {"path": "TestOutput/ml_training_ap_result.txt"}}},
     ]
 

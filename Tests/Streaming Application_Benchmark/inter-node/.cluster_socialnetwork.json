@@ -1,5 +1,5 @@
 {
-  "_comment": "ClusterDag: socialnetwork streaming across 4 nodes (data-parallel + RDMA partial-tally merge on node 3).",
+  "_comment": "ClusterDag: socialnetwork streaming across 8 nodes (data-parallel + RDMA partial-tally tree merge, branch=2, root=node 0).",
   "shm_path_prefix": "/dev/shm/rdma_stream",
   "log_level": "info",
   "transfer": true,
@@ -19,12 +19,39 @@
     {
       "path": "TestData/stream_app/cluster/events_node3.csv",
       "source_node": 0
+    },
+    {
+      "path": "TestData/stream_app/cluster/events_node4.csv",
+      "source_node": 0
+    },
+    {
+      "path": "TestData/stream_app/cluster/events_node5.csv",
+      "source_node": 0
+    },
+    {
+      "path": "TestData/stream_app/cluster/events_node6.csv",
+      "source_node": 0
+    },
+    {
+      "path": "TestData/stream_app/cluster/events_node7.csv",
+      "source_node": 0
     }
   ],
   "node_dags": {
     "0": [
       {
-        "id": "load",
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "sn_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "load_0",
         "deps": [],
         "kind": {
           "Input": {
@@ -35,33 +62,22 @@
         }
       },
       {
-        "id": "seed",
-        "deps": [],
-        "kind": {
-          "Func": {
-            "func": "sn_seed",
-            "arg": 0,
-            "wasm_arg": 10000
-          }
-        }
-      },
-      {
-        "id": "parse",
+        "id": "parse_0",
         "deps": [
-          "load"
+          "load_0"
         ],
         "kind": {
           "Func": {
             "func": "sn_parse",
-            "arg": 4,
+            "arg": 8,
             "arg2": 10
           }
         }
       },
       {
-        "id": "apply_0",
+        "id": "apply_0_0",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -73,9 +89,9 @@
         }
       },
       {
-        "id": "apply_1",
+        "id": "apply_0_1",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -87,9 +103,9 @@
         }
       },
       {
-        "id": "apply_2",
+        "id": "apply_0_2",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -101,9 +117,9 @@
         }
       },
       {
-        "id": "apply_3",
+        "id": "apply_0_3",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -115,12 +131,72 @@
         }
       },
       {
+        "id": "apply_0_4",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_0_5",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_0_6",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_0_7",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
         "id": "persist",
         "deps": [
-          "apply_0",
-          "apply_1",
-          "apply_2",
-          "apply_3"
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7"
         ],
         "kind": {
           "Persist": {
@@ -131,10 +207,18 @@
               11,
               12,
               13,
+              14,
+              15,
+              16,
+              17,
               110,
               111,
               112,
-              113
+              113,
+              114,
+              115,
+              116,
+              117
             ],
             "shared_state": true,
             "sync": true
@@ -152,530 +236,112 @@
               110,
               111,
               112,
-              113
+              113,
+              114,
+              115,
+              116,
+              117
             ],
             "downstream": 200
           }
         }
       },
       {
-        "id": "send",
-        "deps": [
-          "aggregate_local"
-        ],
-        "kind": {
-          "RemoteSend": {
-            "slot": 200,
-            "slot_kind": "Stream",
-            "peer": 3
-          }
-        }
-      }
-    ],
-    "1": [
-      {
-        "id": "load",
-        "deps": [],
-        "kind": {
-          "Input": {
-            "path": "TestData/stream_app/cluster/events_node1.csv",
-            "slot": 0,
-            "prefetch": true
-          }
-        }
-      },
-      {
-        "id": "seed",
-        "deps": [],
-        "kind": {
-          "Func": {
-            "func": "sn_seed",
-            "arg": 0,
-            "wasm_arg": 10000
-          }
-        }
-      },
-      {
-        "id": "parse",
-        "deps": [
-          "load"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_parse",
-            "arg": 4,
-            "arg2": 10
-          }
-        }
-      },
-      {
-        "id": "apply_0",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 10,
-            "arg2": 110
-          }
-        }
-      },
-      {
-        "id": "apply_1",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 11,
-            "arg2": 111
-          }
-        }
-      },
-      {
-        "id": "apply_2",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 12,
-            "arg2": 112
-          }
-        }
-      },
-      {
-        "id": "apply_3",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 13,
-            "arg2": 113
-          }
-        }
-      },
-      {
-        "id": "persist",
-        "deps": [
-          "apply_0",
-          "apply_1",
-          "apply_2",
-          "apply_3"
-        ],
-        "kind": {
-          "Persist": {
-            "output_dir": "TestOutput/persist/node1",
-            "atomics": true,
-            "stream_slots": [
-              10,
-              11,
-              12,
-              13,
-              110,
-              111,
-              112,
-              113
-            ],
-            "shared_state": true,
-            "sync": true
-          }
-        }
-      },
-      {
-        "id": "aggregate_local",
-        "deps": [
-          "persist"
-        ],
-        "kind": {
-          "Aggregate": {
-            "upstream": [
-              110,
-              111,
-              112,
-              113
-            ],
-            "downstream": 200
-          }
-        }
-      },
-      {
-        "id": "send",
-        "deps": [
-          "aggregate_local"
-        ],
-        "kind": {
-          "RemoteSend": {
-            "slot": 200,
-            "slot_kind": "Stream",
-            "peer": 3
-          }
-        }
-      }
-    ],
-    "2": [
-      {
-        "id": "load",
-        "deps": [],
-        "kind": {
-          "Input": {
-            "path": "TestData/stream_app/cluster/events_node2.csv",
-            "slot": 0,
-            "prefetch": true
-          }
-        }
-      },
-      {
-        "id": "seed",
-        "deps": [],
-        "kind": {
-          "Func": {
-            "func": "sn_seed",
-            "arg": 0,
-            "wasm_arg": 10000
-          }
-        }
-      },
-      {
-        "id": "parse",
-        "deps": [
-          "load"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_parse",
-            "arg": 4,
-            "arg2": 10
-          }
-        }
-      },
-      {
-        "id": "apply_0",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 10,
-            "arg2": 110
-          }
-        }
-      },
-      {
-        "id": "apply_1",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 11,
-            "arg2": 111
-          }
-        }
-      },
-      {
-        "id": "apply_2",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 12,
-            "arg2": 112
-          }
-        }
-      },
-      {
-        "id": "apply_3",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 13,
-            "arg2": 113
-          }
-        }
-      },
-      {
-        "id": "persist",
-        "deps": [
-          "apply_0",
-          "apply_1",
-          "apply_2",
-          "apply_3"
-        ],
-        "kind": {
-          "Persist": {
-            "output_dir": "TestOutput/persist/node2",
-            "atomics": true,
-            "stream_slots": [
-              10,
-              11,
-              12,
-              13,
-              110,
-              111,
-              112,
-              113
-            ],
-            "shared_state": true,
-            "sync": true
-          }
-        }
-      },
-      {
-        "id": "aggregate_local",
-        "deps": [
-          "persist"
-        ],
-        "kind": {
-          "Aggregate": {
-            "upstream": [
-              110,
-              111,
-              112,
-              113
-            ],
-            "downstream": 200
-          }
-        }
-      },
-      {
-        "id": "send",
-        "deps": [
-          "aggregate_local"
-        ],
-        "kind": {
-          "RemoteSend": {
-            "slot": 200,
-            "slot_kind": "Stream",
-            "peer": 3
-          }
-        }
-      }
-    ],
-    "3": [
-      {
-        "id": "load",
-        "deps": [],
-        "kind": {
-          "Input": {
-            "path": "TestData/stream_app/cluster/events_node3.csv",
-            "slot": 0,
-            "prefetch": true
-          }
-        }
-      },
-      {
-        "id": "seed",
-        "deps": [],
-        "kind": {
-          "Func": {
-            "func": "sn_seed",
-            "arg": 0,
-            "wasm_arg": 10000
-          }
-        }
-      },
-      {
-        "id": "parse",
-        "deps": [
-          "load"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_parse",
-            "arg": 4,
-            "arg2": 10
-          }
-        }
-      },
-      {
-        "id": "apply_0",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 10,
-            "arg2": 110
-          }
-        }
-      },
-      {
-        "id": "apply_1",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 11,
-            "arg2": 111
-          }
-        }
-      },
-      {
-        "id": "apply_2",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 12,
-            "arg2": 112
-          }
-        }
-      },
-      {
-        "id": "apply_3",
-        "deps": [
-          "parse",
-          "seed"
-        ],
-        "kind": {
-          "Func": {
-            "func": "sn_apply",
-            "arg": 13,
-            "arg2": 113
-          }
-        }
-      },
-      {
-        "id": "persist",
-        "deps": [
-          "apply_0",
-          "apply_1",
-          "apply_2",
-          "apply_3"
-        ],
-        "kind": {
-          "Persist": {
-            "output_dir": "TestOutput/persist/node3",
-            "atomics": true,
-            "stream_slots": [
-              10,
-              11,
-              12,
-              13,
-              110,
-              111,
-              112,
-              113
-            ],
-            "shared_state": true,
-            "sync": true
-          }
-        }
-      },
-      {
-        "id": "aggregate_local",
-        "deps": [
-          "persist"
-        ],
-        "kind": {
-          "Aggregate": {
-            "upstream": [
-              110,
-              111,
-              112,
-              113
-            ],
-            "downstream": 200
-          }
-        }
-      },
-      {
-        "id": "recv_0",
+        "id": "recv_l0_1",
         "deps": [
           "aggregate_local"
         ],
         "kind": {
           "RemoteRecv": {
-            "slot": 201,
-            "slot_kind": "Stream",
-            "peer": 0
-          }
-        }
-      },
-      {
-        "id": "recv_1",
-        "deps": [
-          "aggregate_local"
-        ],
-        "kind": {
-          "RemoteRecv": {
-            "slot": 202,
+            "slot": 400,
             "slot_kind": "Stream",
             "peer": 1
           }
         }
       },
       {
-        "id": "recv_2",
+        "id": "agg_l0",
         "deps": [
-          "aggregate_local"
+          "aggregate_local",
+          "recv_l0_1"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              200,
+              400
+            ],
+            "downstream": 360
+          }
+        }
+      },
+      {
+        "id": "recv_l1_2",
+        "deps": [
+          "agg_l0"
         ],
         "kind": {
           "RemoteRecv": {
-            "slot": 203,
+            "slot": 432,
             "slot_kind": "Stream",
             "peer": 2
           }
         }
       },
       {
-        "id": "aggregate_global",
+        "id": "agg_l1",
         "deps": [
-          "aggregate_local",
-          "recv_0",
-          "recv_1",
-          "recv_2"
+          "agg_l0",
+          "recv_l1_2"
         ],
         "kind": {
           "Aggregate": {
             "upstream": [
-              200,
-              201,
-              202,
-              203
+              360,
+              432
             ],
-            "downstream": 300
+            "downstream": 361
+          }
+        }
+      },
+      {
+        "id": "recv_l2_4",
+        "deps": [
+          "agg_l1"
+        ],
+        "kind": {
+          "RemoteRecv": {
+            "slot": 464,
+            "slot_kind": "Stream",
+            "peer": 4
+          }
+        }
+      },
+      {
+        "id": "agg_l2",
+        "deps": [
+          "agg_l1",
+          "recv_l2_4"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              361,
+              464
+            ],
+            "downstream": 362
           }
         }
       },
       {
         "id": "summary",
         "deps": [
-          "aggregate_global"
+          "agg_l2"
         ],
         "kind": {
           "Func": {
             "func": "sn_summary",
-            "arg": 300
+            "arg": 362
           }
         }
       },
@@ -687,6 +353,1676 @@
         "kind": {
           "Output": {
             "path": "TestOutput/rdma_stream_socialnetwork.txt"
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "sn_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "load_0",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node1.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_0",
+        "deps": [
+          "load_0"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_parse",
+            "arg": 8,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0_0",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_0_1",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_0_2",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_0_3",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_0_4",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_0_5",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_0_6",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_0_7",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "persist",
+        "deps": [
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7"
+        ],
+        "kind": {
+          "Persist": {
+            "output_dir": "TestOutput/persist/node1",
+            "atomics": true,
+            "stream_slots": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "shared_state": true,
+            "sync": true
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "persist"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "send",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "RemoteSend": {
+            "slot": 200,
+            "slot_kind": "Stream",
+            "peer": 0
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "sn_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "load_0",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node2.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_0",
+        "deps": [
+          "load_0"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_parse",
+            "arg": 8,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0_0",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_0_1",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_0_2",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_0_3",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_0_4",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_0_5",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_0_6",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_0_7",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "persist",
+        "deps": [
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7"
+        ],
+        "kind": {
+          "Persist": {
+            "output_dir": "TestOutput/persist/node2",
+            "atomics": true,
+            "stream_slots": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "shared_state": true,
+            "sync": true
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "persist"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "recv_l0_3",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "RemoteRecv": {
+            "slot": 400,
+            "slot_kind": "Stream",
+            "peer": 3
+          }
+        }
+      },
+      {
+        "id": "agg_l0",
+        "deps": [
+          "aggregate_local",
+          "recv_l0_3"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              200,
+              400
+            ],
+            "downstream": 360
+          }
+        }
+      },
+      {
+        "id": "send",
+        "deps": [
+          "agg_l0"
+        ],
+        "kind": {
+          "RemoteSend": {
+            "slot": 360,
+            "slot_kind": "Stream",
+            "peer": 0
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "sn_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "load_0",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node3.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_0",
+        "deps": [
+          "load_0"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_parse",
+            "arg": 8,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0_0",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_0_1",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_0_2",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_0_3",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_0_4",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_0_5",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_0_6",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_0_7",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "persist",
+        "deps": [
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7"
+        ],
+        "kind": {
+          "Persist": {
+            "output_dir": "TestOutput/persist/node3",
+            "atomics": true,
+            "stream_slots": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "shared_state": true,
+            "sync": true
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "persist"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "send",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "RemoteSend": {
+            "slot": 200,
+            "slot_kind": "Stream",
+            "peer": 2
+          }
+        }
+      }
+    ],
+    "4": [
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "sn_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "load_0",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node4.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_0",
+        "deps": [
+          "load_0"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_parse",
+            "arg": 8,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0_0",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_0_1",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_0_2",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_0_3",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_0_4",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_0_5",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_0_6",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_0_7",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "persist",
+        "deps": [
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7"
+        ],
+        "kind": {
+          "Persist": {
+            "output_dir": "TestOutput/persist/node4",
+            "atomics": true,
+            "stream_slots": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "shared_state": true,
+            "sync": true
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "persist"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "recv_l0_5",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "RemoteRecv": {
+            "slot": 400,
+            "slot_kind": "Stream",
+            "peer": 5
+          }
+        }
+      },
+      {
+        "id": "agg_l0",
+        "deps": [
+          "aggregate_local",
+          "recv_l0_5"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              200,
+              400
+            ],
+            "downstream": 360
+          }
+        }
+      },
+      {
+        "id": "recv_l1_6",
+        "deps": [
+          "agg_l0"
+        ],
+        "kind": {
+          "RemoteRecv": {
+            "slot": 432,
+            "slot_kind": "Stream",
+            "peer": 6
+          }
+        }
+      },
+      {
+        "id": "agg_l1",
+        "deps": [
+          "agg_l0",
+          "recv_l1_6"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              360,
+              432
+            ],
+            "downstream": 361
+          }
+        }
+      },
+      {
+        "id": "send",
+        "deps": [
+          "agg_l1"
+        ],
+        "kind": {
+          "RemoteSend": {
+            "slot": 361,
+            "slot_kind": "Stream",
+            "peer": 0
+          }
+        }
+      }
+    ],
+    "5": [
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "sn_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "load_0",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node5.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_0",
+        "deps": [
+          "load_0"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_parse",
+            "arg": 8,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0_0",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_0_1",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_0_2",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_0_3",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_0_4",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_0_5",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_0_6",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_0_7",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "persist",
+        "deps": [
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7"
+        ],
+        "kind": {
+          "Persist": {
+            "output_dir": "TestOutput/persist/node5",
+            "atomics": true,
+            "stream_slots": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "shared_state": true,
+            "sync": true
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "persist"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "send",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "RemoteSend": {
+            "slot": 200,
+            "slot_kind": "Stream",
+            "peer": 4
+          }
+        }
+      }
+    ],
+    "6": [
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "sn_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "load_0",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node6.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_0",
+        "deps": [
+          "load_0"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_parse",
+            "arg": 8,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0_0",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_0_1",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_0_2",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_0_3",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_0_4",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_0_5",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_0_6",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_0_7",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "persist",
+        "deps": [
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7"
+        ],
+        "kind": {
+          "Persist": {
+            "output_dir": "TestOutput/persist/node6",
+            "atomics": true,
+            "stream_slots": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "shared_state": true,
+            "sync": true
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "persist"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "recv_l0_7",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "RemoteRecv": {
+            "slot": 400,
+            "slot_kind": "Stream",
+            "peer": 7
+          }
+        }
+      },
+      {
+        "id": "agg_l0",
+        "deps": [
+          "aggregate_local",
+          "recv_l0_7"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              200,
+              400
+            ],
+            "downstream": 360
+          }
+        }
+      },
+      {
+        "id": "send",
+        "deps": [
+          "agg_l0"
+        ],
+        "kind": {
+          "RemoteSend": {
+            "slot": 360,
+            "slot_kind": "Stream",
+            "peer": 4
+          }
+        }
+      }
+    ],
+    "7": [
+      {
+        "id": "seed",
+        "deps": [],
+        "kind": {
+          "Func": {
+            "func": "sn_seed",
+            "arg": 0,
+            "wasm_arg": 10000
+          }
+        }
+      },
+      {
+        "id": "load_0",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node7.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_0",
+        "deps": [
+          "load_0"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_parse",
+            "arg": 8,
+            "arg2": 10
+          }
+        }
+      },
+      {
+        "id": "apply_0_0",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 10,
+            "arg2": 110
+          }
+        }
+      },
+      {
+        "id": "apply_0_1",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 11,
+            "arg2": 111
+          }
+        }
+      },
+      {
+        "id": "apply_0_2",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 12,
+            "arg2": 112
+          }
+        }
+      },
+      {
+        "id": "apply_0_3",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 13,
+            "arg2": 113
+          }
+        }
+      },
+      {
+        "id": "apply_0_4",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 14,
+            "arg2": 114
+          }
+        }
+      },
+      {
+        "id": "apply_0_5",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 15,
+            "arg2": 115
+          }
+        }
+      },
+      {
+        "id": "apply_0_6",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 16,
+            "arg2": 116
+          }
+        }
+      },
+      {
+        "id": "apply_0_7",
+        "deps": [
+          "parse_0",
+          "seed"
+        ],
+        "kind": {
+          "Func": {
+            "func": "sn_apply",
+            "arg": 17,
+            "arg2": 117
+          }
+        }
+      },
+      {
+        "id": "persist",
+        "deps": [
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7"
+        ],
+        "kind": {
+          "Persist": {
+            "output_dir": "TestOutput/persist/node7",
+            "atomics": true,
+            "stream_slots": [
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "shared_state": true,
+            "sync": true
+          }
+        }
+      },
+      {
+        "id": "aggregate_local",
+        "deps": [
+          "persist"
+        ],
+        "kind": {
+          "Aggregate": {
+            "upstream": [
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ],
+            "downstream": 200
+          }
+        }
+      },
+      {
+        "id": "send",
+        "deps": [
+          "aggregate_local"
+        ],
+        "kind": {
+          "RemoteSend": {
+            "slot": 200,
+            "slot_kind": "Stream",
+            "peer": 6
           }
         }
       }

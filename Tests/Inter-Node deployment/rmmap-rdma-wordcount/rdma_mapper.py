@@ -40,14 +40,22 @@ def main():
     partial = wc_ops.wc_map(data)
     count_ms = (time.time() - t1) * 1000.0
 
-    busy_ms = transfer_ms + count_ms
-    # one self-contained line per mapper (the node launcher concatenates 15 of these).
-    # occ is the fan-out-invariant gate; the full {word:count} reduce is omitted — merging
-    # 60 tiny dicts is sub-second and identical across all systems, not the cost compared.
+    # @shuffle-write: serialize the partial {word:count} so it can be shipped to the
+    # reducer on node 0 — the RMMap analogue of Cloudburst's KVS `put` of the mapper
+    # return and Faasm's `partial_<i>` state write. Emitted after the RESULT line as
+    # "word\tcount" records; node 0 merges them (the reduce the other systems all time).
+    t2 = time.time()
+    partial_blob = ''.join('%s\t%d\n' % (w, c) for w, c in partial.items())
+    ser_ms = (time.time() - t2) * 1000.0
+
+    busy_ms = transfer_ms + count_ms + ser_ms
+    # one RESULT line per mapper (the node launcher concatenates 15 of these), then the
+    # partial records for the shuffle. occ is the fan-out-invariant gate.
     sys.stdout.write('RESULT idx=%s busy_ms=%.3f transfer_ms=%.3f read_ms=%.3f '
-                     'count_ms=%.3f occ=%d unique=%d len=%d\n' %
-                     (idx, busy_ms, transfer_ms, read_ms, count_ms,
+                     'count_ms=%.3f ser_ms=%.3f occ=%d unique=%d len=%d\n' %
+                     (idx, busy_ms, transfer_ms, read_ms, count_ms, ser_ms,
                       sum(partial.values()), len(partial), len(data)))
+    sys.stdout.write(partial_blob)
 
 
 if __name__ == '__main__':

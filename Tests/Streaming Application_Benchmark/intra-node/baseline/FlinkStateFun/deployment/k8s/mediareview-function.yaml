@@ -16,6 +16,7 @@ spec:
       containers:
         - name: mediareview-function
           image: streaming-example-mediareview
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
 ---

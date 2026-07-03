@@ -4,11 +4,33 @@
     "0": [
       {
         "deps": [],
+        "id": "rr_aggregate_train_local_3_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 1204,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
         "id": "rr_aggregate_train_local_2_from_2",
         "kind": {
           "RemoteRecv": {
             "peer": 2,
             "slot": 1203,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_aggregate_train_local_4_from_4",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 4,
+            "slot": 1205,
             "slot_kind": "Stream"
           }
         }
@@ -26,11 +48,11 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_train_local_6_from_6",
+        "id": "rr_aggregate_train_local_7_from_7",
         "kind": {
           "RemoteRecv": {
-            "peer": 6,
-            "slot": 1207,
+            "peer": 7,
+            "slot": 1208,
             "slot_kind": "Stream"
           }
         }
@@ -48,33 +70,11 @@
       },
       {
         "deps": [],
-        "id": "rr_aggregate_train_local_3_from_3",
+        "id": "rr_aggregate_train_local_6_from_6",
         "kind": {
           "RemoteRecv": {
-            "peer": 3,
-            "slot": 1204,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_train_local_7_from_7",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 7,
-            "slot": 1208,
-            "slot_kind": "Stream"
-          }
-        }
-      },
-      {
-        "deps": [],
-        "id": "rr_aggregate_train_local_4_from_4",
-        "kind": {
-          "RemoteRecv": {
-            "peer": 4,
-            "slot": 1205,
+            "peer": 6,
+            "slot": 1207,
             "slot_kind": "Stream"
           }
         }
@@ -118,167 +118,83 @@
         "deps": [
           "partition_0"
         ],
-        "id": "encode_0",
-        "kind": {
-          "WasmVoid": {
-            "arg": 6553610,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_0"
-        ],
-        "id": "encode_9",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7143443,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_0"
-        ],
-        "id": "encode_18",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7733276,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_0"
-        ],
-        "id": "encode_27",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8323109,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_0"
-        ],
-        "id": "encode_36",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8912942,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_0"
-        ],
-        "id": "encode_45",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9502775,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_0"
-        ],
-        "id": "encode_54",
-        "kind": {
-          "WasmVoid": {
-            "arg": 10092608,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "encode_0"
-        ],
         "id": "train_0",
         "kind": {
           "WasmVoid": {
-            "arg": 19660900,
-            "func": "sgd_grad"
+            "arg": 19660810,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_9"
+          "partition_0"
         ],
         "id": "train_9",
         "kind": {
           "WasmVoid": {
-            "arg": 20250733,
-            "func": "sgd_grad"
+            "arg": 20250643,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_18"
+          "partition_0"
         ],
         "id": "train_18",
         "kind": {
           "WasmVoid": {
-            "arg": 20840566,
-            "func": "sgd_grad"
+            "arg": 20840476,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_27"
+          "partition_0"
         ],
         "id": "train_27",
         "kind": {
           "WasmVoid": {
-            "arg": 21430399,
-            "func": "sgd_grad"
+            "arg": 21430309,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_36"
+          "partition_0"
         ],
         "id": "train_36",
         "kind": {
           "WasmVoid": {
-            "arg": 22020232,
-            "func": "sgd_grad"
+            "arg": 22020142,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_45"
+          "partition_0"
         ],
         "id": "train_45",
         "kind": {
           "WasmVoid": {
-            "arg": 22610065,
-            "func": "sgd_grad"
+            "arg": 22609975,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_54"
+          "partition_0"
         ],
         "id": "train_54",
         "kind": {
           "WasmVoid": {
-            "arg": 23199898,
-            "func": "sgd_grad"
+            "arg": 23199808,
+            "func": "sgd_grad_text"
           }
         }
       },
@@ -341,18 +257,6 @@
       {
         "deps": [
           "update"
-        ],
-        "id": "validate",
-        "kind": {
-          "WasmVoid": {
-            "arg": 3932260,
-            "func": "sgd_validate"
-          }
-        }
-      },
-      {
-        "deps": [
-          "validate"
         ],
         "id": "save",
         "kind": {
@@ -418,167 +322,83 @@
         "deps": [
           "partition_1"
         ],
-        "id": "encode_1",
-        "kind": {
-          "WasmVoid": {
-            "arg": 6619147,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_1"
-        ],
-        "id": "encode_10",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7208980,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_1"
-        ],
-        "id": "encode_19",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7798813,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_1"
-        ],
-        "id": "encode_28",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8388646,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_1"
-        ],
-        "id": "encode_37",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8978479,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_1"
-        ],
-        "id": "encode_46",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9568312,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_1"
-        ],
-        "id": "encode_55",
-        "kind": {
-          "WasmVoid": {
-            "arg": 10158145,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "encode_1"
-        ],
         "id": "train_1",
         "kind": {
           "WasmVoid": {
-            "arg": 19726437,
-            "func": "sgd_grad"
+            "arg": 19726347,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_10"
+          "partition_1"
         ],
         "id": "train_10",
         "kind": {
           "WasmVoid": {
-            "arg": 20316270,
-            "func": "sgd_grad"
+            "arg": 20316180,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_19"
+          "partition_1"
         ],
         "id": "train_19",
         "kind": {
           "WasmVoid": {
-            "arg": 20906103,
-            "func": "sgd_grad"
+            "arg": 20906013,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_28"
+          "partition_1"
         ],
         "id": "train_28",
         "kind": {
           "WasmVoid": {
-            "arg": 21495936,
-            "func": "sgd_grad"
+            "arg": 21495846,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_37"
+          "partition_1"
         ],
         "id": "train_37",
         "kind": {
           "WasmVoid": {
-            "arg": 22085769,
-            "func": "sgd_grad"
+            "arg": 22085679,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_46"
+          "partition_1"
         ],
         "id": "train_46",
         "kind": {
           "WasmVoid": {
-            "arg": 22675602,
-            "func": "sgd_grad"
+            "arg": 22675512,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_55"
+          "partition_1"
         ],
         "id": "train_55",
         "kind": {
           "WasmVoid": {
-            "arg": 23265435,
-            "func": "sgd_grad"
+            "arg": 23265345,
+            "func": "sgd_grad_text"
           }
         }
       },
@@ -651,167 +471,83 @@
         "deps": [
           "partition_2"
         ],
-        "id": "encode_2",
-        "kind": {
-          "WasmVoid": {
-            "arg": 6684684,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_2"
-        ],
-        "id": "encode_11",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7274517,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_2"
-        ],
-        "id": "encode_20",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7864350,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_2"
-        ],
-        "id": "encode_29",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8454183,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_2"
-        ],
-        "id": "encode_38",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9044016,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_2"
-        ],
-        "id": "encode_47",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9633849,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_2"
-        ],
-        "id": "encode_56",
-        "kind": {
-          "WasmVoid": {
-            "arg": 10223682,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "encode_2"
-        ],
         "id": "train_2",
         "kind": {
           "WasmVoid": {
-            "arg": 19791974,
-            "func": "sgd_grad"
+            "arg": 19791884,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_11"
+          "partition_2"
         ],
         "id": "train_11",
         "kind": {
           "WasmVoid": {
-            "arg": 20381807,
-            "func": "sgd_grad"
+            "arg": 20381717,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_20"
+          "partition_2"
         ],
         "id": "train_20",
         "kind": {
           "WasmVoid": {
-            "arg": 20971640,
-            "func": "sgd_grad"
+            "arg": 20971550,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_29"
+          "partition_2"
         ],
         "id": "train_29",
         "kind": {
           "WasmVoid": {
-            "arg": 21561473,
-            "func": "sgd_grad"
+            "arg": 21561383,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_38"
+          "partition_2"
         ],
         "id": "train_38",
         "kind": {
           "WasmVoid": {
-            "arg": 22151306,
-            "func": "sgd_grad"
+            "arg": 22151216,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_47"
+          "partition_2"
         ],
         "id": "train_47",
         "kind": {
           "WasmVoid": {
-            "arg": 22741139,
-            "func": "sgd_grad"
+            "arg": 22741049,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_56"
+          "partition_2"
         ],
         "id": "train_56",
         "kind": {
           "WasmVoid": {
-            "arg": 23330972,
-            "func": "sgd_grad"
+            "arg": 23330882,
+            "func": "sgd_grad_text"
           }
         }
       },
@@ -884,167 +620,83 @@
         "deps": [
           "partition_3"
         ],
-        "id": "encode_3",
-        "kind": {
-          "WasmVoid": {
-            "arg": 6750221,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_3"
-        ],
-        "id": "encode_12",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7340054,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_3"
-        ],
-        "id": "encode_21",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7929887,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_3"
-        ],
-        "id": "encode_30",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8519720,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_3"
-        ],
-        "id": "encode_39",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9109553,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_3"
-        ],
-        "id": "encode_48",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9699386,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_3"
-        ],
-        "id": "encode_57",
-        "kind": {
-          "WasmVoid": {
-            "arg": 10289219,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "encode_3"
-        ],
         "id": "train_3",
         "kind": {
           "WasmVoid": {
-            "arg": 19857511,
-            "func": "sgd_grad"
+            "arg": 19857421,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_12"
+          "partition_3"
         ],
         "id": "train_12",
         "kind": {
           "WasmVoid": {
-            "arg": 20447344,
-            "func": "sgd_grad"
+            "arg": 20447254,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_21"
+          "partition_3"
         ],
         "id": "train_21",
         "kind": {
           "WasmVoid": {
-            "arg": 21037177,
-            "func": "sgd_grad"
+            "arg": 21037087,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_30"
+          "partition_3"
         ],
         "id": "train_30",
         "kind": {
           "WasmVoid": {
-            "arg": 21627010,
-            "func": "sgd_grad"
+            "arg": 21626920,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_39"
+          "partition_3"
         ],
         "id": "train_39",
         "kind": {
           "WasmVoid": {
-            "arg": 22216843,
-            "func": "sgd_grad"
+            "arg": 22216753,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_48"
+          "partition_3"
         ],
         "id": "train_48",
         "kind": {
           "WasmVoid": {
-            "arg": 22806676,
-            "func": "sgd_grad"
+            "arg": 22806586,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_57"
+          "partition_3"
         ],
         "id": "train_57",
         "kind": {
           "WasmVoid": {
-            "arg": 23396509,
-            "func": "sgd_grad"
+            "arg": 23396419,
+            "func": "sgd_grad_text"
           }
         }
       },
@@ -1117,167 +769,83 @@
         "deps": [
           "partition_4"
         ],
-        "id": "encode_4",
-        "kind": {
-          "WasmVoid": {
-            "arg": 6815758,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_4"
-        ],
-        "id": "encode_13",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7405591,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_4"
-        ],
-        "id": "encode_22",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7995424,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_4"
-        ],
-        "id": "encode_31",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8585257,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_4"
-        ],
-        "id": "encode_40",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9175090,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_4"
-        ],
-        "id": "encode_49",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9764923,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_4"
-        ],
-        "id": "encode_58",
-        "kind": {
-          "WasmVoid": {
-            "arg": 10354756,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "encode_4"
-        ],
         "id": "train_4",
         "kind": {
           "WasmVoid": {
-            "arg": 19923048,
-            "func": "sgd_grad"
+            "arg": 19922958,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_13"
+          "partition_4"
         ],
         "id": "train_13",
         "kind": {
           "WasmVoid": {
-            "arg": 20512881,
-            "func": "sgd_grad"
+            "arg": 20512791,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_22"
+          "partition_4"
         ],
         "id": "train_22",
         "kind": {
           "WasmVoid": {
-            "arg": 21102714,
-            "func": "sgd_grad"
+            "arg": 21102624,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_31"
+          "partition_4"
         ],
         "id": "train_31",
         "kind": {
           "WasmVoid": {
-            "arg": 21692547,
-            "func": "sgd_grad"
+            "arg": 21692457,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_40"
+          "partition_4"
         ],
         "id": "train_40",
         "kind": {
           "WasmVoid": {
-            "arg": 22282380,
-            "func": "sgd_grad"
+            "arg": 22282290,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_49"
+          "partition_4"
         ],
         "id": "train_49",
         "kind": {
           "WasmVoid": {
-            "arg": 22872213,
-            "func": "sgd_grad"
+            "arg": 22872123,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_58"
+          "partition_4"
         ],
         "id": "train_58",
         "kind": {
           "WasmVoid": {
-            "arg": 23462046,
-            "func": "sgd_grad"
+            "arg": 23461956,
+            "func": "sgd_grad_text"
           }
         }
       },
@@ -1350,167 +918,83 @@
         "deps": [
           "partition_5"
         ],
-        "id": "encode_5",
-        "kind": {
-          "WasmVoid": {
-            "arg": 6881295,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_5"
-        ],
-        "id": "encode_14",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7471128,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_5"
-        ],
-        "id": "encode_23",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8060961,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_5"
-        ],
-        "id": "encode_32",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8650794,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_5"
-        ],
-        "id": "encode_41",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9240627,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_5"
-        ],
-        "id": "encode_50",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9830460,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_5"
-        ],
-        "id": "encode_59",
-        "kind": {
-          "WasmVoid": {
-            "arg": 10420293,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "encode_5"
-        ],
         "id": "train_5",
         "kind": {
           "WasmVoid": {
-            "arg": 19988585,
-            "func": "sgd_grad"
+            "arg": 19988495,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_14"
+          "partition_5"
         ],
         "id": "train_14",
         "kind": {
           "WasmVoid": {
-            "arg": 20578418,
-            "func": "sgd_grad"
+            "arg": 20578328,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_23"
+          "partition_5"
         ],
         "id": "train_23",
         "kind": {
           "WasmVoid": {
-            "arg": 21168251,
-            "func": "sgd_grad"
+            "arg": 21168161,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_32"
+          "partition_5"
         ],
         "id": "train_32",
         "kind": {
           "WasmVoid": {
-            "arg": 21758084,
-            "func": "sgd_grad"
+            "arg": 21757994,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_41"
+          "partition_5"
         ],
         "id": "train_41",
         "kind": {
           "WasmVoid": {
-            "arg": 22347917,
-            "func": "sgd_grad"
+            "arg": 22347827,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_50"
+          "partition_5"
         ],
         "id": "train_50",
         "kind": {
           "WasmVoid": {
-            "arg": 22937750,
-            "func": "sgd_grad"
+            "arg": 22937660,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_59"
+          "partition_5"
         ],
         "id": "train_59",
         "kind": {
           "WasmVoid": {
-            "arg": 23527583,
-            "func": "sgd_grad"
+            "arg": 23527493,
+            "func": "sgd_grad_text"
           }
         }
       },
@@ -1583,143 +1067,71 @@
         "deps": [
           "partition_6"
         ],
-        "id": "encode_6",
-        "kind": {
-          "WasmVoid": {
-            "arg": 6946832,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_6"
-        ],
-        "id": "encode_15",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7536665,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_6"
-        ],
-        "id": "encode_24",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8126498,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_6"
-        ],
-        "id": "encode_33",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8716331,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_6"
-        ],
-        "id": "encode_42",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9306164,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_6"
-        ],
-        "id": "encode_51",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9895997,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "encode_6"
-        ],
         "id": "train_6",
         "kind": {
           "WasmVoid": {
-            "arg": 20054122,
-            "func": "sgd_grad"
+            "arg": 20054032,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_15"
+          "partition_6"
         ],
         "id": "train_15",
         "kind": {
           "WasmVoid": {
-            "arg": 20643955,
-            "func": "sgd_grad"
+            "arg": 20643865,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_24"
+          "partition_6"
         ],
         "id": "train_24",
         "kind": {
           "WasmVoid": {
-            "arg": 21233788,
-            "func": "sgd_grad"
+            "arg": 21233698,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_33"
+          "partition_6"
         ],
         "id": "train_33",
         "kind": {
           "WasmVoid": {
-            "arg": 21823621,
-            "func": "sgd_grad"
+            "arg": 21823531,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_42"
+          "partition_6"
         ],
         "id": "train_42",
         "kind": {
           "WasmVoid": {
-            "arg": 22413454,
-            "func": "sgd_grad"
+            "arg": 22413364,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_51"
+          "partition_6"
         ],
         "id": "train_51",
         "kind": {
           "WasmVoid": {
-            "arg": 23003287,
-            "func": "sgd_grad"
+            "arg": 23003197,
+            "func": "sgd_grad_text"
           }
         }
       },
@@ -1790,143 +1202,71 @@
         "deps": [
           "partition_7"
         ],
-        "id": "encode_7",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7012369,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_7"
-        ],
-        "id": "encode_16",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7602202,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_7"
-        ],
-        "id": "encode_25",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8192035,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_7"
-        ],
-        "id": "encode_34",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8781868,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_7"
-        ],
-        "id": "encode_43",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9371701,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_7"
-        ],
-        "id": "encode_52",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9961534,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "encode_7"
-        ],
         "id": "train_7",
         "kind": {
           "WasmVoid": {
-            "arg": 20119659,
-            "func": "sgd_grad"
+            "arg": 20119569,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_16"
+          "partition_7"
         ],
         "id": "train_16",
         "kind": {
           "WasmVoid": {
-            "arg": 20709492,
-            "func": "sgd_grad"
+            "arg": 20709402,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_25"
+          "partition_7"
         ],
         "id": "train_25",
         "kind": {
           "WasmVoid": {
-            "arg": 21299325,
-            "func": "sgd_grad"
+            "arg": 21299235,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_34"
+          "partition_7"
         ],
         "id": "train_34",
         "kind": {
           "WasmVoid": {
-            "arg": 21889158,
-            "func": "sgd_grad"
+            "arg": 21889068,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_43"
+          "partition_7"
         ],
         "id": "train_43",
         "kind": {
           "WasmVoid": {
-            "arg": 22478991,
-            "func": "sgd_grad"
+            "arg": 22478901,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_52"
+          "partition_7"
         ],
         "id": "train_52",
         "kind": {
           "WasmVoid": {
-            "arg": 23068824,
-            "func": "sgd_grad"
+            "arg": 23068734,
+            "func": "sgd_grad_text"
           }
         }
       },
@@ -1997,143 +1337,71 @@
         "deps": [
           "partition_8"
         ],
-        "id": "encode_8",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7077906,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_8"
-        ],
-        "id": "encode_17",
-        "kind": {
-          "WasmVoid": {
-            "arg": 7667739,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_8"
-        ],
-        "id": "encode_26",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8257572,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_8"
-        ],
-        "id": "encode_35",
-        "kind": {
-          "WasmVoid": {
-            "arg": 8847405,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_8"
-        ],
-        "id": "encode_44",
-        "kind": {
-          "WasmVoid": {
-            "arg": 9437238,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "partition_8"
-        ],
-        "id": "encode_53",
-        "kind": {
-          "WasmVoid": {
-            "arg": 10027071,
-            "func": "sgd_encode"
-          }
-        }
-      },
-      {
-        "deps": [
-          "encode_8"
-        ],
         "id": "train_8",
         "kind": {
           "WasmVoid": {
-            "arg": 20185196,
-            "func": "sgd_grad"
+            "arg": 20185106,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_17"
+          "partition_8"
         ],
         "id": "train_17",
         "kind": {
           "WasmVoid": {
-            "arg": 20775029,
-            "func": "sgd_grad"
+            "arg": 20774939,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_26"
+          "partition_8"
         ],
         "id": "train_26",
         "kind": {
           "WasmVoid": {
-            "arg": 21364862,
-            "func": "sgd_grad"
+            "arg": 21364772,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_35"
+          "partition_8"
         ],
         "id": "train_35",
         "kind": {
           "WasmVoid": {
-            "arg": 21954695,
-            "func": "sgd_grad"
+            "arg": 21954605,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_44"
+          "partition_8"
         ],
         "id": "train_44",
         "kind": {
           "WasmVoid": {
-            "arg": 22544528,
-            "func": "sgd_grad"
+            "arg": 22544438,
+            "func": "sgd_grad_text"
           }
         }
       },
       {
         "deps": [
-          "encode_53"
+          "partition_8"
         ],
         "id": "train_53",
         "kind": {
           "WasmVoid": {
-            "arg": 23134361,
-            "func": "sgd_grad"
+            "arg": 23134271,
+            "func": "sgd_grad_text"
           }
         }
       },

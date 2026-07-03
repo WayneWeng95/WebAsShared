@@ -1,0 +1,744 @@
+{
+  "log_level": "info",
+  "node_dags": {
+    "0": [
+      {
+        "deps": [],
+        "id": "rr_combine_1_from_1",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 1,
+            "slot": 402,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_combine_3_from_3",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 3,
+            "slot": 404,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_combine_2_from_2",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 2,
+            "slot": 403,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_combine_4_from_4",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 4,
+            "slot": 405,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_combine_5_from_5",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 5,
+            "slot": 406,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_combine_7_from_7",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 7,
+            "slot": 408,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_combine_8_from_8",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 8,
+            "slot": 409,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "rr_combine_6_from_6",
+        "kind": {
+          "RemoteRecv": {
+            "peer": 6,
+            "slot": 407,
+            "slot_kind": "Stream"
+          }
+        }
+      },
+      {
+        "deps": [],
+        "id": "load_0",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort_1.5gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.0,
+              0.1111111111111111
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_0"
+        ],
+        "id": "part_0",
+        "kind": {
+          "WasmVoid": {
+            "arg": 589824,
+            "func": "ts_partition_local"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_0"
+        ],
+        "id": "combine_0",
+        "kind": {
+          "Aggregate": {
+            "downstream": 2,
+            "upstream": [
+              100,
+              101,
+              102,
+              103,
+              104,
+              105,
+              106,
+              107,
+              108
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_0",
+          "rr_combine_1_from_1",
+          "rr_combine_2_from_2",
+          "rr_combine_3_from_3",
+          "rr_combine_4_from_4",
+          "rr_combine_5_from_5",
+          "rr_combine_6_from_6",
+          "rr_combine_7_from_7",
+          "rr_combine_8_from_8"
+        ],
+        "id": "gather",
+        "kind": {
+          "Aggregate": {
+            "downstream": 400,
+            "upstream": [
+              2,
+              402,
+              403,
+              404,
+              405,
+              406,
+              407,
+              408,
+              409
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "gather"
+        ],
+        "id": "summary",
+        "kind": {
+          "WasmVoid": {
+            "arg": 32768400,
+            "func": "ts_range_summary"
+          }
+        }
+      },
+      {
+        "deps": [
+          "summary"
+        ],
+        "id": "summary_global",
+        "kind": {
+          "Aggregate": {
+            "downstream": 401,
+            "upstream": [
+              500
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "summary_global"
+        ],
+        "id": "finalize",
+        "kind": {
+          "WasmVoid": {
+            "arg": 401,
+            "func": "ts_finalize"
+          }
+        }
+      },
+      {
+        "deps": [
+          "finalize"
+        ],
+        "id": "save",
+        "kind": {
+          "Output": {
+            "path": "TestOutput/terasort_ap_result.txt",
+            "slot": 1
+          }
+        }
+      }
+    ],
+    "1": [
+      {
+        "deps": [],
+        "id": "load_1",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort_1.5gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.1111111111111111,
+              0.2222222222222222
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_1"
+        ],
+        "id": "part_1",
+        "kind": {
+          "WasmVoid": {
+            "arg": 589825,
+            "func": "ts_partition_local"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_1"
+        ],
+        "id": "combine_1",
+        "kind": {
+          "Aggregate": {
+            "downstream": 3,
+            "upstream": [
+              109,
+              110,
+              111,
+              112,
+              113,
+              114,
+              115,
+              116,
+              117
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_1"
+        ],
+        "id": "rs_combine_1_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 3,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "2": [
+      {
+        "deps": [],
+        "id": "load_2",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort_1.5gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.2222222222222222,
+              0.3333333333333333
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_2"
+        ],
+        "id": "part_2",
+        "kind": {
+          "WasmVoid": {
+            "arg": 589826,
+            "func": "ts_partition_local"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_2"
+        ],
+        "id": "combine_2",
+        "kind": {
+          "Aggregate": {
+            "downstream": 4,
+            "upstream": [
+              118,
+              119,
+              120,
+              121,
+              122,
+              123,
+              124,
+              125,
+              126
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_2"
+        ],
+        "id": "rs_combine_2_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 4,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "3": [
+      {
+        "deps": [],
+        "id": "load_3",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort_1.5gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.3333333333333333,
+              0.4444444444444444
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_3"
+        ],
+        "id": "part_3",
+        "kind": {
+          "WasmVoid": {
+            "arg": 589827,
+            "func": "ts_partition_local"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_3"
+        ],
+        "id": "combine_3",
+        "kind": {
+          "Aggregate": {
+            "downstream": 5,
+            "upstream": [
+              127,
+              128,
+              129,
+              130,
+              131,
+              132,
+              133,
+              134,
+              135
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_3"
+        ],
+        "id": "rs_combine_3_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 5,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "4": [
+      {
+        "deps": [],
+        "id": "load_4",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort_1.5gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.4444444444444444,
+              0.5555555555555556
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_4"
+        ],
+        "id": "part_4",
+        "kind": {
+          "WasmVoid": {
+            "arg": 589828,
+            "func": "ts_partition_local"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_4"
+        ],
+        "id": "combine_4",
+        "kind": {
+          "Aggregate": {
+            "downstream": 6,
+            "upstream": [
+              136,
+              137,
+              138,
+              139,
+              140,
+              141,
+              142,
+              143,
+              144
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_4"
+        ],
+        "id": "rs_combine_4_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 6,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "5": [
+      {
+        "deps": [],
+        "id": "load_5",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort_1.5gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.5555555555555556,
+              0.6666666666666666
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_5"
+        ],
+        "id": "part_5",
+        "kind": {
+          "WasmVoid": {
+            "arg": 589829,
+            "func": "ts_partition_local"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_5"
+        ],
+        "id": "combine_5",
+        "kind": {
+          "Aggregate": {
+            "downstream": 7,
+            "upstream": [
+              145,
+              146,
+              147,
+              148,
+              149,
+              150,
+              151,
+              152,
+              153
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_5"
+        ],
+        "id": "rs_combine_5_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 7,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "6": [
+      {
+        "deps": [],
+        "id": "load_6",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort_1.5gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.6666666666666666,
+              0.7777777777777778
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_6"
+        ],
+        "id": "part_6",
+        "kind": {
+          "WasmVoid": {
+            "arg": 589830,
+            "func": "ts_partition_local"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_6"
+        ],
+        "id": "combine_6",
+        "kind": {
+          "Aggregate": {
+            "downstream": 8,
+            "upstream": [
+              154,
+              155,
+              156,
+              157,
+              158,
+              159,
+              160,
+              161,
+              162
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_6"
+        ],
+        "id": "rs_combine_6_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 8,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "7": [
+      {
+        "deps": [],
+        "id": "load_7",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort_1.5gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.7777777777777778,
+              0.8888888888888888
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_7"
+        ],
+        "id": "part_7",
+        "kind": {
+          "WasmVoid": {
+            "arg": 589831,
+            "func": "ts_partition_local"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_7"
+        ],
+        "id": "combine_7",
+        "kind": {
+          "Aggregate": {
+            "downstream": 9,
+            "upstream": [
+              163,
+              164,
+              165,
+              166,
+              167,
+              168,
+              169,
+              170,
+              171
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_7"
+        ],
+        "id": "rs_combine_7_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 9,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ],
+    "8": [
+      {
+        "deps": [],
+        "id": "load_8",
+        "kind": {
+          "Input": {
+            "path": "TestData/terasort_1.5gb.txt",
+            "prefetch": true,
+            "slice": [
+              0.8888888888888888,
+              1.0
+            ],
+            "slot": 0
+          }
+        }
+      },
+      {
+        "deps": [
+          "load_8"
+        ],
+        "id": "part_8",
+        "kind": {
+          "WasmVoid": {
+            "arg": 589832,
+            "func": "ts_partition_local"
+          }
+        }
+      },
+      {
+        "deps": [
+          "part_8"
+        ],
+        "id": "combine_8",
+        "kind": {
+          "Aggregate": {
+            "downstream": 10,
+            "upstream": [
+              172,
+              173,
+              174,
+              175,
+              176,
+              177,
+              178,
+              179,
+              180
+            ]
+          }
+        }
+      },
+      {
+        "deps": [
+          "combine_8"
+        ],
+        "id": "rs_combine_8_to_0",
+        "kind": {
+          "RemoteSend": {
+            "peer": 0,
+            "slot": 10,
+            "slot_kind": "Stream"
+          }
+        }
+      }
+    ]
+  },
+  "shared_inputs": [
+    {
+      "path": "TestData/terasort_1.5gb.txt",
+      "source_node": 0
+    }
+  ],
+  "shm_path_prefix": "/dev/shm/rdma_terasort_ap",
+  "transfer": true
+}

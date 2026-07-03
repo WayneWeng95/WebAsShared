@@ -22,6 +22,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 use alloc::vec::Vec;
+use hashbrown::HashMap;
 use crate::api::ShmApi;
 
 /// First stream slot used by the distribute stage.
@@ -56,7 +57,11 @@ pub extern "C" fn wc_distribute(arg: u32) {
 /// `slot + WC_MAP_OUT_BASE`.
 #[no_mangle]
 pub extern "C" fn wc_map(slot: u32) {
-    let mut counts: Vec<(alloc::string::String, u64)> = Vec::new();
+    // Hash map (hashbrown::HashMap) — the same associative structure as the Cloudburst
+    // & RMMap `Counter` (Python dict) and the Faasm `std::unordered_map`, so the four
+    // systems count with identical O(1)-amortized-per-token complexity (fair-comparison
+    // requirement — the previous Vec did an O(unique) linear scan per token).
+    let mut counts: HashMap<alloc::string::String, u64> = HashMap::new();
 
     let records = ShmApi::read_all_stream_records(slot);
     for (_origin, rec) in &records {
@@ -70,10 +75,7 @@ pub extern "C" fn wc_map(slot: u32) {
                 })
                 .collect();
             if word.is_empty() { continue; }
-            match counts.iter_mut().find(|(w, _)| w == &word) {
-                Some((_, n)) => *n += 1,
-                None => counts.push((word, 1)),
-            }
+            *counts.entry(word).or_insert(0) += 1;
         }
     }
 
@@ -88,7 +90,10 @@ pub extern "C" fn wc_map(slot: u32) {
 /// merge counts, sort alphabetically, and write to `OUTPUT_IO_SLOT`.
 #[no_mangle]
 pub extern "C" fn wc_reduce(stream_slot: u32) {
-    let mut totals: Vec<(alloc::string::String, u64)> = Vec::new();
+    // Same hash-map reducer structure as Cloudburst/RMMap (`Counter.update`) and Faasm
+    // (`std::unordered_map`): accumulate into a hash map, then materialize + sort for a
+    // deterministic output.
+    let mut acc: HashMap<alloc::string::String, u64> = HashMap::new();
 
     let records = ShmApi::read_all_stream_records(stream_slot);
     for (_origin, rec) in &records {
@@ -104,12 +109,10 @@ pub extern "C" fn wc_reduce(stream_slot: u32) {
         let word = &body[..sep];
         let count: u64 = body[sep + 1..].parse().unwrap_or(0);
         if word.is_empty() { continue; }
-        match totals.iter_mut().find(|(w, _)| w == word) {
-            Some((_, n)) => *n += count,
-            None => totals.push((alloc::string::String::from(word), count)),
-        }
+        *acc.entry(alloc::string::String::from(word)).or_insert(0) += count;
     }
 
+    let mut totals: Vec<(alloc::string::String, u64)> = acc.into_iter().collect();
     totals.sort_by(|(a, _), (b, _)| a.as_str().cmp(b.as_str()));
 
     let unique = totals.len();

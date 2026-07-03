@@ -75,21 +75,51 @@ def submit(cdag_path):
 
 
 def read_result():
-    """(weight_checksum, accuracy_str) from the Output file; None if absent."""
-    cks, acc = None, None
+    """(weight_checksum, model[list[int]]) from the Output file; None if absent.
+    The DAG's `update` node emits `weight_checksum=` (the gate) and `model=` (the final
+    weights). Accuracy is scored UNTIMED by the driver — matching the baselines, which
+    finish training at the central update and compute accuracy off-DAG — so it is no
+    longer part of the measured makespan."""
+    cks, model = None, None
     try:
         for line in open(RESULT):
-            m = re.match(r"weight_checksum=(-?\d+)", line.strip())
+            line = line.strip()
+            m = re.match(r"weight_checksum=(-?\d+)", line)
             if m:
                 cks = int(m.group(1))
-            m2 = re.match(r"accuracy=([\d.]+)%", line.strip())
-            if m2:
-                acc = float(m2.group(1))
+            m2 = re.match(r"model=(.+)$", line)
+            if m2 and m2.group(1):
+                model = [int(v) for v in m2.group(1).split(",")]
     except FileNotFoundError:
         return None
     if cks is None:
         return None
-    return cks, acc
+    return cks, model
+
+
+def score_accuracy_untimed(data_abs, model):
+    """Train accuracy from the final model, computed OFF the timed path (numpy argmax,
+    same integer scoring as sgd_core.accuracy / the baselines). Returns pct or None."""
+    if not model:
+        return None
+    try:
+        import numpy as np
+        rows = []
+        with open(data_abs) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line or line.startswith("label"):
+                    continue
+                rows.append([int(v) for v in line.split(",")])
+        arr = np.asarray(rows, dtype=np.int64)
+        y = arr[:, 0]
+        X = arr[:, 1:]
+        F = X.shape[1]
+        W = np.asarray(model, dtype=np.int64).reshape(-1, F)   # [C, F]
+        pred = (X @ W.T).argmax(axis=1)                         # first-max, like the guest
+        return round(float((pred == y).sum()) * 100.0 / X.shape[0], 2)
+    except Exception:
+        return None
 
 
 def main():
@@ -137,8 +167,8 @@ def main():
         makespan, total_job, per_node, ok = submit(cdag)
         res = read_result()
         cks = res[0] if res else None
-        if res and res[1] is not None:
-            acc_seen = res[1]
+        if res and res[1] is not None and acc_seen is None:
+            acc_seen = score_accuracy_untimed(data_abs, res[1])   # UNTIMED, once
         gate = args.expect if args.expect is not None else (cks_seen if cks_seen is not None else cks)
         cks_seen = cks
         success = ok and cks is not None and cks == gate

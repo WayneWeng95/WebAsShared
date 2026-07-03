@@ -1,2 +1,2 @@
 trades,fanout,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,violations,expect,success,reps,mem_max_mb,mem_total_mb,redis_peak_mb,cold_makespan_mean_ms,cold_makespan_std_ms
-5000000,118,8,21056,320.4,163561,2271415,2271415,True,12,7632,47960,1692,28271,262.1
+6000000,118,8,26402,252.6,188294,2724765,2724765,True,3,8000,42248,3399,33233,132.9

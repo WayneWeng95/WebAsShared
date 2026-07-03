@@ -508,6 +508,53 @@ pub extern "C" fn sgd_grad(arg: u32) {
     ShmApi::append_stream_data(grad_out, parts.join(",").as_bytes());
 }
 
+/// Fused gradient worker: parse this worker's TEXT shard AND accumulate the integer
+/// gradient SUM in a SINGLE pass — no separate `sgd_encode` wave, no binary
+/// materialization. This is the E=1 fair-comparison path: it matches the baselines'
+/// in-worker CSV-parse-then-gradient (Cloudburst/RMMap `sgd_core.grad_sum`, Faasm
+/// `sgd_grad.cwasm`), so WasMem's TIMED training topology is `partition → grad → agg →
+/// update`, identical to theirs, instead of the extra `encode` pass the parse-once
+/// (multi-epoch) optimization added. `arg` packs `text_slot | (grad_out_slot << 16)`.
+#[no_mangle]
+pub extern "C" fn sgd_grad_text(arg: u32) {
+    let text_slot = arg & 0xFFFF;
+    let grad_out = arg >> 16;
+
+    // Model: present only on epoch > 0. For the 1-epoch benchmark it's absent → zero
+    // weights (pred == 0). Owned copy (not borrowed) to keep the closure simple.
+    let (c, mut f, wvec) = match sgd_read_model() {
+        Some((c, f, _n, _lr, w)) => (c, f, w),
+        None => (N_CLASSES, 0usize, alloc::vec![]),
+    };
+    let have_model = !wvec.is_empty();
+
+    let mut feats = [0i64; SGD_MAX_FEATURES];
+    let mut g: Vec<i64> = if have_model { alloc::vec![0i64; c * f] } else { Vec::new() };
+    let mut count: i64 = 0;
+    ShmApi::for_each_stream_record(text_slot, |_o, rec| {
+        let (label, nf) = match sgd_parse_into(rec, &mut feats) { Some(s) => s, None => return };
+        if f == 0 { f = nf; }
+        if nf != f { return; }
+        if g.is_empty() { g = alloc::vec![0i64; c * f]; }
+        count += 1;
+        for cls in 0..c {
+            let mut pred: i64 = 0;
+            if have_model { for j in 0..f { pred += wvec[cls * f + j] * feats[j]; } }
+            let target = if cls as i64 == label { SGD_TARGET } else { 0 };
+            let err = pred - target;
+            for j in 0..f { g[cls * f + j] += err * feats[j]; }
+        }
+    });
+    if f == 0 { return; }
+
+    let mut parts = alloc::vec![
+        alloc::string::String::from("grad"),
+        alloc::format!("{}", count), alloc::format!("{}", f),
+    ];
+    for v in &g { parts.push(alloc::format!("{}", v)); }
+    ShmApi::append_stream_data(grad_out, parts.join(",").as_bytes());
+}
+
 /// Update: sum every worker's gradient record (aggregated into `arg`'s slot),
 /// take ONE central toward-zero step, append the new model. On epoch 0 (no model
 /// yet) it bootstraps the model: n_samples = Σ worker counts, lr_den = n*SGD_LR_K,
@@ -547,6 +594,18 @@ pub extern "C" fn sgd_update(arg: u32) {
     }
     for k in 0..c * f { w[k] -= sgd_trunc_div(gsum[k], lr_den); }
     sgd_write_model(c, f, n_model, lr_den, &w);
+
+    // Emit the correctness gate here (cheap: Σ model) so `sgd_validate`'s per-shard
+    // accuracy loop can leave the TIMED path — the baselines likewise finish training
+    // at the central update and compute accuracy off-DAG. We also dump the final model
+    // so the driver can score accuracy UNTIMED (640 ints; negligible).
+    let checksum: i64 = w.iter().sum();
+    ShmApi::write_output_str("=== sgd_training_results ===");
+    ShmApi::write_output_str(&alloc::format!("classes={} features={} samples={}", c, f, n_model));
+    ShmApi::write_output_str(&alloc::format!("weight_checksum={}", checksum));
+    let model_csv: alloc::string::String =
+        w.iter().map(|v| alloc::format!("{}", v)).collect::<Vec<_>>().join(",");
+    ShmApi::write_output_str(&alloc::format!("model={}", model_csv));
 }
 
 /// Validate: read all `W` BINARY shards + the final model, compute the weight

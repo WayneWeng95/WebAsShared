@@ -1,0 +1,9 @@
+system,workload,nodes,throughput_ev_s,note
+wasmem_async,mediareview,9,306304,persist=async @3.6M
+wasmem_async,socialnetwork,9,265663,persist=async @3.6M
+wasmem_sync,mediareview,9,248842,persist=sync @3.6M
+wasmem_sync,socialnetwork,9,229416,persist=sync @3.6M
+rtsfaas,mediareview,9,45422,load-balanced parallel estimate
+rtsfaas,socialnetwork,9,51834,load-balanced parallel estimate
+statefun,mediareview,9,16537,128 pods 16/node 1cpu/2G FT-on
+statefun,socialnetwork,9,11204,128 pods 16/node 1cpu/2G FT-on

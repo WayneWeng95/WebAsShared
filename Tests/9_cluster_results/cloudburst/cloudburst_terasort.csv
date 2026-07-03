@@ -1,2 +1,2 @@
 size_mb,workers,nodes_used,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,records,keysum,sorted,expect,success,reps,mem_max_mb,mem_total_mb,redis_peak_mb,cold_makespan_mean_ms,cold_makespan_std_ms
-1200,4,8,22315,409.4,77294,12582912,8115998987,1,12582912|8115998987|1,True,12,4847,15129,3581,25408,122.3
+1536,4,8,30163,603.3,93987,16106127,10388596156,1,16106127|10388596156|1,True,12,4999,15672,7467,32755,921.5

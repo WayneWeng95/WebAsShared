@@ -37,3 +37,17 @@ def wc_reduce(partials):
         if p:
             total.update(p)
     return dict(total)
+
+
+def wc_reduce_lines(lines):
+    """Reducer over serialized partials: each mapper ships its {word:count} as
+    "word\\tcount" records (the RDMA shuffle payload); merge them all into the final
+    {word:count}. Equivalent to wc_reduce over the deserialized dicts, but merges the
+    120 partials straight into one Counter without rebuilding intermediate dicts."""
+    total = Counter()
+    for ln in lines:
+        tab = ln.rfind('\t')
+        if tab <= 0:
+            continue
+        total[ln[:tab]] += int(ln[tab + 1:])
+    return dict(total)

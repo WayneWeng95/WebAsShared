@@ -16,6 +16,7 @@ spec:
       containers:
         - name: socialnetwork-function
           image: streaming-example-socialnetwork
+          imagePullPolicy: Never
           ports:
             - containerPort: 80
 ---

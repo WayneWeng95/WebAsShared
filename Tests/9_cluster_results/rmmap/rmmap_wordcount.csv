@@ -1,2 +1,2 @@
 size_mb,mappers,nodes_used,variant,makespan_mean_ms,makespan_std_ms,total_job_mean_ms,occurrences,expect,success,reps,cold_start_ms,cold_makespan_ms
-4096,120,8,rdma,11007,281.5,1127823,676710552,676710552,True,3,5903,16910
+4096,120,8,rdma,10772,9.4,1133072,676710552,676710552,True,3,5821,16593

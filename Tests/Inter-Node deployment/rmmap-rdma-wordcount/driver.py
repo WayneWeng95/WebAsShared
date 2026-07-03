@@ -35,12 +35,15 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import wc_ops                              # shared reducer body (wc_reduce_lines)
 
 
 def run_node(node, server_ip, port, idxs, self_host):
     """Launch ALL of this node's mappers in ONE shot (one SSH per node, not per mapper —
     60 concurrent SSH trips sshd MaxStartups). The remote launcher spawns its mappers in
-    parallel, then cats their RESULT lines. Returns the list of RESULT lines."""
+    parallel, then cats their RESULT lines AND their serialized partial records. Returns
+    every stdout line (RESULT metrics + "word\\tcount" shuffle payload)."""
     ids = ' '.join(str(i) for i in idxs)
     # NB: single-quote the binary/mapper paths — node 0's repo dir is "Inter-Node
     # deployment" (has a space) and would otherwise break the shell word-splitting.
@@ -55,11 +58,14 @@ def run_node(node, server_ip, port, idxs, self_host):
                                        os.path.join(HERE, 'rdma_mapper.py'))]
         env = os.environ
     p = subprocess.run(cmd, capture_output=True, text=True, env=env)
-    lines = [ln for ln in p.stdout.splitlines() if ln.startswith('RESULT')]
-    if len(lines) != len(idxs):
+    all_lines = p.stdout.splitlines()
+    n_result = sum(1 for ln in all_lines if ln.startswith('RESULT'))
+    if n_result != len(idxs):
         raise RuntimeError('node %s: %d/%d mappers returned. stderr: %s'
-                           % (node, len(lines), len(idxs), p.stderr[-300:]))
-    return lines
+                           % (node, n_result, len(idxs), p.stderr[-300:]))
+    # Return BOTH the RESULT metric lines and each mapper's serialized partial records
+    # ("word\tcount"); node 0 merges the latter in run_once (the real reduce).
+    return all_lines
 
 
 def run_once(server_ip, port, n, nodes, self_host):
@@ -77,17 +83,26 @@ def run_once(server_ip, port, n, nodes, self_host):
         lines = []
         for fut in as_completed(futs):
             lines += fut.result()
-    makespan_ms = (time.time() - t0) * 1000.0
+
+    # --- @shuffle + @reduce (INSIDE the timed window) --------------------------------
+    # The mapper partials arrived above over the control channel (the shuffle). Now merge
+    # them into the final {word:count} with the SAME reducer body as Cloudburst's
+    # wc_reducer and Faasm's wc_reducer — the reduce stage those systems include in their
+    # makespan, so RMMap must too. Only RESULT lines carry busy_ms; everything else is a
+    # "word\tcount" partial record.
     sum_map_ms = 0.0
-    total_occ = 0
     for ln in lines:
-        for tok in ln.split():
-            if tok.startswith('busy_ms='):
-                sum_map_ms += float(tok.split('=', 1)[1])
-            elif tok.startswith('occ='):
-                total_occ += int(tok.split('=', 1)[1])
-    total_job_ms = sum_map_ms                          # reduce of tiny dicts omitted (negligible)
-    return makespan_ms, total_job_ms, total_occ, 0
+        if ln.startswith('RESULT'):
+            for tok in ln.split():
+                if tok.startswith('busy_ms='):
+                    sum_map_ms += float(tok.split('=', 1)[1])
+    merged = wc_ops.wc_reduce_lines(
+        ln for ln in lines if ln and not ln.startswith('RESULT'))
+    total_occ = sum(merged.values())               # gate is now derived from the real merge
+    unique = len(merged)
+    makespan_ms = (time.time() - t0) * 1000.0      # fan-out + shuffle + reduce
+    total_job_ms = sum_map_ms
+    return makespan_ms, total_job_ms, total_occ, unique
 
 
 def main():
