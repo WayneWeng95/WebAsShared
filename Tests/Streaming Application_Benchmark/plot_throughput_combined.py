@@ -31,7 +31,7 @@ TESTS_FIGS = os.path.abspath(os.path.join(HERE, '..', 'Figures'))   # HERE -> St
 TICK_SIZE, LABEL_SIZE, LEGEND_SIZE, YLABEL_SIZE, TITLE_SIZE = 13, 15, 13, 16, 15
 
 WORKLOADS = ['mediareview', 'socialnetwork']
-WL_LABEL = {'mediareview': 'MediaReview', 'socialnetwork': 'SocialNetwork'}
+WL_LABEL = {'mediareview': 'Media', 'socialnetwork': 'Social'}
 
 # Unified palette (Tests/PLOT_COLOR_SCHEMES.md). Legend order = draw order.
 COLOR = {'statefun': '#d69a60', 'rtsfaas': '#b07ba6',
@@ -90,7 +90,7 @@ def draw_panel(ax_hi, ax_lo, data, series, bands, title, star_keys=()):
         for bx, v in zip(offs, vals):
             ax = ax_hi if v >= low_top else ax_lo
             ann = ax.annotate(f'{v:.1f}{suffix}', (bx, v), ha='center', va='bottom',
-                              fontsize=9, fontweight='bold', xytext=(0, 2),
+                              fontsize=9, fontweight='bold', xytext=(-5, 2),
                               textcoords='offset points')
             ann.set_clip_on(True)   # keep each label inside its own band (no stray text at the break)
     ax_hi.set_ylim(hi_bot, hi_top); ax_lo.set_ylim(0, low_top)
@@ -107,7 +107,7 @@ def draw_panel(ax_hi, ax_lo, data, series, bands, title, star_keys=()):
               color='k', mec='k', mew=1, clip_on=False)
     ax_hi.plot([0, 1], [0, 0], transform=ax_hi.transAxes, **kw)
     ax_lo.plot([0, 1], [1, 1], transform=ax_lo.transAxes, **kw)
-    ax_lo.set_xticks(x); ax_lo.set_xticklabels([WL_LABEL[w] for w in WORKLOADS], fontsize=LABEL_SIZE)
+    ax_lo.set_xticks(x); ax_lo.set_xticklabels([WL_LABEL[w] for w in WORKLOADS], fontsize=12)
     ax_lo.set_xlim(x[0] - 0.5, x[-1] + 0.5)
     # panel label UNDER the column (below the workload names)
     ax_lo.set_xlabel(title, fontsize=TITLE_SIZE, labelpad=10)
@@ -115,20 +115,30 @@ def draw_panel(ax_hi, ax_lo, data, series, bands, title, star_keys=()):
 
 def main():
     intra, inter = load_intra(), load_inter()
+    # (c) 8-node cluster — clean measurements (each system isolated), ev/s.
+    inter8 = {
+        'statefun':   {'mediareview': 16537,  'socialnetwork': 11204},
+        'rtsfaas':    {'mediareview': 40280,  'socialnetwork': 46303},
+        'was_sync':   {'mediareview': 230932, 'socialnetwork': 184833},
+        'was_async':  {'mediareview': 275608, 'socialnetwork': 231303},
+    }
     fig = plt.figure(figsize=(9, 4.5))
     # explicit margins so the legend can sit right above the bars (small top gap)
-    gs = fig.add_gridspec(2, 2, height_ratios=[2.2, 1], hspace=0.07, wspace=0.20,
-                          left=0.10, right=0.985, top=0.90, bottom=0.16)
-    # column 0 = single-node, column 1 = 4-node cluster; each is a broken axis.
+    gs = fig.add_gridspec(2, 3, height_ratios=[2.2, 1], hspace=0.07, wspace=0.30,
+                          left=0.075, right=0.99, top=0.90, bottom=0.16)
+    # column 0 = single-node, 1 = 4-node cluster, 2 = 8-node cluster; each broken axis.
     a_hi, a_lo = fig.add_subplot(gs[0, 0]), fig.add_subplot(gs[1, 0])
     b_hi, b_lo = fig.add_subplot(gs[0, 1]), fig.add_subplot(gs[1, 1])
+    c_hi, c_lo = fig.add_subplot(gs[0, 2]), fig.add_subplot(gs[1, 2])
     # bands = (lower-top, upper-bottom, upper-top)
     draw_panel(a_hi, a_lo, intra, ['statefun', 'rtsfaas', 'was_sync', 'was_async'],
                (8.0, 30.0, 95.0), '(a) Single node')
     draw_panel(b_hi, b_lo, inter, ['statefun', 'rtsfaas', 'was_sync', 'was_async'],
                (30.0, 80.0, 140.0), '(b) 4-node cluster', star_keys={'rtsfaas'})
+    draw_panel(c_hi, c_lo, inter8, ['statefun', 'rtsfaas', 'was_sync', 'was_async'],
+               (60.0, 170.0, 300.0), '(c) 8-node cluster', star_keys={'rtsfaas'})
 
-    fig.supylabel('Throughput (k requests / sec)', fontsize=YLABEL_SIZE, x=0.040)
+    fig.supylabel('Throughput (k requests / sec)', fontsize=14, x=0.012)
     handles = [mpatches.Patch(facecolor=COLOR[k], edgecolor='black', linewidth=0.5, label=lab)
                for k, lab in LEGEND]
     fig.legend(handles=handles, ncol=len(LEGEND), fontsize=LEGEND_SIZE,

@@ -1,0 +1,25 @@
+system,workload,nodes,throughput_ev_s,note
+wasmem_async,mediareview,1,26411,weak 450k/node @sync|async
+wasmem_sync,mediareview,1,26187,weak 450k/node @sync|async
+wasmem_async,socialnetwork,1,11486,weak 450k/node @sync|async
+wasmem_sync,socialnetwork,1,11533,weak 450k/node @sync|async
+wasmem_async,mediareview,4,135951,weak 450k/node @sync|async
+wasmem_sync,mediareview,4,114737,weak 450k/node @sync|async
+wasmem_async,socialnetwork,4,93095,weak 450k/node @sync|async
+wasmem_sync,socialnetwork,4,86742,weak 450k/node @sync|async
+wasmem_async,mediareview,8,275608,weak 450k/node @sync|async
+wasmem_sync,mediareview,8,230932,weak 450k/node @sync|async
+wasmem_async,socialnetwork,8,231303,weak 450k/node @sync|async
+wasmem_sync,socialnetwork,8,184833,weak 450k/node @sync|async
+rtsfaas,mediareview,1,5442,load-balanced parallel estimate
+rtsfaas,socialnetwork,1,5472,load-balanced parallel estimate
+rtsfaas,mediareview,4,19532,load-balanced parallel estimate
+rtsfaas,socialnetwork,4,23119,load-balanced parallel estimate
+rtsfaas,mediareview,8,40280,load-balanced parallel estimate
+rtsfaas,socialnetwork,8,46303,load-balanced parallel estimate
+statefun,mediareview,8,16537,16 pods/node 1cpu/2G FT-on
+statefun,socialnetwork,8,11204,16 pods/node 1cpu/2G FT-on
+statefun,mediareview,4,15755,16 pods/node 1cpu/2G FT-on
+statefun,socialnetwork,4,6786,16 pods/node 1cpu/2G FT-on
+statefun,mediareview,1,11941,16 pods/node 1cpu/2G FT-on
+statefun,socialnetwork,1,18297,16 pods/node 1cpu/2G FT-on
