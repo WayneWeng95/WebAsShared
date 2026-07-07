@@ -2,19 +2,19 @@
 """plot_inter_bars_9c.py — inter-node app benchmark bars from the 9-node cluster
 results (Tests/9_cluster_results/<sys>/<sys>_<wl>.csv), all four systems.
 
-Adapted from ../Inter-Node Application_Benchmark/analysis/plot_inter_bars.py:
-same two-tone bars (full = total execution Σ node-seconds, saturated base =
-makespan), same broken linear y-axis, same palette. Cold-start (Cloudburst/RMMap)
-is derived from the CSVs' cold_makespan columns and drawn as a hatched segment on
-the makespan base.
+2x6 grid: COLUMNS = workload (6), rows = metric.
+  TOP ROW    = makespan (end-to-end latency, s); cold start (Cloudburst/RMMap)
+               drawn as a hatched increment on the makespan base.
+  BOTTOM ROW = cost (Accumulated Sandbox Time = Σ busy node-seconds).
+Bars in each cell = the four systems, coloured by system. Each panel auto-scales
+independently (cost is ~10-100x makespan, so a shared scale is unreadable).
 
-Output: Tests/Figures/inter_node_bars.pdf
+Output: Tests/Figures/inter_node_bars_9c.pdf
 """
-import csv, os, shutil
+import csv, os
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import numpy as np
 from matplotlib.patches import Patch
 
 HERE = os.path.dirname(os.path.abspath(__file__))          # Tests/9_cluster_results
@@ -32,17 +32,21 @@ ORDER = ["cloudburst", "rmmap", "faasm", "wasmem"]
 
 # per workload: display name, csv basename, size label (current run sizes)
 WORKLOADS = [
-    dict(name="WordCount",    file="wordcount",    size="4 GB"),
-    dict(name="TeraSort",     file="terasort",     size="1.5 GB"),
+    dict(name="Wordcount",    file="wordcount",    size="4 GB"),
+    dict(name="Terasort",     file="terasort",     size="1.5 GB"),
     dict(name="Finra",        file="finra",        size="6M"),
     dict(name="Matrix",       file="matrix",       size="4096 × 4096"),
     dict(name="ML training",  file="ml_training",  size="10M"),
     dict(name="ML inference", file="ml_inference", size="10M"),
 ]
 
-LOW_TOP = 65.0
-HIGH_BOT, HIGH_TOP = 110.0, 1450.0
-TICK_SIZE = 16; LABEL_SIZE = 16; LEGEND_SIZE = 17; VALUE_SIZE = 12; YLABEL_SIZE = 22
+# rows of the grid: (csv column, y-axis label). Both are stored in ms -> seconds.
+METRICS = [
+    ("makespan_mean_ms", "Makespan (s)"),
+    ("total_job_mean_ms", "Cost (Accumulated\nSandbox Time)"),
+]
+
+TICK_SIZE = 14; LABEL_SIZE = 16; LEGEND_SIZE = 17; VALUE_SIZE = 12; YLABEL_SIZE = 18
 
 
 def fnum(x):
@@ -67,88 +71,70 @@ def cold_increment(sysdir, rec, mk):
     return max(0.0, cm / 1000.0 - mk)
 
 
-def lighten(hexc, f=0.62):
-    r, g, b = (int(hexc[i:i+2], 16) for i in (1, 3, 5))
-    return "#%02x%02x%02x" % tuple(int(c + (255 - c) * f) for c in (r, g, b))
-
-
 def fmt(y):
     return ("%.1f" % y) if y < 100 else "%.0f" % y
 
 
 def main():
-    n = len(WORKLOADS)
-    bar_w = 0.74 / len(ORDER)
-    fig, (ax_hi, ax_lo) = plt.subplots(
-        2, 1, sharex=True, figsize=(18, 4.5),
-        gridspec_kw={"height_ratios": [1, 2.4], "hspace": 0.07})
+    nrows, ncols = len(METRICS), len(WORKLOADS)
+    fig, axes = plt.subplots(nrows, ncols, figsize=(3.6 * ncols, 5.5))
+    letters = "abcdefghij"
 
-    for gi, wl in enumerate(WORKLOADS):
-        for j, sysd in enumerate(ORDER):
-            rec = row_of(sysd, wl["file"])
-            if not rec:
-                print("  ! missing %s/%s" % (sysd, wl["file"])); continue
-            x = gi + (j - (len(ORDER) - 1) / 2) * bar_w
-            mk = (fnum(rec.get("makespan_mean_ms")) or 0.0) / 1000.0
-            te = fnum(rec.get("total_job_mean_ms"))
-            te = te / 1000.0 if te is not None else None
-            w = bar_w * 0.9
-            base = SYS[sysd]["color"]
-            for ax in (ax_hi, ax_lo):
-                if te is not None:
-                    ax.bar(x, te, w, color=lighten(base), edgecolor="black",
-                           linewidth=0.4, zorder=2)
-                ax.bar(x, mk, w, color=base, edgecolor="black", linewidth=0.4, zorder=3)
-            cold = cold_increment(sysd, rec, mk)
-            if cold:
-                for ax in (ax_hi, ax_lo):
-                    ax.bar(x, cold, w, bottom=mk, color=base, edgecolor="white",
-                           linewidth=0.5, hatch="////", zorder=4)
-                ax_lo.text(x, mk + cold, "+%.1f" % cold, ha="center", va="bottom",
-                           fontsize=VALUE_SIZE - 2, color="#444", fontstyle="italic",
-                           fontweight="bold", zorder=6)
-            if te is not None:
-                ax_te = ax_hi if te >= LOW_TOP else ax_lo
-                ax_te.text(x, te, fmt(te), ha="center", va="bottom",
-                           fontsize=VALUE_SIZE, color="#333", fontweight="bold", zorder=5)
-            ax_lo.text(x, mk, fmt(mk), ha="center", va="top", fontsize=VALUE_SIZE,
-                       color="white", fontweight="bold", zorder=5)
+    for c, wl in enumerate(WORKLOADS):
+        recs = {s: row_of(s, wl["file"]) for s in ORDER}
+        for row, (mcol, ylab) in enumerate(METRICS):
+            ax = axes[row][c]
+            ys = []
+            for s in ORDER:
+                v = fnum(recs[s].get(mcol)) if recs[s] else None
+                ys.append(v / 1000.0 if v is not None else 0.0)  # ms -> s
+            bars = ax.bar(range(len(ORDER)), ys,
+                          color=[SYS[s]["color"] for s in ORDER],
+                          edgecolor="black", linewidth=0.3)
+            for b, y in zip(bars, ys):
+                if y:
+                    ax.text(b.get_x() + b.get_width() / 2, y, fmt(y),
+                            ha="center", va="bottom", fontsize=VALUE_SIZE,
+                            fontweight="bold")
+            # cold-start hatched increment on the makespan base (top row only)
+            if mcol == "makespan_mean_ms":
+                for j, s in enumerate(ORDER):
+                    if not recs[s]:
+                        continue
+                    cold = cold_increment(s, recs[s], ys[j])
+                    if cold:
+                        ax.bar(j, cold, bottom=ys[j], color=SYS[s]["color"],
+                               edgecolor="white", linewidth=0.5, hatch="////")
+                        # thin cold increments (e.g. Finra RMMap +1.2) crowd the
+                        # makespan label below, so lift them a bit more.
+                        dy = 12 if (wl["name"] == "Finra" and s == "rmmap") else 5
+                        ax.annotate("+%.1f" % cold, xy=(j, ys[j] + cold),
+                                    xytext=(0, dy), textcoords="offset points",
+                                    ha="center", va="bottom", fontsize=VALUE_SIZE,
+                                    color="black", fontweight="bold")
+            ax.set_xticks([])
+            ax.margins(y=0.16)
+            ax.tick_params(axis="y", labelsize=TICK_SIZE)
+            ax.grid(True, axis="y", alpha=.3)
+            ax.set_axisbelow(True)
+            if c == 0:
+                ax.set_ylabel(ylab, fontsize=YLABEL_SIZE)
+            # size + workload notation at the BOTTOM of each column
+            if row == nrows - 1:
+                ax.set_xlabel(wl["size"], fontsize=LABEL_SIZE)
+                ax.text(0.5, -0.15, "%s. %s" % (letters[c], wl["name"]),
+                        transform=ax.transAxes, ha="center", va="top",
+                        fontsize=LABEL_SIZE, fontweight="bold")
 
-    ax_hi.set_ylim(HIGH_BOT, HIGH_TOP)
-    ax_lo.set_ylim(0, LOW_TOP)
-    for ax in (ax_hi, ax_lo):
-        ax.tick_params(axis="y", labelsize=TICK_SIZE)
-        ax.grid(True, axis="y", alpha=.3); ax.set_axisbelow(True)
-    ax_hi.spines["bottom"].set_visible(False)
-    ax_lo.spines["top"].set_visible(False)
-    ax_hi.tick_params(axis="x", bottom=False)
-    d = 0.5
-    kw = dict(marker=[(-1, -d), (1, d)], markersize=12, linestyle="none",
-              color="k", mec="k", mew=1, clip_on=False)
-    ax_hi.plot([0, 1], [0, 0], transform=ax_hi.transAxes, **kw)
-    ax_lo.plot([0, 1], [1, 1], transform=ax_lo.transAxes, **kw)
+    fig.tight_layout(rect=[0.008, 0, 1, 0.94], w_pad=0.4, h_pad=1.2)
 
-    ax_lo.set_xticks(range(n))
-    ax_lo.set_xticklabels([wl["name"] for wl in WORKLOADS], fontsize=LABEL_SIZE,
-                          fontweight="bold")
-    for gi, wl in enumerate(WORKLOADS):
-        ax_lo.annotate(wl["size"], xy=(gi, 0), xycoords=("data", "axes fraction"),
-                       xytext=(0, -25), textcoords="offset points",
-                       ha="center", va="top", fontsize=LABEL_SIZE)
-    ax_lo.set_xlim(-0.6, n - 0.4)
-    fig.subplots_adjust(left=0.06, right=0.998, top=0.9, bottom=0.09)
-    fig.supylabel("Time (s)", fontsize=YLABEL_SIZE, x=0.005)
-
-    handles = [Patch(facecolor=SYS[s]["color"], edgecolor="black", linewidth=0.4,
+    handles = [Patch(facecolor=SYS[s]["color"], edgecolor="black", linewidth=0.3,
                      label=SYS[s]["label"]) for s in ORDER]
     handles.append(Patch(facecolor="#cfcfcf", edgecolor="white", linewidth=0.5,
                          hatch="////", label="cold start (+s)"))
-    leg = fig.legend(handles=handles, ncol=5, loc="lower center",
-                     bbox_to_anchor=(0.5, 0.98), bbox_transform=ax_hi.transAxes,
-                     frameon=False, fontsize=LEGEND_SIZE, columnspacing=1.8,
-                     handletextpad=0.6, labelspacing=0.3, borderpad=0.2,
-                     title="full bar = total execution time   ·   saturated base = makespan")
-    leg.get_title().set_fontsize(LEGEND_SIZE - 1)
+    fig.legend(handles=handles, ncol=5, loc="upper center", frameon=False,
+               fontsize=LEGEND_SIZE, bbox_to_anchor=(0.5, 1.0),
+               columnspacing=2.0, handletextpad=0.6)
 
     out = os.path.join(FIGURES, "inter_node_bars_9c.pdf")
     fig.savefig(out, bbox_inches="tight", pad_inches=0.03)

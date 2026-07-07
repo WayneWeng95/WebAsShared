@@ -103,7 +103,7 @@ ax_wmem.set(title="Weak — peak memory",    ylabel="MB")
 
 bottom = (ax_wt, ax_wthr, ax_wmem)
 for a in (ax_sp, ax_sms, ax_smem, *bottom):
-    a.set_xticks(ticks); a.set_xticklabels([str(t) for t in ticks])
+    a.set_xticks(ticks); a.set_xticklabels([f"{t}\n({t//16}-node)" for t in ticks])
     a.grid(True, alpha=.3)
 for a in bottom:
     a.set_xlabel("number of executors")

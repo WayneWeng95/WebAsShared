@@ -122,8 +122,11 @@ def all_sizes(data):
 
 
 def style(a):
+    is_ours = a == "shm-zerocopy-engine"
     return dict(color=COLOR[a], marker=MARKER[a], label=LABEL[a],
-                linewidth=1.8, markersize=8 if a == "shm-zerocopy-engine" else 6)
+                linestyle=(0, (1, 1)) if is_ours else "-",
+                linewidth=3.0 if is_ours else 1.8,
+                markersize=8 if is_ours else 6)
 
 
 def line_plot(data, col, ylabel, outpath, figsize, logy=True):
@@ -177,6 +180,46 @@ def panel_plot(data, metric, outpath, figsize):
     print(f"[plot] wrote {outpath}")
 
 
+def speedup_plot(data, metric, outpath, figsize):
+    """Mock-up speedup panel: how many times faster WasMem delivers state than
+    each baseline, per size. Read (GET) left, Write (PUT) right, log y so the
+    huge (100000x) and modest (2x) advantages both stay readable. A dashed line
+    at 1x marks parity (below it, WasMem is slower)."""
+    base = "shm-zerocopy-engine"
+    if base not in data:
+        return
+    sizes = all_sizes(data)
+    idx = {s: i for i, s in enumerate(sizes)}
+    stat = "Mean" if metric == "mean" else "Median"
+    others = [a for a in present(data) if a != base]
+    fig, axes = plt.subplots(1, 2, figsize=figsize)
+    for ax, op in zip(axes, ("get", "put")):
+        eng = {s: float(data[base][s][f"{op}_{metric}_us"]) for s in data[base]}
+        for a in others:
+            xs, ys = [], []
+            for s in sorted(data[a]):
+                if s in eng and eng[s]:
+                    xs.append(idx[s])
+                    ys.append(float(data[a][s][f"{op}_{metric}_us"]) / eng[s])
+            ax.plot(xs, ys, **style(a))
+        ax.axhline(1.0, ls="--", color="#777", lw=1.2, zorder=1)
+        ax.text(0.02, 1.0, "parity (1×)", color="#555", fontsize=11, va="bottom",
+                ha="left", transform=ax.get_yaxis_transform())
+        ax.set_yscale("log")
+        ax.set_xticks(range(len(sizes)))
+        ax.set_xticklabels([fmt_size(s) for s in sizes], fontsize=TICK_SIZE)
+        ax.set_xlabel("state size")
+        ax.set_ylabel(f"{OP_LABEL[op]} speedup vs WasMem (×, log)", fontsize=YLABEL_SIZE)
+        ax.grid(True, which="both", ls=":", alpha=0.4)
+    fig.tight_layout()
+    handles, labels = axes[0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=2, fontsize=LEGEND_SIZE,
+               frameon=False, bbox_to_anchor=(0.5, 1.0))
+    fig.savefig(outpath, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"[plot] wrote {outpath}")
+
+
 def speedup(data, op, metric):
     base = "shm-zerocopy-engine"
     if base not in data:
@@ -214,6 +257,7 @@ def main():
 
     tag = "" if m == "p50" else f"_{m}"   # keep p50 filenames stable; tag mean
     panel_plot(data, m, os.path.join(args.outdir, f"compare_put_get{tag}.{ext}"), figsize)
+    speedup_plot(data, m, os.path.join(args.outdir, f"compare_speedup{tag}.{ext}"), figsize)
     # Single-panel throughput uses half the width so its aspect matches the panels.
     line_plot(data, "get_gibps", "Read throughput (GiB/s, log)",
               os.path.join(args.outdir, f"compare_get_throughput.{ext}"),

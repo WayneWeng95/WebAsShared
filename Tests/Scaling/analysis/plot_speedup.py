@@ -19,10 +19,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 FIGS = os.path.join(HERE, "figs"); os.makedirs(FIGS, exist_ok=True)
 
 # font sizes (pt)
-TICK_SIZE = 16
+TICK_SIZE = 12
 LABEL_SIZE = 15
 LEGEND_SIZE = 14
-VALUE_SIZE = 12
+VALUE_SIZE = 11
 YLABEL_SIZE = 16
 
 # One drawn series per (workload, placement policy). word_count carries two
@@ -31,6 +31,8 @@ YLABEL_SIZE = 16
 # single "n/a" data-parallel series.
 COLOR = {"word_count": "#3b6ea5", "mediareview": "#a5533b"}
 WLABEL = {"word_count": "WordCount (batch)", "mediareview": "MediaReview (streaming)"}
+# weak-panel throughput annotation unit per workload (WordCount = MB/s, MediaReview = ev/s)
+THRU_FMT = {"word_count": lambda t: f"{t:.0f}\nMB/s", "mediareview": lambda t: f"{t/1000:.0f}k\nev/s"}
 POL_STYLE = {  # marker / linestyle / fill per policy so overlapping lines stay legible
     "balanced": dict(marker="o", ls="-",  mfc="full"),
     "pack":     dict(marker="s", ls="--", mfc="none"),
@@ -66,12 +68,12 @@ ticks = [16, 48, 96, 144]
 # x positions = the executor count itself (proportional spacing), so the ideal line
 # y = executors/16 plots as a straight line through the origin.
 XP = {t: t for t in ticks}
-fig, (ax_s, ax_w) = plt.subplots(1, 2, figsize=(11, 4.5), sharex=True)
+fig, (ax_s, ax_w) = plt.subplots(1, 2, figsize=(9, 4.5), sharex=True)
 
 ymax = 9.5
 for wl in COLOR:
     for pol, s in series(wl, "strong"):
-        if pol == "pack" or wl == "mediareview": continue  # drop pack; omit MediaReview from strong panel
+        if pol == "pack": continue                          # drop the pack sanity control
         ps = POL_STYLE.get(pol, POL_STYLE["n/a"])
         thr = [int(r["threads"]) for r in s]; t = colf(s, "wall_ms_median"); t0 = t[0]
         sp = [t0/ti if (ti and t0) else None for ti in t]
@@ -96,29 +98,34 @@ for wl in COLOR:
         X = list(thr)
         ax_w.plot(X, sc, marker=ps["marker"], ls=ps["ls"], color=COLOR[wl], lw=2, ms=8,
                   mfc=(COLOR[wl] if ps["mfc"]=="full" else "white"), label=WLABEL[wl])
-        for p,v in zip(thr,sc):
-            if v and f"{v:.2f}" != "1.00":    # drop the 1.00× baseline point
-                ax_w.annotate(f"{v:.2f}×", (p,v), textcoords="offset points",
-                              xytext=(0,-8), ha="center", va="top",
-                              fontsize=VALUE_SIZE, fontweight="bold", color=COLOR[wl])
+        # label each point with its ABSOLUTE throughput (WordCount MB/s, MediaReview k ev/s)
+        fmt = THRU_FMT[wl]
+        # WordCount curve sits above MediaReview → label it above, MediaReview below (max separation)
+        dy, va = ((8, "bottom") if wl == "word_count" else (-8, "top"))
+        for p, v, tpv in zip(thr, sc, tp):
+            if v is None or tpv is None: continue
+            ax_w.annotate(fmt(tpv), (p, v), textcoords="offset points",
+                          xytext=(0, dy), ha="center", va=va,
+                          fontsize=VALUE_SIZE, fontweight="bold", color=COLOR[wl])
 
 for ax, title, ideal, ideal_lbl, ytop in (
     # strong: ideal speedup is linear (p/16); weak: normalised by load, so ideal is a flat 1×.
     (ax_s, "Strong scaling", [t/16 for t in ticks], "ideal (linear), = compute", ymax),
-    (ax_w, "Weak scaling",   [1 for _ in ticks],    "ideal (flat), = 1×",         1.6),
+    (ax_w, "Weak scaling",   [1 for _ in ticks],    "ideal (flat), = 1×",         1.8),
 ):
     ax.plot(ticks, ideal, "k--", alpha=.55, label=ideal_lbl)
     ax.set_xticks(ticks)
-    ax.set_xticklabels([str(t) for t in ticks])      # proportional spacing → straight ideal
+    ax.set_xticklabels([f"{t}\n({t//16}-node)" for t in ticks])   # thread count + node count
     ax.tick_params(axis="both", labelsize=TICK_SIZE)
     ax.set_ylabel("speedup", fontsize=YLABEL_SIZE)
-    ax.set_xlabel("number of executors", fontsize=LABEL_SIZE)
-    # subplot title at the very bottom, below the axis label (pushed down to fill
-    # the empty band so there's little blank under it on the fixed 9×4.5 canvas)
-    ax.text(0.5, -0.24, title, transform=ax.transAxes, ha="center", fontweight="bold", fontsize=18)
+    # x-tick labels already carry executor + node counts, so no separate "number of
+    # executors" axis label — just the bold panel title below the two-line ticks.
+    ax.text(0.5, -0.22, title, transform=ax.transAxes, ha="center", fontweight="bold", fontsize=18)
     ax.set_ylim(0, ytop); ax.grid(True, alpha=.3); ax.legend(loc="upper left", fontsize=LEGEND_SIZE)
+    ax.set_xlim(ticks[0] - 12, ticks[-1] + 26)   # room for the wide edge labels (32 MB/s … 529k ev/s)
 
-fig.subplots_adjust(left=0.085, right=0.985, top=0.97, bottom=0.20, wspace=0.22)
+fig.subplots_adjust(left=0.075, right=0.99, top=0.97, bottom=0.22, wspace=0.20)
 for ext in ("pdf","png"):
-    fig.savefig(os.path.join(FIGS, f"scaling_speedup.{ext}"), dpi=150)
+    fig.savefig(os.path.join(FIGS, f"scaling_speedup.{ext}"), dpi=150,
+                bbox_inches="tight", pad_inches=0.03)
 print(f"wrote {FIGS}/scaling_speedup.pdf + .png")

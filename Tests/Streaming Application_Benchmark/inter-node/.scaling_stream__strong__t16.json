@@ -12,17 +12,6 @@
   "node_dags": {
     "0": [
       {
-        "id": "load",
-        "deps": [],
-        "kind": {
-          "Input": {
-            "path": "TestData/stream_app/cluster/events_node0.csv",
-            "slot": 0,
-            "prefetch": true
-          }
-        }
-      },
-      {
         "id": "seed",
         "deps": [],
         "kind": {
@@ -34,9 +23,20 @@
         }
       },
       {
-        "id": "parse",
+        "id": "load_0",
+        "deps": [],
+        "kind": {
+          "Input": {
+            "path": "TestData/stream_app/cluster/events_node0.csv",
+            "slot": 0,
+            "prefetch": true
+          }
+        }
+      },
+      {
+        "id": "parse_0",
         "deps": [
-          "load"
+          "load_0"
         ],
         "kind": {
           "Func": {
@@ -47,9 +47,9 @@
         }
       },
       {
-        "id": "apply_0",
+        "id": "apply_0_0",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -61,9 +61,9 @@
         }
       },
       {
-        "id": "apply_1",
+        "id": "apply_0_1",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -75,9 +75,9 @@
         }
       },
       {
-        "id": "apply_2",
+        "id": "apply_0_2",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -89,9 +89,9 @@
         }
       },
       {
-        "id": "apply_3",
+        "id": "apply_0_3",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -103,9 +103,9 @@
         }
       },
       {
-        "id": "apply_4",
+        "id": "apply_0_4",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -117,9 +117,9 @@
         }
       },
       {
-        "id": "apply_5",
+        "id": "apply_0_5",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -131,9 +131,9 @@
         }
       },
       {
-        "id": "apply_6",
+        "id": "apply_0_6",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -145,9 +145,9 @@
         }
       },
       {
-        "id": "apply_7",
+        "id": "apply_0_7",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -159,9 +159,9 @@
         }
       },
       {
-        "id": "apply_8",
+        "id": "apply_0_8",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -173,9 +173,9 @@
         }
       },
       {
-        "id": "apply_9",
+        "id": "apply_0_9",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -187,9 +187,9 @@
         }
       },
       {
-        "id": "apply_10",
+        "id": "apply_0_10",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -201,9 +201,9 @@
         }
       },
       {
-        "id": "apply_11",
+        "id": "apply_0_11",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -215,9 +215,9 @@
         }
       },
       {
-        "id": "apply_12",
+        "id": "apply_0_12",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -229,9 +229,9 @@
         }
       },
       {
-        "id": "apply_13",
+        "id": "apply_0_13",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -243,9 +243,9 @@
         }
       },
       {
-        "id": "apply_14",
+        "id": "apply_0_14",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -257,9 +257,9 @@
         }
       },
       {
-        "id": "apply_15",
+        "id": "apply_0_15",
         "deps": [
-          "parse",
+          "parse_0",
           "seed"
         ],
         "kind": {
@@ -273,22 +273,22 @@
       {
         "id": "aggregate_local",
         "deps": [
-          "apply_0",
-          "apply_1",
-          "apply_2",
-          "apply_3",
-          "apply_4",
-          "apply_5",
-          "apply_6",
-          "apply_7",
-          "apply_8",
-          "apply_9",
-          "apply_10",
-          "apply_11",
-          "apply_12",
-          "apply_13",
-          "apply_14",
-          "apply_15"
+          "apply_0_0",
+          "apply_0_1",
+          "apply_0_2",
+          "apply_0_3",
+          "apply_0_4",
+          "apply_0_5",
+          "apply_0_6",
+          "apply_0_7",
+          "apply_0_8",
+          "apply_0_9",
+          "apply_0_10",
+          "apply_0_11",
+          "apply_0_12",
+          "apply_0_13",
+          "apply_0_14",
+          "apply_0_15"
         ],
         "kind": {
           "Aggregate": {
